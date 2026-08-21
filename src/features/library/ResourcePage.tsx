@@ -37,14 +37,15 @@ export function ResourcePage() {
 
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   useEffect(() => {
-    if (!localVersion?.blob) {
+    if (!localVersion?.bytes) {
       setBlobUrl(null);
       return;
     }
-    const url = URL.createObjectURL(localVersion.blob);
+    const blob = new Blob([localVersion.bytes], { type: localVersion.mimeType });
+    const url = URL.createObjectURL(blob);
     setBlobUrl(url);
     return () => URL.revokeObjectURL(url);
-  }, [localVersion?.blob]);
+  }, [localVersion?.bytes, localVersion?.mimeType]);
 
   const title = localResource?.title ?? remote.data?.resource.title;
   const kind = localResource?.kind ?? remote.data?.resource.kind;
