@@ -77,7 +77,7 @@ async function syncResource(item: OutboxRecord): Promise<void> {
   if (!resource) return;
   const version = await db.resourceVersions.get(resource.currentVersionId);
   const extraction = await db.extractions.get(resource.currentVersionId);
-  if (!version || !extraction || !version.blob) {
+  if (!version || !extraction || !version.bytes) {
     throw new ApiRequestError('Les données locales du support sont incomplètes.', 0, 'LOCAL_DATA_MISSING', false);
   }
 
@@ -103,7 +103,8 @@ async function syncResource(item: OutboxRecord): Promise<void> {
   };
 
   await apiJson('/api/resources/register', { method: 'POST', body: JSON.stringify(payload) });
-  await apiPutBlob(`/api/resource-versions/${encodeURIComponent(version.id)}/blob`, version.blob, version.mimeType);
+  const uploadBlob = new Blob([version.bytes], { type: version.mimeType });
+  await apiPutBlob(`/api/resource-versions/${encodeURIComponent(version.id)}/blob`, uploadBlob, version.mimeType);
 
   if (extraction.status === 'ready') {
     const extractionPayload: ExtractionUploadInput = {
