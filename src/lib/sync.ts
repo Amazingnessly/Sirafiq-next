@@ -1,0 +1,167 @@
+import { db, type OutboxRecord, type SubjectRecord } from '../data/db';
+import { apiJson, apiPutBlob, ApiRequestError } from './api';
+import type { ExtractionUploadInput, ResourceRegisterInput } from '../shared/contracts';
+
+let activeSync: Promise<void> | null = null;
+
+export function requestSync(): Promise<void> {
+  if (activeSync) return activeSync;
+  activeSync = runSync().finally(() => {
+    activeSync = null;
+  });
+  return activeSync;
+}
+
+export async function retryAllSyncErrorsNow(): Promise<void> {
+  const outbox = await db.outbox.toArray();
+  const now = Date.now();
+  await db.transaction('rw', db.outbox, db.subjects, db.resources, db.resourceVersions, async () => {
+    for (const item of outbox) {
+      await db.outbox.update(item.id, { nextAttemptAt: now, lastError: null });
+      if (item.type === 'subject.upsert') {
+        await db.subjects.update(item.entityId, { syncState: 'pending', syncError: null });
+      } else {
+        const resource = await db.resources.get(item.entityId);
+        if (resource) {
+          await db.resources.update(resource.id, { syncState: 'pending', syncError: null });
+          await db.resourceVersions.update(resource.currentVersionId, { syncState: 'pending', syncError: null });
+        }
+      }
+    }
+  });
+  await requestSync();
+}
+
+export function installSyncTriggers(): () => void {
+  const onOnline = () => void requestSync();
+  window.addEventListener('online', onOnline);
+  const timer = window.setInterval(() => {
+    if (navigator.onLine) void requestSync();
+  }, 30_000);
+  void requestSync();
+  return () => {
+    window.removeEventListener('online', onOnline);
+    window.clearInterval(timer);
+  };
+}
+
+async function runSync(): Promise<void> {
+  if (!navigator.onLine) return;
+  while (navigator.onLine) {
+    const due = await db.outbox.where('nextAttemptAt').belowOrEqual(Date.now()).sortBy('createdAt');
+    const item = due[0];
+    if (!item) return;
+    try {
+      if (item.type === 'subject.upsert') await syncSubject(item);
+      if (item.type === 'resource.sync') await syncResource(item);
+      await db.outbox.delete(item.id);
+    } catch (error) {
+      await markOutboxFailure(item, error);
+      if (!navigator.onLine) return;
+    }
+  }
+}
+
+async function syncSubject(item: OutboxRecord): Promise<void> {
+  const subject = await db.subjects.get(item.entityId);
+  if (!subject) return;
+  await apiJson('/api/subjects/upsert', {
+    method: 'POST',
+    body: JSON.stringify(toSubjectPayload(subject)),
+  });
+  await db.subjects.update(subject.id, { syncState: 'synced', syncError: null });
+}
+
+async function syncResource(item: OutboxRecord): Promise<void> {
+  const resource = await db.resources.get(item.entityId);
+  if (!resource) return;
+  const version = await db.resourceVersions.get(resource.currentVersionId);
+  const extraction = await db.extractions.get(resource.currentVersionId);
+  if (!version || !extraction || !version.blob) {
+    throw new ApiRequestError('Les données locales du support sont incomplètes.', 0, 'LOCAL_DATA_MISSING', false);
+  }
+
+  const payload: ResourceRegisterInput = {
+    resource: {
+      id: resource.id,
+      subjectId: resource.subjectId,
+      title: resource.title,
+      kind: resource.kind,
+      currentVersionId: resource.currentVersionId,
+      createdAt: resource.createdAt,
+      updatedAt: resource.updatedAt,
+    },
+    version: {
+      id: version.id,
+      resourceId: version.resourceId,
+      sha256: version.sha256,
+      fileName: version.fileName,
+      mimeType: version.mimeType,
+      size: version.size,
+      createdAt: version.createdAt,
+    },
+  };
+
+  await apiJson('/api/resources/register', { method: 'POST', body: JSON.stringify(payload) });
+  await apiPutBlob(`/api/resource-versions/${encodeURIComponent(version.id)}/blob`, version.blob, version.mimeType);
+
+  if (extraction.status === 'ready') {
+    const extractionPayload: ExtractionUploadInput = {
+      status: 'ready',
+      pages: extraction.pages,
+      charCount: extraction.charCount,
+    };
+    await apiJson(`/api/resource-versions/${encodeURIComponent(version.id)}/extraction`, {
+      method: 'POST',
+      body: JSON.stringify(extractionPayload),
+    });
+  } else {
+    await apiJson(`/api/resource-versions/${encodeURIComponent(version.id)}/extraction-failure`, {
+      method: 'POST',
+      body: JSON.stringify({
+        code: extraction.errorCode ?? 'EXTRACTION_FAILED',
+        message: extraction.errorMessage ?? 'Extraction impossible.',
+      }),
+    });
+  }
+
+  await db.transaction('rw', db.resources, db.resourceVersions, async () => {
+    await db.resources.update(resource.id, { syncState: 'synced', syncError: null });
+    await db.resourceVersions.update(version.id, { syncState: 'synced', syncError: null });
+  });
+}
+
+async function markOutboxFailure(item: OutboxRecord, error: unknown): Promise<void> {
+  const message = error instanceof Error ? error.message : 'Erreur de synchronisation inconnue.';
+  const attempts = item.attempts + 1;
+  const retryable = !(error instanceof ApiRequestError) || error.retryable;
+  const nextDelay = Math.min(5 * 60_000, 2 ** Math.min(attempts, 6) * 1_000);
+
+  await db.outbox.update(item.id, {
+    attempts,
+    lastError: message,
+    nextAttemptAt: retryable ? Date.now() + nextDelay : Number.MAX_SAFE_INTEGER,
+  });
+
+  if (item.type === 'subject.upsert') {
+    await db.subjects.update(item.entityId, { syncState: 'error', syncError: message });
+  } else {
+    const resource = await db.resources.get(item.entityId);
+    if (resource) {
+      await db.transaction('rw', db.resources, db.resourceVersions, async () => {
+        await db.resources.update(resource.id, { syncState: 'error', syncError: message });
+        await db.resourceVersions.update(resource.currentVersionId, { syncState: 'error', syncError: message });
+      });
+    }
+  }
+}
+
+function toSubjectPayload(subject: SubjectRecord) {
+  return {
+    id: subject.id,
+    name: subject.name,
+    parentId: subject.parentId,
+    createdAt: subject.createdAt,
+    updatedAt: subject.updatedAt,
+  };
+}
