@@ -102,6 +102,10 @@ export async function importFile(subjectId: string, file: File, preferredTitle?:
     syncError: null,
   };
 
+  // WebKit/Safari can reject Blob/File structured clones in IndexedDB even
+  // when the file itself is valid. Store plain bytes locally instead, then
+  // reconstruct a Blob only when the file must be displayed or uploaded.
+  const bytes = await file.arrayBuffer();
   const version: ResourceVersionRecord = {
     id: versionId,
     resourceId,
@@ -109,7 +113,7 @@ export async function importFile(subjectId: string, file: File, preferredTitle?:
     fileName: file.name,
     mimeType: file.type || (kind === 'pdf' ? 'application/pdf' : 'text/plain'),
     size: file.size,
-    blob: file,
+    bytes,
     createdAt: now,
     syncState: 'pending',
     syncError: null,
