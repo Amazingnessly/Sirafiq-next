@@ -44,15 +44,17 @@ npm run dev
 
 ```bash
 npm run check
-npx playwright install chromium
+npx playwright install webkit
 npm run test:e2e
 ```
 
-La CI GitHub exécute les contrôles de qualité et le scénario E2E à chaque pull request et à chaque push sur `main`.
+La CI GitHub exécute les contrôles de qualité et le scénario E2E WebKit au format iPad paysage à chaque pull request et à chaque push sur `main`.
 
 ## Cloudflare
 
-Le dépôt est préparé pour Cloudflare Workers + Static Assets, D1 et R2. Le déploiement de production automatique n'est pas activé tant que le socle V0.1 n'a pas passé la CI puis la validation sur iPad réel.
+Le dépôt est préparé pour Cloudflare Workers + Static Assets, D1 et R2. D1 et R2 portent des noms explicites dans la configuration, mais leurs identifiants de compte ne sont pas codés en dur : Wrangler peut les provisionner et les lier.
+
+Le déploiement de production automatique n'est pas activé tant que le socle V0.1 n'a pas passé la CI puis la validation sur iPad réel.
 
 Avant tout usage avec des données personnelles réelles, l'application devra être protégée par une couche d'authentification/contrôle d'accès adaptée.
 
