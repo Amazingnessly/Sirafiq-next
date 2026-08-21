@@ -17,15 +17,16 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
   const [duplicateId, setDuplicateId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const firstSubjectId = subjects[0]?.id ?? '';
+  const effectiveSubjectId = subjects.some((subject) => subject.id === subjectId)
+    ? subjectId
+    : firstSubjectId;
+
   useEffect(() => {
-    if (!subjects.length) {
-      if (subjectId) setSubjectId('');
-      return;
+    if (subjectId !== effectiveSubjectId) {
+      setSubjectId(effectiveSubjectId);
     }
-    if (!subjects.some((subject) => subject.id === subjectId)) {
-      setSubjectId(subjects[0].id);
-    }
-  }, [subjects, subjectId]);
+  }, [effectiveSubjectId, subjectId]);
 
   if (!subjects.length) {
     return (
@@ -42,14 +43,16 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
     setDuplicateId(null);
     setBusy(true);
     try {
+      if (!effectiveSubjectId) throw new Error('Choisissez une matière avant l’import.');
+
       if (mode === 'file') {
         if (!file) throw new Error('Choisissez un fichier PDF, TXT ou Markdown.');
-        await importFile(subjectId, file, title);
+        await importFile(effectiveSubjectId, file, title);
         setFile(null);
         setTitle('');
         if (inputRef.current) inputRef.current.value = '';
       } else {
-        await importPastedText(subjectId, title, text);
+        await importPastedText(effectiveSubjectId, title, text);
         setTitle('');
         setText('');
       }
@@ -76,7 +79,7 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
       <div className="form-grid">
         <label>
           <span>Matière</span>
-          <select value={subjectId} onChange={(event) => setSubjectId(event.target.value)}>
+          <select value={effectiveSubjectId} onChange={(event) => setSubjectId(event.target.value)}>
             {subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}
           </select>
         </label>
@@ -115,7 +118,7 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
 
       <div className="import-actions">
         <p>Le contenu est extrait réellement avant d’être déclaré prêt.</p>
-        <button className="button button--primary" type="submit" disabled={busy || !subjectId || (mode === 'file' ? !file : !text.trim())}>
+        <button className="button button--primary" type="submit" disabled={busy || !effectiveSubjectId || (mode === 'file' ? !file : !text.trim())}>
           {busy ? 'Analyse et enregistrement…' : 'Importer le support'}
         </button>
       </div>
