@@ -35,7 +35,7 @@ export interface ResourceVersionRecord {
   fileName: string;
   mimeType: string;
   size: number;
-  blob: Blob | null;
+  bytes: ArrayBuffer | null;
   createdAt: string;
   syncState: SyncState;
   syncError: string | null;
