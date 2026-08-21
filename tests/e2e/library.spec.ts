@@ -5,7 +5,7 @@ test('matière → texte réel → persistance après rechargement', async ({ pa
 
   await page.getByLabel('Nouvelle matière').fill('Français E2E');
   await page.getByRole('button', { name: 'Ajouter' }).click();
-  await expect(page.getByText('Français E2E', { exact: true })).toBeVisible();
+  await expect(page.getByRole('listitem').getByText('Français E2E', { exact: true })).toBeVisible();
 
   await page.getByRole('button', { name: 'Texte', exact: true }).click();
   await page.getByLabel(/Titre/).fill('Lecture test');
@@ -27,6 +27,7 @@ test('un même contenu n’est pas importé deux fois localement', async ({ page
   if (await subjectInput.isVisible()) {
     await subjectInput.fill('Doublons E2E');
     await page.getByRole('button', { name: 'Ajouter' }).click();
+    await expect(page.getByRole('listitem').getByText('Doublons E2E', { exact: true })).toBeVisible();
   }
 
   await page.getByRole('button', { name: 'Texte', exact: true }).click();
