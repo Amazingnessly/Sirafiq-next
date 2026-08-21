@@ -1,4 +1,4 @@
-import { FormEvent, useRef, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { SubjectRecord } from '../../data/db';
 import { DuplicateSupportError, importFile, importPastedText } from '../../data/repository';
@@ -16,6 +16,16 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
   const [error, setError] = useState<string | null>(null);
   const [duplicateId, setDuplicateId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!subjects.length) {
+      if (subjectId) setSubjectId('');
+      return;
+    }
+    if (!subjects.some((subject) => subject.id === subjectId)) {
+      setSubjectId(subjects[0].id);
+    }
+  }, [subjects, subjectId]);
 
   if (!subjects.length) {
     return (
