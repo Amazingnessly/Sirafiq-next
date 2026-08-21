@@ -11,8 +11,8 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --pretty false",
     "cf:types": "wrangler types",
-    "db:migrate:local": "wrangler d1 migrations apply DB --local",
-    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "db:migrate:local": "wrangler d1 migrations apply sirafiq-next-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply sirafiq-next-db --remote",
     "prepare:local": "npm run cf:types && npm run db:migrate:local",
     "test": "vitest run",
     "test:e2e": "playwright test",
@@ -31,12 +31,13 @@
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.53.0",
     "@playwright/test": "1.62.1",
+    "@types/node": "24.10.1",
     "@types/react": "19.2.0",
     "@types/react-dom": "19.2.0",
     "@vitejs/plugin-react": "6.0.5",
     "typescript": "7.0.2",
     "vite": "8.2.1",
     "vitest": "4.1.11",
-    "wrangler": "4.45.0"
+    "wrangler": "4.125.0"
   }
 }
