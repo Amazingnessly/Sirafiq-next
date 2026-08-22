@@ -1,6 +1,7 @@
 import { db, type OutboxRecord, type SubjectRecord } from '../data/db';
 import { apiJson, apiPutBlob, ApiRequestError } from './api';
-import type { ExtractionUploadInput, ResourceRegisterInput } from '../shared/contracts';
+import type { ExtractionUploadInput, ResourceRegisterInput, ServerExtractionResult } from '../shared/contracts';
+import { shouldTryServerPdfExtraction } from '../shared/importPolicy';
 
 let activeSync: Promise<void> | null = null;
 
@@ -30,6 +31,28 @@ export async function retryAllSyncErrorsNow(): Promise<void> {
     }
   });
   await requestSync();
+}
+
+export async function retryServerExtractionForResource(resourceId: string): Promise<ServerExtractionResult> {
+  const resource = await db.resources.get(resourceId);
+  if (!resource) throw new Error('Le support local est introuvable.');
+  const version = await db.resourceVersions.get(resource.currentVersionId);
+  const extraction = await db.extractions.get(resource.currentVersionId);
+  if (!version || !extraction) throw new Error('Les données locales du support sont incomplètes.');
+  if (!shouldTryServerPdfExtraction(resource.kind, version.size, extraction.status)) {
+    throw new Error('Ce support ne peut pas utiliser l’extraction PDF serveur dans cette version.');
+  }
+  if (resource.syncState !== 'synced') {
+    throw new Error('Synchronisez d’abord le fichier avant de relancer son extraction.');
+  }
+
+  const result = await apiJson<ServerExtractionResult>(
+    `/api/resource-versions/${encodeURIComponent(version.id)}/server-extraction`,
+    { method: 'POST' },
+    120_000,
+  );
+  await applyServerExtractionResult(resource.id, version.id, result);
+  return result;
 }
 
 export function installSyncTriggers(): () => void {
@@ -104,7 +127,7 @@ async function syncResource(item: OutboxRecord): Promise<void> {
 
   await apiJson('/api/resources/register', { method: 'POST', body: JSON.stringify(payload) });
   const uploadBlob = new Blob([version.bytes], { type: version.mimeType });
-  await apiPutBlob(`/api/resource-versions/${encodeURIComponent(version.id)}/blob`, uploadBlob, version.mimeType);
+  await apiPutBlob(`/api/resource-versions/${encodeURIComponent(version.id)}/blob`, uploadBlob, version.mimeType, 120_000);
 
   if (extraction.status === 'ready') {
     const extractionPayload: ExtractionUploadInput = {
@@ -116,6 +139,13 @@ async function syncResource(item: OutboxRecord): Promise<void> {
       method: 'POST',
       body: JSON.stringify(extractionPayload),
     });
+  } else if (shouldTryServerPdfExtraction(resource.kind, version.size, extraction.status)) {
+    const serverResult = await apiJson<ServerExtractionResult>(
+      `/api/resource-versions/${encodeURIComponent(version.id)}/server-extraction`,
+      { method: 'POST' },
+      120_000,
+    );
+    await applyServerExtractionResult(resource.id, version.id, serverResult);
   } else {
     await apiJson(`/api/resource-versions/${encodeURIComponent(version.id)}/extraction-failure`, {
       method: 'POST',
@@ -129,6 +159,43 @@ async function syncResource(item: OutboxRecord): Promise<void> {
   await db.transaction('rw', db.resources, db.resourceVersions, async () => {
     await db.resources.update(resource.id, { syncState: 'synced', syncError: null });
     await db.resourceVersions.update(version.id, { syncState: 'synced', syncError: null });
+  });
+}
+
+async function applyServerExtractionResult(resourceId: string, versionId: string, result: ServerExtractionResult): Promise<void> {
+  const now = new Date().toISOString();
+  await db.transaction('rw', db.resources, db.extractions, async () => {
+    if (result.status === 'ready') {
+      await db.extractions.put({
+        versionId,
+        status: 'ready',
+        pages: result.pages,
+        charCount: result.charCount,
+        errorCode: null,
+        errorMessage: null,
+        createdAt: now,
+      });
+      await db.resources.update(resourceId, {
+        status: 'ready',
+        extractionError: null,
+        updatedAt: now,
+      });
+    } else {
+      await db.extractions.put({
+        versionId,
+        status: 'failed',
+        pages: [],
+        charCount: 0,
+        errorCode: result.code,
+        errorMessage: result.message,
+        createdAt: now,
+      });
+      await db.resources.update(resourceId, {
+        status: 'failed',
+        extractionError: result.message,
+        updatedAt: now,
+      });
+    }
   });
 }
 

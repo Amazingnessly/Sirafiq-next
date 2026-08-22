@@ -39,7 +39,10 @@
         {
           "binding": "FILES"
         }
-      ]
+      ],
+      "ai": {
+        "binding": "AI"
+      }
     }
   }
 }

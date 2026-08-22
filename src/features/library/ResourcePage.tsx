@@ -6,7 +6,8 @@ import { db } from '../../data/db';
 import { retrySyncForResource } from '../../data/repository';
 import { useDexieQuery } from '../../data/useDexieQuery';
 import { apiJson } from '../../lib/api';
-import { requestSync } from '../../lib/sync';
+import { requestSync, retryServerExtractionForResource } from '../../lib/sync';
+import { shouldTryServerPdfExtraction } from '../../shared/importPolicy';
 import type { ExtractedPage, ResourceDetailPayload } from '../../shared/contracts';
 
 export function ResourcePage() {
@@ -36,6 +37,9 @@ export function ResourcePage() {
   });
 
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [extracting, setExtracting] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+
   useEffect(() => {
     if (!localVersion?.bytes) {
       setBlobUrl(null);
@@ -57,11 +61,31 @@ export function ResourcePage() {
   const extractionFailed = localExtraction?.status === 'failed' || remote.data?.version.extractionStatus === 'failed';
   const extractionError = localExtraction?.errorMessage ?? remote.data?.version.extractionError;
   const pdfUrl = blobUrl ?? (versionId ? `/api/resource-versions/${encodeURIComponent(versionId)}/blob` : null);
+  const canRetryServerExtraction = Boolean(
+    localResource
+    && localVersion
+    && localExtraction
+    && localResource.syncState === 'synced'
+    && shouldTryServerPdfExtraction(localResource.kind, localVersion.size, localExtraction.status),
+  );
 
   async function retrySync() {
     if (!localResource) return;
     await retrySyncForResource(localResource.id);
     await requestSync();
+  }
+
+  async function retryExtraction() {
+    if (!localResource || extracting) return;
+    setExtracting(true);
+    setRetryError(null);
+    try {
+      await retryServerExtractionForResource(localResource.id);
+    } catch (error) {
+      setRetryError(error instanceof Error ? error.message : 'L’extraction serveur a échoué.');
+    } finally {
+      setExtracting(false);
+    }
   }
 
   if (!localResource && remote.isPending) {
@@ -112,6 +136,12 @@ export function ResourcePage() {
             <strong>Contenu non exploitable automatiquement</strong>
             <p>{extractionError || 'Le texte n’a pas pu être extrait.'}</p>
             <small>Le fichier reste conservé et consultable. Sirāfiq ne prétendra pas créer des activités à partir de ce contenu.</small>
+            {canRetryServerExtraction && (
+              <button className="button button--secondary" type="button" onClick={retryExtraction} disabled={extracting}>
+                {extracting ? 'Extraction en cours…' : 'Retenter l’extraction avec le serveur'}
+              </button>
+            )}
+            {retryError && <span className="field-error">{retryError}</span>}
           </div>
         </div>
       )}
@@ -127,7 +157,7 @@ export function ResourcePage() {
           <section className="text-viewer">
             {pages.length ? pages.map((page) => (
               <article key={page.pageNumber}>
-                {pages.length > 1 && <span className="page-number">Page {page.pageNumber}</span>}
+                {pages.length > 1 && <span className="page-number">Bloc {page.pageNumber}</span>}
                 <p>{page.text}</p>
               </article>
             )) : <p className="muted">Aucun texte extrait n’est disponible.</p>}
@@ -142,7 +172,7 @@ export function ResourcePage() {
               <strong className="large-stat">{pages.reduce((sum, page) => sum + page.text.length, 0).toLocaleString('fr-FR')}</strong>
               <span>caractères extraits</span>
               <div className="source-rule" />
-              <p>{pages.length} page{pages.length > 1 ? 's' : ''} de texte disponible{pages.length > 1 ? 's' : ''} pour les prochaines activités.</p>
+              <p>{pages.length} bloc{pages.length > 1 ? 's' : ''} de texte disponible{pages.length > 1 ? 's' : ''} pour les prochaines activités.</p>
             </>
           ) : (
             <p>Aucune donnée textuelle n’est déclarée utilisable.</p>

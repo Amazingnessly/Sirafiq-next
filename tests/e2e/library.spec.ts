@@ -65,6 +65,40 @@ test('un fichier TXT réel reste importable sans Blob.arrayBuffer ni Blob.text',
   await expect(page.getByText('Ce fichier TXT est réellement lu, extrait et conservé sur Safari.')).toBeVisible();
 });
 
+test('un PDF refusé par le lecteur local peut être récupéré par le fallback serveur', async ({ page }) => {
+  const extractedText = 'Texte réel récupéré par le moteur serveur de secours.';
+  await page.route('**/api/resource-versions/*/server-extraction', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        status: 'ready',
+        pages: [{ pageNumber: 1, text: extractedText }],
+        charCount: extractedText.length,
+      }),
+    });
+  });
+
+  await page.goto('/bibliotheque');
+  await page.getByLabel('Nouvelle matière', { exact: true }).first().fill('PDF secours E2E');
+  await page.getByRole('button', { name: 'Ajouter', exact: true }).click();
+  await expect(page.getByRole('listitem').getByText('PDF secours E2E', { exact: true })).toBeVisible();
+
+  await page.getByLabel(/Titre/).fill('PDF fallback');
+  await page.getByLabel('Fichier du support').setInputFiles({
+    name: 'fallback.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from('%PDF-1.4\nce contenu force volontairement un échec du lecteur local'),
+  });
+  await page.getByRole('button', { name: 'Importer le support' }).click();
+  await expect(page.getByRole('heading', { name: 'PDF fallback' })).toBeVisible();
+  await page.getByRole('heading', { name: 'PDF fallback' }).click();
+
+  await expect(page.getByText('Prêt', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('caractères extraits', { exact: true })).toBeVisible();
+  await expect(page.getByText('Contenu non exploitable automatiquement')).toHaveCount(0);
+});
+
 test('un même contenu n’est pas importé deux fois localement', async ({ page }) => {
   await page.goto('/bibliotheque');
 
