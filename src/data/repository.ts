@@ -2,7 +2,6 @@ import { db, type ExtractionRecord, type ResourceRecord, type ResourceVersionRec
 import { readBlobAsArrayBuffer } from '../lib/blob';
 import { sha256ArrayBuffer, sha256Hex } from '../lib/hash';
 import { isoNow, newId } from '../lib/ids';
-import { DocumentExtractionError, extractDocument } from '../lib/pdf';
 import type { ResourceKind } from '../shared/contracts';
 
 export class DuplicateSupportError extends Error {
@@ -60,6 +59,9 @@ export async function importFile(subjectId: string, file: File, preferredTitle?:
 
   let extraction: ExtractionRecord;
   try {
+    // PDF.js is intentionally lazy-loaded. Older Safari/iPadOS versions must be
+    // able to start Sirāfiq even if the PDF engine itself requires newer APIs.
+    const { extractDocument } = await import('../lib/pdf');
     const pages = await extractDocument(file);
     const charCount = pages.reduce((total, page) => total + page.text.length, 0);
     extraction = {
@@ -72,9 +74,7 @@ export async function importFile(subjectId: string, file: File, preferredTitle?:
       createdAt: now,
     };
   } catch (error) {
-    const extractionError = error instanceof DocumentExtractionError
-      ? error
-      : new DocumentExtractionError('Le contenu n’a pas pu être extrait.', 'UNREADABLE_PDF');
+    const extractionError = normalizeExtractionError(error);
     extraction = {
       versionId,
       status: 'failed',
@@ -174,6 +174,18 @@ async function requireSubject(subjectId: string): Promise<void> {
 async function requireUniqueSha(sha256: string): Promise<void> {
   const existingVersion = await db.resourceVersions.where('sha256').equals(sha256).first();
   if (existingVersion) throw new DuplicateSupportError(existingVersion.resourceId);
+}
+
+function normalizeExtractionError(error: unknown): { code: string; message: string } {
+  if (error && typeof error === 'object') {
+    const code = 'code' in error && typeof error.code === 'string' ? error.code : null;
+    const message = 'message' in error && typeof error.message === 'string' ? error.message : null;
+    if (code && message) return { code, message };
+  }
+  return {
+    code: 'UNREADABLE_PDF',
+    message: 'Le contenu n’a pas pu être extrait sur cet appareil. Le fichier reste conservé et pourra être traité par le serveur.',
+  };
 }
 
 async function persistImportedResource(input: {
