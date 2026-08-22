@@ -1,6 +1,7 @@
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { ExtractedPage } from '../shared/contracts';
+import { readBlobAsArrayBuffer, readBlobAsText } from './blob';
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -29,7 +30,7 @@ export async function extractDocument(file: File): Promise<ExtractedPage[]> {
   }
 
   if (file.type.startsWith('text/') || ['txt', 'md'].includes(extension ?? '')) {
-    const text = (await file.text()).trim();
+    const text = (await readBlobAsText(file)).trim();
     if (!text) {
       throw new DocumentExtractionError('Ce document ne contient aucun texte exploitable.', 'EMPTY_TEXT');
     }
@@ -44,7 +45,7 @@ export async function extractDocument(file: File): Promise<ExtractedPage[]> {
 
 async function extractPdf(file: File): Promise<ExtractedPage[]> {
   try {
-    const data = new Uint8Array(await file.arrayBuffer());
+    const data = new Uint8Array(await readBlobAsArrayBuffer(file));
     const pdf = await getDocument({ data }).promise;
     if (pdf.numPages > MAX_PAGES) {
       throw new DocumentExtractionError(`Ce PDF contient ${pdf.numPages} pages ; la limite actuelle est ${MAX_PAGES}.`, 'TOO_LARGE');

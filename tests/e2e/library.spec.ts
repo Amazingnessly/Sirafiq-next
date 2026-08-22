@@ -10,6 +10,7 @@ test('matière → texte réel → persistance après rechargement', async ({ pa
   await page.getByRole('button', { name: 'Texte', exact: true }).click();
   await page.getByLabel(/Titre/).fill('Lecture test');
   await page.getByLabel('Contenu').fill('Sirāfiq conserve ce texte réel puis le restitue après rechargement.');
+  await expect(page.getByRole('button', { name: 'Importer le support' })).toBeEnabled();
   await page.getByRole('button', { name: 'Importer le support' }).click();
 
   await expect(page.getByRole('heading', { name: 'Lecture test' })).toBeVisible();
@@ -28,9 +29,40 @@ test('depuis une bibliothèque vide, la matière peut être créée dans le bloc
   await importSubject.fill('Onboarding E2E');
   await page.getByRole('button', { name: 'Créer et continuer' }).click();
 
+  const subjectSelect = page.getByRole('combobox', { name: 'Matière du support' });
   await expect(page.getByRole('button', { name: 'Texte', exact: true })).toBeVisible();
-  await expect(page.getByLabel('Matière')).toHaveValue(/.+/);
-  await expect(page.getByLabel('Matière').locator('option', { hasText: 'Onboarding E2E' })).toBeAttached();
+  await expect(subjectSelect).toHaveValue(/.+/);
+  await expect(subjectSelect.locator('option', { hasText: 'Onboarding E2E' })).toBeAttached();
+});
+
+test('un fichier TXT réel reste importable sans Blob.arrayBuffer ni Blob.text', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(Blob.prototype, 'arrayBuffer', { value: undefined, configurable: true });
+    Object.defineProperty(Blob.prototype, 'text', { value: undefined, configurable: true });
+  });
+  await page.goto('/bibliotheque');
+
+  expect(await page.evaluate(() => typeof Blob.prototype.arrayBuffer)).toBe('undefined');
+  expect(await page.evaluate(() => typeof Blob.prototype.text)).toBe('undefined');
+
+  await page.getByLabel('Nouvelle matière', { exact: true }).first().fill('Safari TXT E2E');
+  await page.getByRole('button', { name: 'Ajouter', exact: true }).click();
+  await expect(page.getByRole('listitem').getByText('Safari TXT E2E', { exact: true })).toBeVisible();
+
+  await page.getByLabel(/Titre/).fill('Notes Safari');
+  await page.getByLabel('Fichier du support').setInputFiles({
+    name: 'notes-safari.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('Ce fichier TXT est réellement lu, extrait et conservé sur Safari.'),
+  });
+
+  await expect(page.getByText('notes-safari.txt', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Importer le support' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Importer le support' }).click();
+  await expect(page.getByRole('heading', { name: 'Notes Safari' })).toBeVisible();
+
+  await page.getByRole('heading', { name: 'Notes Safari' }).click();
+  await expect(page.getByText('Ce fichier TXT est réellement lu, extrait et conservé sur Safari.')).toBeVisible();
 });
 
 test('un même contenu n’est pas importé deux fois localement', async ({ page }) => {

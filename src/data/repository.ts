@@ -1,5 +1,6 @@
 import { db, type ExtractionRecord, type ResourceRecord, type ResourceVersionRecord, type SubjectRecord } from './db';
-import { sha256Hex } from '../lib/hash';
+import { readBlobAsArrayBuffer } from '../lib/blob';
+import { sha256ArrayBuffer, sha256Hex } from '../lib/hash';
 import { isoNow, newId } from '../lib/ids';
 import { DocumentExtractionError, extractDocument } from '../lib/pdf';
 import type { ResourceKind } from '../shared/contracts';
@@ -46,12 +47,9 @@ export async function createSubject(name: string, parentId: string | null = null
 }
 
 export async function importFile(subjectId: string, file: File, preferredTitle?: string): Promise<ResourceRecord> {
-  const subject = await db.subjects.get(subjectId);
-  if (!subject) throw new Error('La matière sélectionnée n’existe plus.');
-
+  await requireSubject(subjectId);
   const sha256 = await sha256Hex(file);
-  const existingVersion = await db.resourceVersions.where('sha256').equals(sha256).first();
-  if (existingVersion) throw new DuplicateSupportError(existingVersion.resourceId);
+  await requireUniqueSha(sha256);
 
   const now = isoNow();
   const resourceId = newId();
@@ -88,61 +86,60 @@ export async function importFile(subjectId: string, file: File, preferredTitle?:
     };
   }
 
-  const resource: ResourceRecord = {
-    id: resourceId,
+  const bytes = await readBlobAsArrayBuffer(file);
+  return persistImportedResource({
     subjectId,
     title,
     kind,
-    currentVersionId: versionId,
-    status: extraction.status === 'ready' ? 'ready' : 'failed',
-    extractionError: extraction.errorMessage,
-    createdAt: now,
-    updatedAt: now,
-    syncState: 'pending',
-    syncError: null,
-  };
-
-  // WebKit/Safari can reject Blob/File structured clones in IndexedDB even
-  // when the file itself is valid. Store plain bytes locally instead, then
-  // reconstruct a Blob only when the file must be displayed or uploaded.
-  const bytes = await file.arrayBuffer();
-  const version: ResourceVersionRecord = {
-    id: versionId,
-    resourceId,
-    sha256,
     fileName: file.name,
     mimeType: file.type || (kind === 'pdf' ? 'application/pdf' : 'text/plain'),
     size: file.size,
     bytes,
-    createdAt: now,
-    syncState: 'pending',
-    syncError: null,
-  };
-
-  await db.transaction('rw', db.resources, db.resourceVersions, db.extractions, db.outbox, async () => {
-    await db.resources.add(resource);
-    await db.resourceVersions.add(version);
-    await db.extractions.add(extraction);
-    await db.outbox.add({
-      id: newId(),
-      type: 'resource.sync',
-      entityId: resourceId,
-      attempts: 0,
-      nextAttemptAt: Date.now(),
-      lastError: null,
-      createdAt: now,
-    });
+    sha256,
+    extraction,
+    resourceId,
+    versionId,
+    now,
   });
-
-  return resource;
 }
 
 export async function importPastedText(subjectId: string, title: string, text: string): Promise<ResourceRecord> {
+  await requireSubject(subjectId);
   const cleanText = text.trim();
   if (!cleanText) throw new Error('Le texte est vide.');
   const cleanTitle = title.trim() || 'Texte personnel';
-  const file = new File([cleanText], `${safeFileName(cleanTitle)}.txt`, { type: 'text/plain' });
-  return importFile(subjectId, file, cleanTitle);
+  const blob = new Blob([cleanText], { type: 'text/plain;charset=utf-8' });
+  const bytes = await readBlobAsArrayBuffer(blob);
+  const sha256 = await sha256ArrayBuffer(bytes);
+  await requireUniqueSha(sha256);
+
+  const now = isoNow();
+  const resourceId = newId();
+  const versionId = newId();
+  const extraction: ExtractionRecord = {
+    versionId,
+    status: 'ready',
+    pages: [{ pageNumber: 1, text: cleanText }],
+    charCount: cleanText.length,
+    errorCode: null,
+    errorMessage: null,
+    createdAt: now,
+  };
+
+  return persistImportedResource({
+    subjectId,
+    title: cleanTitle.slice(0, 240),
+    kind: 'text',
+    fileName: `${safeFileName(cleanTitle)}.txt`,
+    mimeType: 'text/plain;charset=utf-8',
+    size: blob.size,
+    bytes,
+    sha256,
+    extraction,
+    resourceId,
+    versionId,
+    now,
+  });
 }
 
 export async function retrySyncForResource(resourceId: string): Promise<void> {
@@ -167,6 +164,75 @@ export async function retrySyncForResource(resourceId: string): Promise<void> {
       });
     }
   });
+}
+
+async function requireSubject(subjectId: string): Promise<void> {
+  const subject = await db.subjects.get(subjectId);
+  if (!subject) throw new Error('La matière sélectionnée n’existe plus.');
+}
+
+async function requireUniqueSha(sha256: string): Promise<void> {
+  const existingVersion = await db.resourceVersions.where('sha256').equals(sha256).first();
+  if (existingVersion) throw new DuplicateSupportError(existingVersion.resourceId);
+}
+
+async function persistImportedResource(input: {
+  subjectId: string;
+  title: string;
+  kind: ResourceKind;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  bytes: ArrayBuffer;
+  sha256: string;
+  extraction: ExtractionRecord;
+  resourceId: string;
+  versionId: string;
+  now: string;
+}): Promise<ResourceRecord> {
+  const resource: ResourceRecord = {
+    id: input.resourceId,
+    subjectId: input.subjectId,
+    title: input.title,
+    kind: input.kind,
+    currentVersionId: input.versionId,
+    status: input.extraction.status === 'ready' ? 'ready' : 'failed',
+    extractionError: input.extraction.errorMessage,
+    createdAt: input.now,
+    updatedAt: input.now,
+    syncState: 'pending',
+    syncError: null,
+  };
+
+  const version: ResourceVersionRecord = {
+    id: input.versionId,
+    resourceId: input.resourceId,
+    sha256: input.sha256,
+    fileName: input.fileName,
+    mimeType: input.mimeType,
+    size: input.size,
+    bytes: input.bytes,
+    createdAt: input.now,
+    syncState: 'pending',
+    syncError: null,
+  };
+
+  await db.transaction('rw', db.resources, db.resourceVersions, db.extractions, db.outbox, async () => {
+    await db.resources.add(resource);
+    await db.resourceVersions.add(version);
+    await db.extractions.add(input.extraction);
+    await db.outbox.add({
+      id: newId(),
+      type: 'resource.sync',
+      entityId: input.resourceId,
+      attempts: 0,
+      nextAttemptAt: Date.now(),
+      lastError: null,
+      createdAt: input.now,
+    });
+  });
+
+  return resource;
 }
 
 function safeFileName(title: string): string {

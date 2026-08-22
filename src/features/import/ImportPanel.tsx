@@ -85,7 +85,7 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
       <div className="form-grid">
         <label>
           <span>Matière</span>
-          <select value={effectiveSubjectId} onChange={(event) => setSubjectId(event.target.value)}>
+          <select aria-label="Matière du support" value={effectiveSubjectId} onChange={(event) => setSubjectId(event.target.value)}>
             {subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}
           </select>
         </label>
@@ -96,17 +96,28 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
       </div>
 
       {mode === 'file' ? (
-        <label className="file-drop">
+        <div className="file-drop">
           <input
             ref={inputRef}
+            aria-label="Fichier du support"
             type="file"
-            accept="application/pdf,text/plain,text/markdown,.pdf,.txt,.md"
-            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+            accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
+            onChange={(event) => {
+              setError(null);
+              setFile(event.target.files?.[0] ?? null);
+            }}
           />
           <span className="file-drop__icon" aria-hidden="true">＋</span>
           <strong>{file ? file.name : 'Choisir un PDF ou un texte'}</strong>
           <small>{file ? `${formatBytes(file.size)} · sera conservé localement avant synchronisation` : 'PDF, TXT ou Markdown · 25 Mo maximum'}</small>
-        </label>
+          <button
+            type="button"
+            className="button button--secondary"
+            onClick={() => inputRef.current?.click()}
+          >
+            {file ? 'Changer de fichier' : 'Parcourir les fichiers'}
+          </button>
+        </div>
       ) : (
         <label className="text-import">
           <span>Contenu</span>
@@ -123,7 +134,7 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
       )}
 
       <div className="import-actions">
-        <p>Le contenu est extrait réellement avant d’être déclaré prêt.</p>
+        <p>Le support n’est déclaré prêt qu’après lecture et enregistrement local réels.</p>
         <button className="button button--primary" type="submit" disabled={busy || !effectiveSubjectId || (mode === 'file' ? !file : !text.trim())}>
           {busy ? 'Analyse et enregistrement…' : 'Importer le support'}
         </button>
