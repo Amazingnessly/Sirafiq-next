@@ -6,10 +6,15 @@ import {
   SubjectUpsertSchema,
   type ApiErrorPayload,
   type BootstrapPayload,
+  type ExtractedPage,
   type ResourceDetailPayload,
+  type ServerExtractionResult,
 } from '../src/shared/contracts';
-
-const MAX_FILE_BYTES = 25 * 1024 * 1024;
+import {
+  MAX_EXTRACTED_CHARS,
+  MAX_SYNC_FILE_BYTES,
+  SERVER_PDF_EXTRACTION_MAX_BYTES,
+} from '../src/shared/importPolicy';
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -40,6 +45,11 @@ export default {
       if (blobMatch?.[1]) {
         if (request.method === 'PUT') return putBlob(blobMatch[1], request, env);
         if (request.method === 'GET') return getBlob(blobMatch[1], env);
+      }
+
+      const serverExtractionMatch = url.pathname.match(/^\/api\/resource-versions\/([0-9a-f-]+)\/server-extraction$/i);
+      if (request.method === 'POST' && serverExtractionMatch?.[1]) {
+        return extractPdfOnServer(serverExtractionMatch[1], env);
       }
 
       const extractionMatch = url.pathname.match(/^\/api\/resource-versions\/([0-9a-f-]+)\/extraction$/i);
@@ -160,8 +170,8 @@ async function putBlob(versionId: string, request: Request, env: Env): Promise<R
   if (!request.body) return errorResponse(400, 'EMPTY_UPLOAD', 'Le fichier envoyé est vide.', true);
 
   const declaredLength = Number(request.headers.get('content-length') ?? version.size);
-  if (!Number.isFinite(declaredLength) || declaredLength > MAX_FILE_BYTES) {
-    return errorResponse(413, 'FILE_TOO_LARGE', 'Le fichier dépasse la limite de 25 Mo.', false);
+  if (!Number.isFinite(declaredLength) || declaredLength > MAX_SYNC_FILE_BYTES) {
+    return errorResponse(413, 'FILE_TOO_LARGE', 'Le fichier dépasse la limite de synchronisation de 90 Mo.', false);
   }
 
   const stored = await env.FILES.put(version.r2_key, request.body, {
@@ -197,6 +207,87 @@ async function getBlob(versionId: string, env: Env): Promise<Response> {
   return new Response(object.body, { headers });
 }
 
+async function extractPdfOnServer(versionId: string, env: Env): Promise<Response> {
+  const version = await env.DB.prepare(`
+    SELECT r2_key, mime_type, file_name, size
+    FROM resource_versions WHERE id = ?
+  `).bind(versionId).first<{ r2_key: string; mime_type: string; file_name: string; size: number }>();
+  if (!version) return errorResponse(404, 'VERSION_NOT_FOUND', 'La version du support est introuvable.', false);
+  if (version.mime_type !== 'application/pdf' && !version.file_name.toLowerCase().endsWith('.pdf')) {
+    return errorResponse(400, 'NOT_A_PDF', 'Cette extraction serveur est réservée aux PDF.', false);
+  }
+  if (version.size > SERVER_PDF_EXTRACTION_MAX_BYTES) {
+    return errorResponse(413, 'SERVER_EXTRACTION_TOO_LARGE', 'L’extraction PDF serveur est limitée à 25 Mo pour cette version.', false);
+  }
+
+  const object = await env.FILES.get(version.r2_key);
+  if (!object) return errorResponse(409, 'FILE_NOT_STORED', 'Le PDF doit d’abord être synchronisé avant une extraction serveur.', true);
+
+  try {
+    const converted = await env.AI.toMarkdown(
+      {
+        name: version.file_name,
+        blob: new Blob([await object.arrayBuffer()], { type: 'application/pdf' }),
+      },
+      {
+        conversionOptions: {
+          output: { format: 'text' },
+          pdf: { metadata: false },
+        },
+      },
+    );
+    const result = (Array.isArray(converted) ? converted[0] : converted) as
+      | { format: 'markdown' | 'text' | 'error'; data?: string; error?: string }
+      | undefined;
+
+    if (!result || result.format === 'error') {
+      return persistServerExtractionFailure(
+        versionId,
+        'SERVER_EXTRACTION_FAILED',
+        result?.error || 'Le service d’extraction n’a pas pu interpréter ce PDF.',
+        env,
+      );
+    }
+
+    const text = (result.data ?? '').replace(/\u0000/g, '').trim();
+    if (text.replace(/\s/g, '').length < 20) {
+      return persistServerExtractionFailure(
+        versionId,
+        'EMPTY_SERVER_EXTRACTION',
+        'Le service d’extraction n’a trouvé aucun texte exploitable dans ce PDF.',
+        env,
+      );
+    }
+    if (text.length > MAX_EXTRACTED_CHARS) {
+      return persistServerExtractionFailure(
+        versionId,
+        'SERVER_EXTRACTION_TOO_LONG',
+        'Le texte extrait dépasse la capacité de stockage textuel de cette première version.',
+        env,
+      );
+    }
+
+    const pages = splitIntoTextBlocks(text);
+    const charCount = pages.reduce((sum, page) => sum + page.text.length, 0);
+    await persistReadyExtraction(versionId, pages, charCount, env);
+    const payload: ServerExtractionResult = { status: 'ready', pages, charCount };
+    return json(payload);
+  } catch (error) {
+    console.error(JSON.stringify({
+      level: 'error',
+      operation: 'server-pdf-extraction',
+      versionId,
+      message: error instanceof Error ? error.message : 'Unknown toMarkdown error',
+    }));
+    return persistServerExtractionFailure(
+      versionId,
+      'SERVER_EXTRACTION_FAILED',
+      'L’extraction serveur du PDF a échoué. Le fichier reste conservé et consultable.',
+      env,
+    );
+  }
+}
+
 async function storeExtraction(versionId: string, request: Request, env: Env): Promise<Response> {
   const parsed = ExtractionUploadSchema.safeParse(await safeJson(request));
   if (!parsed.success) return validationError(parsed.error);
@@ -208,6 +299,19 @@ async function storeExtraction(versionId: string, request: Request, env: Env): P
     return errorResponse(400, 'CHAR_COUNT_MISMATCH', 'Le contenu extrait est incohérent ; il n’a pas été enregistré.', true);
   }
 
+  await persistReadyExtraction(versionId, parsed.data.pages, computedCharCount, env);
+  return json({ ok: true });
+}
+
+async function storeExtractionFailure(versionId: string, request: Request, env: Env): Promise<Response> {
+  const parsed = ExtractionFailureSchema.safeParse(await safeJson(request));
+  if (!parsed.success) return validationError(parsed.error);
+  const changed = await persistExtractionFailure(versionId, parsed.data.code, parsed.data.message, env);
+  if (!changed) return errorResponse(404, 'VERSION_NOT_FOUND', 'La version du support est introuvable.', false);
+  return json({ ok: true });
+}
+
+async function persistReadyExtraction(versionId: string, pages: ExtractedPage[], charCount: number, env: Env): Promise<void> {
   const now = new Date().toISOString();
   await env.DB.batch([
     env.DB.prepare(`
@@ -217,27 +321,50 @@ async function storeExtraction(versionId: string, request: Request, env: Env): P
         content_json = excluded.content_json,
         char_count = excluded.char_count,
         updated_at = excluded.updated_at
-    `).bind(versionId, JSON.stringify(parsed.data.pages), computedCharCount, now, now),
+    `).bind(versionId, JSON.stringify(pages), charCount, now, now),
     env.DB.prepare(`
       UPDATE resource_versions
       SET extraction_status = 'ready', extraction_error = NULL, status = 'ready', updated_at = ?
       WHERE id = ?
     `).bind(now, versionId),
   ]);
-  return json({ ok: true });
 }
 
-async function storeExtractionFailure(versionId: string, request: Request, env: Env): Promise<Response> {
-  const parsed = ExtractionFailureSchema.safeParse(await safeJson(request));
-  if (!parsed.success) return validationError(parsed.error);
+async function persistExtractionFailure(versionId: string, code: string, message: string, env: Env): Promise<boolean> {
   const now = new Date().toISOString();
   const result = await env.DB.prepare(`
     UPDATE resource_versions
     SET extraction_status = 'failed', extraction_error = ?, status = 'failed', updated_at = ?
     WHERE id = ?
-  `).bind(`${parsed.data.code}: ${parsed.data.message}`, now, versionId).run();
-  if (!result.meta.changes) return errorResponse(404, 'VERSION_NOT_FOUND', 'La version du support est introuvable.', false);
-  return json({ ok: true });
+  `).bind(`${code}: ${message}`, now, versionId).run();
+  return Boolean(result.meta.changes);
+}
+
+async function persistServerExtractionFailure(versionId: string, code: string, message: string, env: Env): Promise<Response> {
+  const changed = await persistExtractionFailure(versionId, code, message, env);
+  if (!changed) return errorResponse(404, 'VERSION_NOT_FOUND', 'La version du support est introuvable.', false);
+  const payload: ServerExtractionResult = { status: 'failed', code, message };
+  return json(payload);
+}
+
+function splitIntoTextBlocks(text: string): ExtractedPage[] {
+  const blocks: ExtractedPage[] = [];
+  let offset = 0;
+  const target = 180_000;
+  while (offset < text.length) {
+    let end = Math.min(offset + target, text.length);
+    if (end < text.length) {
+      const paragraphBreak = text.lastIndexOf('\n\n', end);
+      const wordBreak = text.lastIndexOf(' ', end);
+      const candidate = paragraphBreak > offset + target / 2 ? paragraphBreak : wordBreak;
+      if (candidate > offset + target / 2) end = candidate;
+    }
+    const block = text.slice(offset, end).trim();
+    if (block) blocks.push({ pageNumber: blocks.length + 1, text: block });
+    offset = end;
+    while (offset < text.length && /\s/.test(text[offset] ?? '')) offset += 1;
+  }
+  return blocks;
 }
 
 async function getBootstrap(env: Env): Promise<Response> {
