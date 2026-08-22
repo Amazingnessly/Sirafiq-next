@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import type { SubjectRecord } from '../../data/db';
 import { DuplicateSupportError, importFile, importPastedText } from '../../data/repository';
 import { requestSync } from '../../lib/sync';
+import { SubjectForm } from './SubjectForm';
 
 type Mode = 'file' | 'text';
 
@@ -30,9 +31,14 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
 
   if (!subjects.length) {
     return (
-      <div className="empty-panel">
+      <div className="empty-panel empty-panel--onboarding">
         <h3>Commencez par une matière</h3>
-        <p>Un support doit toujours appartenir à une matière afin que les futures révisions restent organisées.</p>
+        <p>Créez-la ici, puis l’import sera disponible immédiatement sans quitter cette zone.</p>
+        <SubjectForm
+          inputId="import-subject-name"
+          submitLabel="Créer et continuer"
+          onCreated={(subject) => setSubjectId(subject.id)}
+        />
       </div>
     );
   }
