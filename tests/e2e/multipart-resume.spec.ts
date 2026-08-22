@@ -120,11 +120,16 @@ test('reprend un multipart interrompu sans renvoyer les morceaux déjà confirm�
   await page.getByLabel('Fichier à reprendre').setInputFiles({ name: 'multipart.pdf', mimeType: 'application/pdf', buffer: fileBytes });
   await page.getByRole('button', { name: 'Reprendre l’envoi' }).click();
 
-  await expect(page.getByText('L’envoi du gros fichier est interrompu.')).toHaveCount(0, { timeout: 30_000 });
+  await expect.poll(async () => page.evaluate(async (versionId) => {
+    const { db } = await import('/src/data/db.ts');
+    return Boolean(await db.multipartUploads.get(versionId));
+  }, VERSION_ID), { timeout: 30_000 }).toBe(false);
+
   expect(uploadedParts).toEqual([2, 3]);
   expect(completeCalled).toBe(true);
-  expect(await page.evaluate(async (versionId) => {
+  await expect(page.getByText('L’envoi du gros fichier est interrompu.')).toHaveCount(0);
+  await expect.poll(async () => page.evaluate(async (resourceId) => {
     const { db } = await import('/src/data/db.ts');
-    return db.multipartUploads.get(versionId);
-  }, VERSION_ID)).toBeUndefined();
+    return (await db.resources.get(resourceId))?.syncState;
+  }, RESOURCE_ID)).toBe('synced');
 });
