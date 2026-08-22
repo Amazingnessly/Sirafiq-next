@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import type { SubjectRecord } from '../../data/db';
 import { DuplicateSupportError, importFile, importPastedText } from '../../data/repository';
 import { requestSync } from '../../lib/sync';
+import { LOCAL_PDF_EXTRACTION_MAX_BYTES, MAX_SYNC_FILE_BYTES, MEBIBYTE } from '../../shared/importPolicy';
 import { SubjectForm } from './SubjectForm';
 
 type Mode = 'file' | 'text';
@@ -53,6 +54,9 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
 
       if (mode === 'file') {
         if (!file) throw new Error('Choisissez un fichier PDF, TXT ou Markdown.');
+        if (file.size > MAX_SYNC_FILE_BYTES) {
+          throw new Error(`Le fichier dépasse la limite de synchronisation actuelle de ${formatMiB(MAX_SYNC_FILE_BYTES)} Mo.`);
+        }
         await importFile(effectiveSubjectId, file, title);
         setFile(null);
         setTitle('');
@@ -109,7 +113,11 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
           />
           <span className="file-drop__icon" aria-hidden="true">＋</span>
           <strong>{file ? file.name : 'Choisir un PDF ou un texte'}</strong>
-          <small>{file ? `${formatBytes(file.size)} · sera conservé localement avant synchronisation` : 'PDF, TXT ou Markdown · 25 Mo maximum'}</small>
+          <small>
+            {file
+              ? `${formatBytes(file.size)} · sera conservé localement avant synchronisation`
+              : `PDF, TXT ou Markdown · synchronisation jusqu’à ${formatMiB(MAX_SYNC_FILE_BYTES)} Mo · extraction PDF locale jusqu’à ${formatMiB(LOCAL_PDF_EXTRACTION_MAX_BYTES)} Mo`}
+          </small>
           <button
             type="button"
             className="button button--secondary"
@@ -145,6 +153,10 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} o`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} Ko`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
+  if (bytes < MEBIBYTE) return `${Math.round(bytes / 1024)} Ko`;
+  return `${(bytes / MEBIBYTE).toFixed(1)} Mo`;
+}
+
+function formatMiB(bytes: number): number {
+  return Math.round(bytes / MEBIBYTE);
 }
