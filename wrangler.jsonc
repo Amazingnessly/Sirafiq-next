@@ -21,9 +21,6 @@
       "bucket_name": "sirafiq-next-files"
     }
   ],
-  "ai": {
-    "binding": "AI"
-  },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
