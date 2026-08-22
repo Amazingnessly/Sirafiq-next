@@ -1,5 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie';
-import type { ExtractedPage, ResourceKind } from '../shared/contracts';
+import type { ExtractedPage, ResourceKind, UploadedPart } from '../shared/contracts';
 
 export type SyncState = 'pending' | 'synced' | 'error';
 export type LocalResourceStatus = 'ready' | 'failed';
@@ -61,12 +61,28 @@ export interface OutboxRecord {
   createdAt: string;
 }
 
+export interface MultipartUploadRecord {
+  versionId: string;
+  resourceId: string;
+  fileName: string;
+  size: number;
+  lastModified: number;
+  sha256: string;
+  uploadId: string | null;
+  partSize: number;
+  parts: UploadedPart[];
+  status: 'pending' | 'uploading' | 'error';
+  error: string | null;
+  updatedAt: string;
+}
+
 export class SirafiqDB extends Dexie {
   subjects!: EntityTable<SubjectRecord, 'id'>;
   resources!: EntityTable<ResourceRecord, 'id'>;
   resourceVersions!: EntityTable<ResourceVersionRecord, 'id'>;
   extractions!: EntityTable<ExtractionRecord, 'versionId'>;
   outbox!: EntityTable<OutboxRecord, 'id'>;
+  multipartUploads!: EntityTable<MultipartUploadRecord, 'versionId'>;
 
   constructor() {
     super('sirafiq-next');
@@ -76,6 +92,14 @@ export class SirafiqDB extends Dexie {
       resourceVersions: 'id, resourceId, &sha256, createdAt, syncState',
       extractions: 'versionId, status, createdAt',
       outbox: 'id, type, entityId, nextAttemptAt, createdAt',
+    });
+    this.version(2).stores({
+      subjects: 'id, name, parentId, updatedAt, syncState',
+      resources: 'id, subjectId, currentVersionId, updatedAt, status, syncState',
+      resourceVersions: 'id, resourceId, &sha256, createdAt, syncState',
+      extractions: 'versionId, status, createdAt',
+      outbox: 'id, type, entityId, nextAttemptAt, createdAt',
+      multipartUploads: 'versionId, resourceId, status, updatedAt',
     });
   }
 }

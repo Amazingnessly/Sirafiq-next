@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { MAX_EXTRACTED_CHARS, MAX_EXTRACTED_PAGES, MAX_SYNC_FILE_BYTES } from './importPolicy';
+import { MAX_EXTRACTED_CHARS, MAX_EXTRACTED_PAGES, MAX_RESOURCE_FILE_BYTES } from './importPolicy';
 
 export const ResourceKindSchema = z.enum(['text', 'pdf']);
 export type ResourceKind = z.infer<typeof ResourceKindSchema>;
@@ -29,11 +29,35 @@ export const ResourceRegisterSchema = z.object({
     sha256: z.string().regex(/^[a-f0-9]{64}$/),
     fileName: z.string().min(1).max(255),
     mimeType: z.string().min(1).max(120),
-    size: z.number().int().nonnegative().max(MAX_SYNC_FILE_BYTES),
+    size: z.number().int().nonnegative().max(MAX_RESOURCE_FILE_BYTES),
     createdAt: z.string().datetime(),
   }),
 });
 export type ResourceRegisterInput = z.infer<typeof ResourceRegisterSchema>;
+
+export const MultipartCreateSchema = z.object({
+  partSize: z.number().int().min(5 * 1024 * 1024).max(90 * 1024 * 1024),
+  restart: z.boolean().optional().default(false),
+});
+export type MultipartCreateInput = z.infer<typeof MultipartCreateSchema>;
+
+export const UploadedPartSchema = z.object({
+  partNumber: z.number().int().positive(),
+  etag: z.string().min(1).max(512),
+});
+export type UploadedPart = z.infer<typeof UploadedPartSchema>;
+
+export const MultipartCreateResultSchema = z.object({
+  uploadId: z.string().min(1),
+  partSize: z.number().int().positive(),
+  parts: z.array(UploadedPartSchema),
+});
+export type MultipartCreateResult = z.infer<typeof MultipartCreateResultSchema>;
+
+export const MultipartCompleteSchema = z.object({
+  uploadId: z.string().min(1),
+});
+export type MultipartCompleteInput = z.infer<typeof MultipartCompleteSchema>;
 
 export const ExtractedPageSchema = z.object({
   pageNumber: z.number().int().positive(),

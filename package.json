@@ -18,8 +18,8 @@
     "test": "vitest run tests/unit",
     "test:e2e": "playwright test",
     "check": "npm run cf:types && npm run typecheck && npm run test && npm run build",
-    "deploy": "npm run cf:types && vite build && wrangler deploy && npm run db:migrate:remote",
-    "deploy:preview": "npm run cf:types && node scripts/ensure-preview-d1.mjs && CLOUDFLARE_ENV=preview vite build && CLOUDFLARE_ENV=preview wrangler deploy && npm run db:migrate:preview"
+    "deploy": "npm run cf:types && vite build && npm run db:migrate:remote && wrangler deploy",
+    "deploy:preview": "npm run cf:types && node scripts/ensure-preview-d1.mjs && CLOUDFLARE_ENV=preview vite build && npm run db:migrate:preview && CLOUDFLARE_ENV=preview wrangler deploy"
   },
   "dependencies": {
     "@tanstack/react-query": "5.101.4",

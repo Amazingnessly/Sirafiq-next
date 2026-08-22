@@ -1,7 +1,10 @@
-import { readBlobAsArrayBuffer } from './blob';
+import { sha256BlobIncremental } from './incrementalSha256';
 
-export async function sha256Hex(blob: Blob): Promise<string> {
-  return sha256ArrayBuffer(await readBlobAsArrayBuffer(blob));
+export async function sha256Hex(
+  blob: Blob,
+  onProgress?: (processedBytes: number, totalBytes: number) => void,
+): Promise<string> {
+  return sha256BlobIncremental(blob, 8 * 1024 * 1024, onProgress);
 }
 
 export async function sha256ArrayBuffer(buffer: ArrayBuffer): Promise<string> {
