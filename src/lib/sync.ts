@@ -1,9 +1,26 @@
-import { db, type OutboxRecord, type SubjectRecord } from '../data/db';
+import {
+  db,
+  type OutboxRecord,
+  type ResourceRecord,
+  type ResourceVersionRecord,
+  type SubjectRecord,
+} from '../data/db';
 import { apiJson, apiPutBlob, ApiRequestError } from './api';
-import type { ExtractionUploadInput, ResourceRegisterInput, ServerExtractionResult } from '../shared/contracts';
+import type {
+  ExtractionUploadInput,
+  ResourceDetailPayload,
+  ResourceRegisterInput,
+  ServerExtractionResult,
+} from '../shared/contracts';
 import { shouldTryServerPdfExtraction } from '../shared/importPolicy';
 
 let activeSync: Promise<void> | null = null;
+
+type RemoteRegistration = {
+  versionId: string;
+  reusedExisting: boolean;
+  remote: ResourceDetailPayload | null;
+};
 
 export function requestSync(): Promise<void> {
   if (activeSync) return activeSync;
@@ -46,8 +63,19 @@ export async function retryServerExtractionForResource(resourceId: string): Prom
     throw new Error('Synchronisez d’abord le fichier avant de relancer son extraction.');
   }
 
+  const registration = await registerOrResolveRemoteVersion(toResourcePayload(resource, version));
+  if (registration.remote?.version.extractionStatus === 'ready' && registration.remote.extraction) {
+    const ready: ServerExtractionResult = {
+      status: 'ready',
+      pages: registration.remote.extraction.pages,
+      charCount: registration.remote.extraction.charCount,
+    };
+    await applyServerExtractionResult(resource.id, version.id, ready);
+    return ready;
+  }
+
   const result = await apiJson<ServerExtractionResult>(
-    `/api/resource-versions/${encodeURIComponent(version.id)}/server-extraction`,
+    `/api/resource-versions/${encodeURIComponent(registration.versionId)}/server-extraction`,
     { method: 'POST' },
     120_000,
   );
@@ -104,7 +132,84 @@ async function syncResource(item: OutboxRecord): Promise<void> {
     throw new ApiRequestError('Les données locales du support sont incomplètes.', 0, 'LOCAL_DATA_MISSING', false);
   }
 
-  const payload: ResourceRegisterInput = {
+  const registration = await registerOrResolveRemoteVersion(toResourcePayload(resource, version));
+
+  if (!registration.reusedExisting) {
+    const uploadBlob = new Blob([version.bytes], { type: version.mimeType });
+    await apiPutBlob(`/api/resource-versions/${encodeURIComponent(registration.versionId)}/blob`, uploadBlob, version.mimeType, 120_000);
+  }
+
+  if (extraction.status === 'ready') {
+    const extractionPayload: ExtractionUploadInput = {
+      status: 'ready',
+      pages: extraction.pages,
+      charCount: extraction.charCount,
+    };
+    await apiJson(`/api/resource-versions/${encodeURIComponent(registration.versionId)}/extraction`, {
+      method: 'POST',
+      body: JSON.stringify(extractionPayload),
+    });
+  } else if (registration.remote?.version.extractionStatus === 'ready' && registration.remote.extraction) {
+    await applyServerExtractionResult(resource.id, version.id, {
+      status: 'ready',
+      pages: registration.remote.extraction.pages,
+      charCount: registration.remote.extraction.charCount,
+    });
+  } else if (shouldTryServerPdfExtraction(resource.kind, version.size, extraction.status)) {
+    const serverResult = await apiJson<ServerExtractionResult>(
+      `/api/resource-versions/${encodeURIComponent(registration.versionId)}/server-extraction`,
+      { method: 'POST' },
+      120_000,
+    );
+    await applyServerExtractionResult(resource.id, version.id, serverResult);
+  } else if (!registration.reusedExisting) {
+    await apiJson(`/api/resource-versions/${encodeURIComponent(registration.versionId)}/extraction-failure`, {
+      method: 'POST',
+      body: JSON.stringify({
+        code: extraction.errorCode ?? 'EXTRACTION_FAILED',
+        message: extraction.errorMessage ?? 'Extraction impossible.',
+      }),
+    });
+  }
+
+  await db.transaction('rw', db.resources, db.resourceVersions, async () => {
+    await db.resources.update(resource.id, { syncState: 'synced', syncError: null });
+    await db.resourceVersions.update(version.id, { syncState: 'synced', syncError: null });
+  });
+}
+
+async function registerOrResolveRemoteVersion(payload: ResourceRegisterInput): Promise<RemoteRegistration> {
+  try {
+    await apiJson('/api/resources/register', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    return { versionId: payload.version.id, reusedExisting: false, remote: null };
+  } catch (error) {
+    if (!(error instanceof ApiRequestError) || error.code !== 'DUPLICATE_SUPPORT') throw error;
+    const existingResourceId = readExistingResourceId(error.details);
+    if (!existingResourceId) {
+      throw new ApiRequestError(
+        'Le serveur a signalé un doublon sans fournir le support existant.',
+        409,
+        'DUPLICATE_RECONCILIATION_FAILED',
+        true,
+        error.details,
+      );
+    }
+    const remote = await apiJson<ResourceDetailPayload>(`/api/resources/${encodeURIComponent(existingResourceId)}`);
+    return { versionId: remote.version.id, reusedExisting: true, remote };
+  }
+}
+
+function readExistingResourceId(details: unknown): string | null {
+  if (!details || typeof details !== 'object') return null;
+  const candidate = (details as { existingResourceId?: unknown }).existingResourceId;
+  return typeof candidate === 'string' && candidate.length > 0 ? candidate : null;
+}
+
+function toResourcePayload(resource: ResourceRecord, version: ResourceVersionRecord): ResourceRegisterInput {
+  return {
     resource: {
       id: resource.id,
       subjectId: resource.subjectId,
@@ -124,42 +229,6 @@ async function syncResource(item: OutboxRecord): Promise<void> {
       createdAt: version.createdAt,
     },
   };
-
-  await apiJson('/api/resources/register', { method: 'POST', body: JSON.stringify(payload) });
-  const uploadBlob = new Blob([version.bytes], { type: version.mimeType });
-  await apiPutBlob(`/api/resource-versions/${encodeURIComponent(version.id)}/blob`, uploadBlob, version.mimeType, 120_000);
-
-  if (extraction.status === 'ready') {
-    const extractionPayload: ExtractionUploadInput = {
-      status: 'ready',
-      pages: extraction.pages,
-      charCount: extraction.charCount,
-    };
-    await apiJson(`/api/resource-versions/${encodeURIComponent(version.id)}/extraction`, {
-      method: 'POST',
-      body: JSON.stringify(extractionPayload),
-    });
-  } else if (shouldTryServerPdfExtraction(resource.kind, version.size, extraction.status)) {
-    const serverResult = await apiJson<ServerExtractionResult>(
-      `/api/resource-versions/${encodeURIComponent(version.id)}/server-extraction`,
-      { method: 'POST' },
-      120_000,
-    );
-    await applyServerExtractionResult(resource.id, version.id, serverResult);
-  } else {
-    await apiJson(`/api/resource-versions/${encodeURIComponent(version.id)}/extraction-failure`, {
-      method: 'POST',
-      body: JSON.stringify({
-        code: extraction.errorCode ?? 'EXTRACTION_FAILED',
-        message: extraction.errorMessage ?? 'Extraction impossible.',
-      }),
-    });
-  }
-
-  await db.transaction('rw', db.resources, db.resourceVersions, async () => {
-    await db.resources.update(resource.id, { syncState: 'synced', syncError: null });
-    await db.resourceVersions.update(version.id, { syncState: 'synced', syncError: null });
-  });
 }
 
 async function applyServerExtractionResult(resourceId: string, versionId: string, result: ServerExtractionResult): Promise<void> {
