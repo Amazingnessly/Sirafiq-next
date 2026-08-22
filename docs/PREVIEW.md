@@ -11,3 +11,5 @@ Dernier déclenchement contrôlé après activation de R2 et correction de la co
 Nouveau déclenchement demandé après configuration des builds non-production.
 
 Déclenchement manuel supplémentaire demandé le 22 août 2026 pour vérifier la chaîne GitHub → Cloudflare.
+
+Nouveau redéclenchement manuel demandé à 16:52 pour relancer Cloudflare Builds.
