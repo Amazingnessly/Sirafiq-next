@@ -3,8 +3,8 @@ import { expect, test } from '@playwright/test';
 test('matière → texte réel → persistance après rechargement', async ({ page }) => {
   await page.goto('/bibliotheque');
 
-  await page.getByLabel('Nouvelle matière').fill('Français E2E');
-  await page.getByRole('button', { name: 'Ajouter' }).click();
+  await page.getByLabel('Nouvelle matière', { exact: true }).first().fill('Français E2E');
+  await page.getByRole('button', { name: 'Ajouter', exact: true }).click();
   await expect(page.getByRole('listitem').getByText('Français E2E', { exact: true })).toBeVisible();
 
   await page.getByRole('button', { name: 'Texte', exact: true }).click();
@@ -30,16 +30,16 @@ test('depuis une bibliothèque vide, la matière peut être créée dans le bloc
 
   await expect(page.getByRole('button', { name: 'Texte', exact: true })).toBeVisible();
   await expect(page.getByLabel('Matière')).toHaveValue(/.+/);
-  await expect(page.getByLabel('Matière').getByRole('option', { name: 'Onboarding E2E' })).toBeAttached();
+  await expect(page.getByLabel('Matière').locator('option', { hasText: 'Onboarding E2E' })).toBeAttached();
 });
 
 test('un même contenu n’est pas importé deux fois localement', async ({ page }) => {
   await page.goto('/bibliotheque');
 
-  const subjectInput = page.getByLabel('Nouvelle matière');
+  const subjectInput = page.getByLabel('Nouvelle matière', { exact: true }).first();
   if (await subjectInput.isVisible()) {
     await subjectInput.fill('Doublons E2E');
-    await page.getByRole('button', { name: 'Ajouter' }).click();
+    await page.getByRole('button', { name: 'Ajouter', exact: true }).click();
     await expect(page.getByRole('listitem').getByText('Doublons E2E', { exact: true })).toBeVisible();
   }
 
