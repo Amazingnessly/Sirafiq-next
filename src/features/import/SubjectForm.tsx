@@ -1,8 +1,19 @@
 import { FormEvent, useState } from 'react';
+import type { SubjectRecord } from '../../data/db';
 import { createSubject } from '../../data/repository';
 import { requestSync } from '../../lib/sync';
 
-export function SubjectForm() {
+type SubjectFormProps = {
+  inputId?: string;
+  submitLabel?: string;
+  onCreated?: (subject: SubjectRecord) => void;
+};
+
+export function SubjectForm({
+  inputId = 'subject-name',
+  submitLabel = 'Ajouter',
+  onCreated,
+}: SubjectFormProps = {}) {
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -12,8 +23,9 @@ export function SubjectForm() {
     setError(null);
     setSaving(true);
     try {
-      await createSubject(name);
+      const subject = await createSubject(name);
       setName('');
+      onCreated?.(subject);
       void requestSync();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Impossible de créer la matière.');
@@ -24,10 +36,10 @@ export function SubjectForm() {
 
   return (
     <form className="subject-form" onSubmit={submit}>
-      <label htmlFor="subject-name">Nouvelle matière</label>
+      <label htmlFor={inputId}>Nouvelle matière</label>
       <div className="field-row">
         <input
-          id="subject-name"
+          id={inputId}
           value={name}
           onChange={(event) => setName(event.target.value)}
           placeholder="Ex. Arabe, Français, Religion…"
@@ -35,7 +47,7 @@ export function SubjectForm() {
           autoComplete="off"
         />
         <button className="button button--secondary" type="submit" disabled={saving || !name.trim()}>
-          {saving ? 'Ajout…' : 'Ajouter'}
+          {saving ? 'Ajout…' : submitLabel}
         </button>
       </div>
       {error && <p className="form-error" role="alert">{error}</p>}
