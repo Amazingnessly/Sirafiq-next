@@ -16,6 +16,8 @@ import {
   SERVER_PDF_EXTRACTION_MAX_BYTES,
 } from '../src/shared/importPolicy';
 
+type WorkerEnv = Env & { AI?: Cloudflare.PreviewEnv['AI'] };
+
 export default {
   async fetch(request, env): Promise<Response> {
     const requestId = crypto.randomUUID();
@@ -72,7 +74,7 @@ export default {
       return errorResponse(500, 'INTERNAL_ERROR', 'Une erreur serveur inattendue est survenue.', true);
     }
   },
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler<WorkerEnv>;
 
 async function upsertSubject(request: Request, env: Env): Promise<Response> {
   const parsed = SubjectUpsertSchema.safeParse(await safeJson(request));
@@ -207,7 +209,12 @@ async function getBlob(versionId: string, env: Env): Promise<Response> {
   return new Response(object.body, { headers });
 }
 
-async function extractPdfOnServer(versionId: string, env: Env): Promise<Response> {
+async function extractPdfOnServer(versionId: string, env: WorkerEnv): Promise<Response> {
+  const ai = env.AI;
+  if (!ai) {
+    return errorResponse(503, 'SERVER_EXTRACTION_UNAVAILABLE', 'L’extraction PDF serveur n’est pas disponible dans cet environnement.', true);
+  }
+
   const version = await env.DB.prepare(`
     SELECT r2_key, mime_type, file_name, size
     FROM resource_versions WHERE id = ?
@@ -224,7 +231,7 @@ async function extractPdfOnServer(versionId: string, env: Env): Promise<Response
   if (!object) return errorResponse(409, 'FILE_NOT_STORED', 'Le PDF doit d’abord être synchronisé avant une extraction serveur.', true);
 
   try {
-    const converted = await env.AI.toMarkdown(
+    const converted = await ai.toMarkdown(
       {
         name: version.file_name,
         blob: new Blob([await object.arrayBuffer()], { type: 'application/pdf' }),
