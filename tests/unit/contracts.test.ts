@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { ExtractionUploadSchema, ResourceRegisterSchema } from '../../src/shared/contracts';
-import { MAX_SYNC_FILE_BYTES, shouldTryServerPdfExtraction } from '../../src/shared/importPolicy';
+import { ExtractionUploadSchema, MultipartCreateSchema, ResourceRegisterSchema } from '../../src/shared/contracts';
+import {
+  MAX_RESOURCE_FILE_BYTES,
+  MULTIPART_PART_BYTES,
+  MULTIPART_UPLOAD_THRESHOLD_BYTES,
+  shouldTryServerPdfExtraction,
+  shouldUseMultipartUpload,
+} from '../../src/shared/importPolicy';
 
 const UUID_A = '00000000-0000-4000-8000-000000000001';
 const UUID_B = '00000000-0000-4000-8000-000000000002';
@@ -30,14 +36,20 @@ function resourcePayload(size: number) {
 }
 
 describe('contrats API', () => {
-  it('accepte la synchronisation d’un fichier supérieur à 25 Mo mais sous la limite R2', () => {
-    const result = ResourceRegisterSchema.safeParse(resourcePayload(30 * 1024 * 1024));
-    expect(result.success).toBe(true);
+  it('accepte les métadonnées de fichiers multipart supérieurs à 100 Mo', () => {
+    expect(ResourceRegisterSchema.safeParse(resourcePayload(300 * 1024 * 1024)).success).toBe(true);
+    expect(shouldUseMultipartUpload(300 * 1024 * 1024)).toBe(true);
   });
 
-  it('refuse une version au-delà de la limite de synchronisation', () => {
-    const result = ResourceRegisterSchema.safeParse(resourcePayload(MAX_SYNC_FILE_BYTES + 1));
-    expect(result.success).toBe(false);
+  it('bascule au multipart seulement au-delà du chemin simple', () => {
+    expect(shouldUseMultipartUpload(MULTIPART_UPLOAD_THRESHOLD_BYTES)).toBe(false);
+    expect(shouldUseMultipartUpload(MULTIPART_UPLOAD_THRESHOLD_BYTES + 1)).toBe(true);
+    expect(MultipartCreateSchema.safeParse({ partSize: MULTIPART_PART_BYTES }).success).toBe(true);
+  });
+
+  it('refuse seulement les métadonnées au-delà de la limite objet R2', () => {
+    expect(ResourceRegisterSchema.safeParse(resourcePayload(MAX_RESOURCE_FILE_BYTES)).success).toBe(true);
+    expect(ResourceRegisterSchema.safeParse(resourcePayload(MAX_RESOURCE_FILE_BYTES + 1)).success).toBe(false);
   });
 
   it('réserve le fallback serveur aux PDF en échec de 25 Mo maximum', () => {
