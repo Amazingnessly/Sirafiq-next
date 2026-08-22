@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_EXTRACTED_CHARS, MAX_EXTRACTED_PAGES, MAX_SYNC_FILE_BYTES } from './importPolicy';
 
 export const ResourceKindSchema = z.enum(['text', 'pdf']);
 export type ResourceKind = z.infer<typeof ResourceKindSchema>;
@@ -28,7 +29,7 @@ export const ResourceRegisterSchema = z.object({
     sha256: z.string().regex(/^[a-f0-9]{64}$/),
     fileName: z.string().min(1).max(255),
     mimeType: z.string().min(1).max(120),
-    size: z.number().int().nonnegative().max(25 * 1024 * 1024),
+    size: z.number().int().nonnegative().max(MAX_SYNC_FILE_BYTES),
     createdAt: z.string().datetime(),
   }),
 });
@@ -42,8 +43,8 @@ export type ExtractedPage = z.infer<typeof ExtractedPageSchema>;
 
 export const ExtractionUploadSchema = z.object({
   status: z.literal('ready'),
-  pages: z.array(ExtractedPageSchema).min(1).max(500),
-  charCount: z.number().int().nonnegative().max(2_000_000),
+  pages: z.array(ExtractedPageSchema).min(1).max(MAX_EXTRACTED_PAGES),
+  charCount: z.number().int().nonnegative().max(MAX_EXTRACTED_CHARS),
 });
 export type ExtractionUploadInput = z.infer<typeof ExtractionUploadSchema>;
 
@@ -52,6 +53,20 @@ export const ExtractionFailureSchema = z.object({
   message: z.string().min(1).max(1000),
 });
 export type ExtractionFailureInput = z.infer<typeof ExtractionFailureSchema>;
+
+export const ServerExtractionResultSchema = z.discriminatedUnion('status', [
+  z.object({
+    status: z.literal('ready'),
+    pages: z.array(ExtractedPageSchema).min(1).max(MAX_EXTRACTED_PAGES),
+    charCount: z.number().int().nonnegative().max(MAX_EXTRACTED_CHARS),
+  }),
+  z.object({
+    status: z.literal('failed'),
+    code: z.string().min(1).max(80),
+    message: z.string().min(1).max(1000),
+  }),
+]);
+export type ServerExtractionResult = z.infer<typeof ServerExtractionResultSchema>;
 
 export type ApiErrorPayload = {
   error: {
