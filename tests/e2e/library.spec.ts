@@ -20,6 +20,19 @@ test('matière → texte réel → persistance après rechargement', async ({ pa
   await expect(page.getByText('Sirāfiq conserve ce texte réel puis le restitue après rechargement.')).toBeVisible();
 });
 
+test('depuis une bibliothèque vide, la matière peut être créée dans le bloc import', async ({ page }) => {
+  await page.goto('/bibliotheque');
+
+  const importSubject = page.getByLabel('Nouvelle matière', { exact: true }).last();
+  await expect(page.getByText('Commencez par une matière')).toBeVisible();
+  await importSubject.fill('Onboarding E2E');
+  await page.getByRole('button', { name: 'Créer et continuer' }).click();
+
+  await expect(page.getByRole('button', { name: 'Texte', exact: true })).toBeVisible();
+  await expect(page.getByLabel('Matière')).toHaveValue(/.+/);
+  await expect(page.getByLabel('Matière').getByRole('option', { name: 'Onboarding E2E' })).toBeAttached();
+});
+
 test('un même contenu n’est pas importé deux fois localement', async ({ page }) => {
   await page.goto('/bibliotheque');
 
