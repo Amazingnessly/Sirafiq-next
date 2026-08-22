@@ -1,6 +1,11 @@
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { ExtractedPage } from '../shared/contracts';
+import {
+  LOCAL_PDF_EXTRACTION_MAX_BYTES,
+  MAX_EXTRACTED_CHARS,
+  MAX_EXTRACTED_PAGES,
+} from '../shared/importPolicy';
 import { readBlobAsArrayBuffer, readBlobAsText } from './blob';
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -15,17 +20,17 @@ export class DocumentExtractionError extends Error {
   }
 }
 
-const MAX_FILE_BYTES = 25 * 1024 * 1024;
-const MAX_EXTRACTED_CHARS = 2_000_000;
-const MAX_PAGES = 500;
-
 export async function extractDocument(file: File): Promise<ExtractedPage[]> {
-  if (file.size > MAX_FILE_BYTES) {
-    throw new DocumentExtractionError('Le fichier dépasse la limite de 25 Mo de cette première version.', 'TOO_LARGE');
-  }
-
   const extension = file.name.split('.').pop()?.toLowerCase();
-  if (file.type === 'application/pdf' || extension === 'pdf') {
+  const isPdf = file.type === 'application/pdf' || extension === 'pdf';
+
+  if (isPdf) {
+    if (file.size > LOCAL_PDF_EXTRACTION_MAX_BYTES) {
+      throw new DocumentExtractionError(
+        'Ce PDF dépasse 25 Mo pour l’extraction automatique locale. Le fichier peut toutefois être conservé et synchronisé.',
+        'TOO_LARGE',
+      );
+    }
     return extractPdf(file);
   }
 
@@ -47,8 +52,11 @@ async function extractPdf(file: File): Promise<ExtractedPage[]> {
   try {
     const data = new Uint8Array(await readBlobAsArrayBuffer(file));
     const pdf = await getDocument({ data }).promise;
-    if (pdf.numPages > MAX_PAGES) {
-      throw new DocumentExtractionError(`Ce PDF contient ${pdf.numPages} pages ; la limite actuelle est ${MAX_PAGES}.`, 'TOO_LARGE');
+    if (pdf.numPages > MAX_EXTRACTED_PAGES) {
+      throw new DocumentExtractionError(
+        `Ce PDF contient ${pdf.numPages} pages ; la limite actuelle est ${MAX_EXTRACTED_PAGES}.`,
+        'TOO_LARGE',
+      );
     }
 
     const pages: ExtractedPage[] = [];
@@ -72,13 +80,16 @@ async function extractPdf(file: File): Promise<ExtractedPage[]> {
     const meaningfulChars = pages.reduce((sum, page) => sum + page.text.replace(/\s/g, '').length, 0);
     if (meaningfulChars < 20) {
       throw new DocumentExtractionError(
-        'Le PDF semble scanné ou ne contient pas assez de texte extractible. Aucun exercice ne sera généré à partir de ce support.',
+        'Le lecteur PDF local n’a pas trouvé assez de texte exploitable. Une extraction serveur pourra être tentée après synchronisation.',
         'EMPTY_TEXT',
       );
     }
     return pages;
   } catch (error) {
     if (error instanceof DocumentExtractionError) throw error;
-    throw new DocumentExtractionError('Le PDF n’a pas pu être lu correctement.', 'UNREADABLE_PDF');
+    throw new DocumentExtractionError(
+      'Le lecteur PDF local n’a pas pu extraire ce document. Une extraction serveur pourra être tentée après synchronisation.',
+      'UNREADABLE_PDF',
+    );
   }
 }
