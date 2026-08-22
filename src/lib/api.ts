@@ -29,17 +29,7 @@ export async function apiJson<T>(path: string, init: RequestInit = {}, timeoutMs
       },
     });
 
-    if (!response.ok) {
-      const payload = await safeErrorPayload(response);
-      throw new ApiRequestError(
-        payload?.error.message ?? `La requête a échoué (${response.status}).`,
-        response.status,
-        payload?.error.code ?? 'HTTP_ERROR',
-        payload?.error.retryable ?? response.status >= 500,
-        payload?.error.details,
-      );
-    }
-
+    if (!response.ok) throw await toApiError(response, `La requête a échoué (${response.status}).`);
     if (response.status === 204) return undefined as T;
     return (await response.json()) as T;
   } catch (error) {
@@ -54,6 +44,17 @@ export async function apiJson<T>(path: string, init: RequestInit = {}, timeoutMs
 }
 
 export async function apiPutBlob(path: string, blob: Blob, mimeType: string, timeoutMs = 60_000): Promise<void> {
+  await apiPutBinary<void>(path, blob, mimeType, {}, timeoutMs, false);
+}
+
+export async function apiPutBinary<T>(
+  path: string,
+  blob: Blob,
+  mimeType: string,
+  headers: Record<string, string> = {},
+  timeoutMs = 120_000,
+  expectJson = true,
+): Promise<T> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -61,17 +62,11 @@ export async function apiPutBlob(path: string, blob: Blob, mimeType: string, tim
       method: 'PUT',
       body: blob,
       signal: controller.signal,
-      headers: { 'Content-Type': mimeType },
+      headers: { 'Content-Type': mimeType, ...headers },
     });
-    if (!response.ok) {
-      const payload = await safeErrorPayload(response);
-      throw new ApiRequestError(
-        payload?.error.message ?? `L’envoi du fichier a échoué (${response.status}).`,
-        response.status,
-        payload?.error.code ?? 'UPLOAD_ERROR',
-        payload?.error.retryable ?? response.status >= 500,
-      );
-    }
+    if (!response.ok) throw await toApiError(response, `L’envoi du fichier a échoué (${response.status}).`);
+    if (!expectJson || response.status === 204) return undefined as T;
+    return (await response.json()) as T;
   } catch (error) {
     if (error instanceof ApiRequestError) throw error;
     if (error instanceof DOMException && error.name === 'AbortError') {
@@ -81,6 +76,17 @@ export async function apiPutBlob(path: string, blob: Blob, mimeType: string, tim
   } finally {
     window.clearTimeout(timeout);
   }
+}
+
+async function toApiError(response: Response, fallback: string): Promise<ApiRequestError> {
+  const payload = await safeErrorPayload(response);
+  return new ApiRequestError(
+    payload?.error.message ?? fallback,
+    response.status,
+    payload?.error.code ?? 'HTTP_ERROR',
+    payload?.error.retryable ?? response.status >= 500,
+    payload?.error.details,
+  );
 }
 
 async function safeErrorPayload(response: Response): Promise<ApiErrorPayload | null> {
