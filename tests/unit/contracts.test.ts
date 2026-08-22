@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { ExtractionUploadSchema, MultipartCreateSchema, ResourceRegisterSchema } from '../../src/shared/contracts';
 import {
   MAX_RESOURCE_FILE_BYTES,
+  MULTIPART_MAX_PARTS,
   MULTIPART_PART_BYTES,
   MULTIPART_UPLOAD_THRESHOLD_BYTES,
+  multipartPartCount,
   shouldTryServerPdfExtraction,
   shouldUseMultipartUpload,
 } from '../../src/shared/importPolicy';
@@ -47,7 +49,8 @@ describe('contrats API', () => {
     expect(MultipartCreateSchema.safeParse({ partSize: MULTIPART_PART_BYTES }).success).toBe(true);
   });
 
-  it('refuse seulement les métadonnées au-delà de la limite objet R2', () => {
+  it('garantit au maximum les 10 000 parties permises par R2 avec les morceaux iPad de 8 MiB', () => {
+    expect(multipartPartCount(MAX_RESOURCE_FILE_BYTES)).toBe(MULTIPART_MAX_PARTS);
     expect(ResourceRegisterSchema.safeParse(resourcePayload(MAX_RESOURCE_FILE_BYTES)).success).toBe(true);
     expect(ResourceRegisterSchema.safeParse(resourcePayload(MAX_RESOURCE_FILE_BYTES + 1)).success).toBe(false);
   });
