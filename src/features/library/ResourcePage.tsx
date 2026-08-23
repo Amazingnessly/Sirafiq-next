@@ -13,7 +13,10 @@ import {
   retryServerExtractionForResource,
   type TransferProgress,
 } from '../../lib/sync';
-import { shouldTryServerPdfExtraction } from '../../shared/importPolicy';
+import {
+  SERVER_PDF_EXTRACTION_MAX_BYTES,
+  shouldTryServerPdfExtraction,
+} from '../../shared/importPolicy';
 import type { ExtractedPage, ResourceDetailPayload } from '../../shared/contracts';
 import { PdfViewer } from './PdfViewer';
 
@@ -51,6 +54,7 @@ export function ResourcePage() {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [extracting, setExtracting] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
+  const [extractionRetryError, setExtractionRetryError] = useState<string | null>(null);
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [resuming, setResuming] = useState(false);
   const [transferProgress, setTransferProgress] = useState<TransferProgress | null>(null);
@@ -84,6 +88,16 @@ export function ResourcePage() {
     && localResource.syncState === 'synced'
     && shouldTryServerPdfExtraction(localResource.kind, localVersion.size, localExtraction.status),
   );
+  const extractionRecoveryReason = getExtractionRecoveryReason({
+    kind,
+    extractionFailed,
+    hasPages: pages.length > 0,
+    syncState: localResource?.syncState,
+    size: localVersion?.size ?? remote.data?.version.size,
+    hasLocalExtraction: Boolean(localExtraction),
+    hasMultipartSession: Boolean(multipartSession),
+    canRetry: canRetryServerExtraction,
+  });
 
   async function retrySync() {
     if (!localResource) return;
@@ -120,11 +134,11 @@ export function ResourcePage() {
   async function retryExtraction() {
     if (!localResource || extracting) return;
     setExtracting(true);
-    setRetryError(null);
+    setExtractionRetryError(null);
     try {
       await retryServerExtractionForResource(localResource.id);
     } catch (error) {
-      setRetryError(error instanceof Error ? error.message : 'L’extraction serveur a échoué.');
+      setExtractionRetryError(error instanceof Error ? error.message : 'L’extraction serveur a échoué.');
     } finally {
       setExtracting(false);
     }
@@ -195,12 +209,6 @@ export function ResourcePage() {
                 ? 'Le fichier n’est pas encore déclaré entièrement stocké. Sirāfiq n’utilisera pas ce contenu pour des activités.'
                 : 'Le fichier reste conservé et consultable. Sirāfiq ne prétendra pas créer des activités à partir de ce contenu.'}
             </small>
-            {canRetryServerExtraction && (
-              <button className="button button--secondary" type="button" onClick={retryExtraction} disabled={extracting}>
-                {extracting ? 'Extraction en cours…' : 'Retenter l’extraction avec le serveur'}
-              </button>
-            )}
-            {!multipartSession && retryError && <span className="field-error">{retryError}</span>}
           </div>
         </div>
       )}
@@ -231,11 +239,46 @@ export function ResourcePage() {
               <p>{pages.length} bloc{pages.length > 1 ? 's' : ''} de texte disponible{pages.length > 1 ? 's' : ''} pour les prochaines activités.</p>
             </>
           ) : <p>Aucune donnée textuelle n’est déclarée utilisable.</p>}
+
+          {kind === 'pdf' && extractionFailed && !pages.length && (
+            <div className="source-recovery" aria-label="Récupération de l’extraction">
+              <strong>Récupération</strong>
+              {canRetryServerExtraction ? (
+                <button className="button button--secondary" type="button" onClick={retryExtraction} disabled={extracting}>
+                  {extracting ? 'Extraction en cours…' : 'Retenter l’extraction avec le serveur'}
+                </button>
+              ) : extractionRecoveryReason ? (
+                <p>{extractionRecoveryReason}</p>
+              ) : null}
+              {extractionRetryError && <span className="source-recovery__error" role="alert">{extractionRetryError}</span>}
+            </div>
+          )}
+
           <div className="source-note">Les activités pédagogiques ne sont pas encore activées dans cette version.</div>
         </aside>
       </div>
     </div>
   );
+}
+
+function getExtractionRecoveryReason(input: {
+  kind: 'text' | 'pdf' | undefined;
+  extractionFailed: boolean;
+  hasPages: boolean;
+  syncState: 'pending' | 'synced' | 'error' | undefined;
+  size: number | undefined;
+  hasLocalExtraction: boolean;
+  hasMultipartSession: boolean;
+  canRetry: boolean;
+}): string | null {
+  if (input.kind !== 'pdf' || !input.extractionFailed || input.hasPages || input.canRetry) return null;
+  if (input.hasMultipartSession) return 'Terminez d’abord l’envoi du fichier. L’extraction ne sera jamais lancée sur un PDF partiellement stocké.';
+  if (input.size !== undefined && input.size > SERVER_PDF_EXTRACTION_MAX_BYTES) {
+    return `La reprise serveur actuelle est limitée aux PDF de ${formatBytes(SERVER_PDF_EXTRACTION_MAX_BYTES)} maximum. Le fichier reste consultable, mais aucune extraction automatique n’est prétendue pour ce volume.`;
+  }
+  if (input.syncState !== 'synced') return 'Le PDF doit d’abord être entièrement synchronisé avant qu’une extraction serveur puisse être relancée.';
+  if (!input.hasLocalExtraction) return 'L’état local d’extraction est incomplet. Aucune relance ne sera proposée tant qu’il n’est pas cohérent.';
+  return 'La reprise serveur n’est pas disponible pour cet état du support.';
 }
 
 function progressLabel(progress: TransferProgress): string {
