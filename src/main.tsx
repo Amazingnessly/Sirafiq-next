@@ -6,6 +6,7 @@ import { App } from './app/App';
 import { installSyncTriggers } from './lib/sync';
 import './styles/index.css';
 import './styles/pdf-reader.css';
+import './styles/extraction-recovery.css';
 
 const queryClient = new QueryClient({
   defaultOptions: {
