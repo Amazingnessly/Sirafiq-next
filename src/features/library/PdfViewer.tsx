@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import type { PDFDocumentProxy, PDFRenderTask } from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
 
 type PdfViewerProps = {
@@ -7,11 +6,42 @@ type PdfViewerProps = {
   title: string;
 };
 
+type PdfViewport = {
+  width: number;
+  height: number;
+};
+
+type PdfRenderTask = {
+  promise: Promise<void>;
+  cancel: () => void;
+};
+
+type PdfPage = {
+  getViewport: (options: { scale: number }) => PdfViewport;
+  render: (options: {
+    canvasContext: CanvasRenderingContext2D;
+    viewport: PdfViewport;
+    transform?: [number, number, number, number, number, number];
+    canvas: HTMLCanvasElement;
+  }) => PdfRenderTask;
+};
+
+type PdfDocument = {
+  numPages: number;
+  getPage: (pageNumber: number) => Promise<PdfPage>;
+  destroy: () => Promise<void>;
+};
+
+type PdfLoadingTask = {
+  promise: Promise<PdfDocument>;
+  destroy: () => Promise<void>;
+};
+
 export function PdfViewer({ src, title }: PdfViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
-  const documentRef = useRef<PDFDocumentProxy | null>(null);
-  const renderTaskRef = useRef<PDFRenderTask | null>(null);
+  const documentRef = useRef<PdfDocument | null>(null);
+  const renderTaskRef = useRef<PdfRenderTask | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
   const [pageCount, setPageCount] = useState(0);
   const [stageWidth, setStageWidth] = useState(0);
@@ -38,7 +68,7 @@ export function PdfViewer({ src, title }: PdfViewerProps) {
 
   useEffect(() => {
     let cancelled = false;
-    let loadingTask: { destroy: () => Promise<void>; promise: Promise<PDFDocumentProxy> } | null = null;
+    let loadingTask: PdfLoadingTask | null = null;
 
     setLoadingDocument(true);
     setError(null);
@@ -52,14 +82,14 @@ export function PdfViewer({ src, title }: PdfViewerProps) {
         loadingTask = pdfjs.getDocument({
           url: src,
           rangeChunkSize: 512 * 1024,
-        });
-        const pdf = await loadingTask.promise;
+        }) as unknown as PdfLoadingTask;
+        const pdfDocument = await loadingTask.promise;
         if (cancelled) {
-          await pdf.destroy();
+          await pdfDocument.destroy();
           return;
         }
-        documentRef.current = pdf;
-        setPageCount(pdf.numPages);
+        documentRef.current = pdfDocument;
+        setPageCount(pdfDocument.numPages);
       } catch (cause) {
         if (!cancelled) {
           setError(cause instanceof Error ? cause.message : 'Le PDF n’a pas pu être ouvert.');
@@ -75,17 +105,17 @@ export function PdfViewer({ src, title }: PdfViewerProps) {
       cancelled = true;
       renderTaskRef.current?.cancel();
       renderTaskRef.current = null;
-      const pdf = documentRef.current;
+      const currentDocument = documentRef.current;
       documentRef.current = null;
-      if (pdf) void pdf.destroy();
+      if (currentDocument) void currentDocument.destroy();
       else if (loadingTask) void loadingTask.destroy();
     };
   }, [src]);
 
   useEffect(() => {
-    const pdf = documentRef.current;
-    const canvas = canvasRef.current;
-    if (!pdf || !canvas || !pageCount || !stageWidth) return;
+    const currentDocument = documentRef.current;
+    const currentCanvas = canvasRef.current;
+    if (!currentDocument || !currentCanvas || !pageCount || !stageWidth) return;
 
     let cancelled = false;
     setRenderingPage(true);
@@ -94,7 +124,7 @@ export function PdfViewer({ src, title }: PdfViewerProps) {
     async function renderPage() {
       try {
         renderTaskRef.current?.cancel();
-        const page = await pdf.getPage(pageNumber);
+        const page = await currentDocument.getPage(pageNumber);
         if (cancelled) return;
 
         const baseViewport = page.getViewport({ scale: 1 });
@@ -102,16 +132,16 @@ export function PdfViewer({ src, title }: PdfViewerProps) {
         const cssScale = Math.min(2, availableWidth / baseViewport.width);
         const viewport = page.getViewport({ scale: cssScale });
         const outputScale = Math.min(window.devicePixelRatio || 1, 1.5);
-        const context = canvas.getContext('2d', { alpha: false });
+        const context = currentCanvas.getContext('2d', { alpha: false });
         if (!context) throw new Error('Le moteur de dessin du navigateur est indisponible.');
 
-        canvas.width = Math.max(1, Math.floor(viewport.width * outputScale));
-        canvas.height = Math.max(1, Math.floor(viewport.height * outputScale));
-        canvas.style.width = `${Math.floor(viewport.width)}px`;
-        canvas.style.height = `${Math.floor(viewport.height)}px`;
+        currentCanvas.width = Math.max(1, Math.floor(viewport.width * outputScale));
+        currentCanvas.height = Math.max(1, Math.floor(viewport.height * outputScale));
+        currentCanvas.style.width = `${Math.floor(viewport.width)}px`;
+        currentCanvas.style.height = `${Math.floor(viewport.height)}px`;
 
         const transform = outputScale === 1 ? undefined : [outputScale, 0, 0, outputScale, 0, 0] as [number, number, number, number, number, number];
-        const renderTask = page.render({ canvasContext: context, viewport, transform, canvas });
+        const renderTask = page.render({ canvasContext: context, viewport, transform, canvas: currentCanvas });
         renderTaskRef.current = renderTask;
         await renderTask.promise;
       } catch (cause) {
