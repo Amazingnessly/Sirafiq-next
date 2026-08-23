@@ -1,0 +1,36 @@
+.source-recovery {
+  margin-top: 18px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(111, 44, 63, .12);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, .52);
+}
+
+.source-recovery > strong {
+  color: var(--wine-deep);
+  font-size: 12px;
+}
+
+.source-recovery .button {
+  width: 100%;
+  min-height: 48px;
+  padding-left: 14px;
+  padding-right: 14px;
+  text-align: center;
+  line-height: 1.25;
+}
+
+.source-recovery p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.source-recovery__error {
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 1.45;
+}
