@@ -102,8 +102,14 @@ test('un PDF synchronisé expose la reprise serveur dans État réel puis appliq
   await retry.click();
 
   await expect(page.getByText('caractères extraits', { exact: true })).toBeVisible();
-  await expect(page.getByText(extractedText, { exact: true })).toBeVisible();
   await expect(page.getByLabel('Récupération de l’extraction')).toHaveCount(0);
+  await expect.poll(async () => page.evaluate(async ({ versionId, expectedText }) => {
+    const { db } = await import('/src/data/db.ts');
+    const extraction = await db.extractions.get(versionId);
+    return extraction?.status === 'ready'
+      && extraction.charCount === expectedText.length
+      && extraction.pages[0]?.text === expectedText;
+  }, { versionId: VERSION_ID, expectedText: extractedText })).toBe(true);
 });
 
 test('un PDF non synchronisé explique pourquoi la reprise serveur est indisponible', async ({ page }) => {
