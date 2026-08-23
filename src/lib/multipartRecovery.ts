@@ -21,8 +21,9 @@ export async function uploadMultipartResourceWithRecovery(
   file: File,
   onProgress?: (progress: TransferProgress) => void,
 ): Promise<void> {
+  // If the final R2 assembly succeeded but its HTTP response was lost, do not
+  // resend a large file: reconcile the durable remote state first.
   if (await reconcileAlreadyStoredRemote(resourceId)) return;
-  await restartFinishedButUnfinalizedSession(resourceId);
 
   let lastPhase: TransferProgress['phase'] | null = null;
   const forwardProgress = (progress: TransferProgress) => {
@@ -31,6 +32,8 @@ export async function uploadMultipartResourceWithRecovery(
   };
 
   try {
+    // Keep the existing upload id and confirmed parts first. If all parts are
+    // already present, the proven path simply retries complete() without upload.
     await uploadMultipartResource(resourceId, file, forwardProgress);
   } catch (error) {
     const canRecoverFinalization = lastPhase === 'finalizing'
@@ -38,12 +41,11 @@ export async function uploadMultipartResourceWithRecovery(
       && FINALIZATION_RECOVERY_CODES.has(error.code);
     if (!canRecoverFinalization) throw error;
 
-    // A lost response can happen after R2 has already assembled the object.
-    // Reconcile that state before ever sending the large file again.
+    // complete() may have succeeded in R2 before the response disappeared.
     if (await reconcileAlreadyStoredRemote(resourceId)) return;
 
-    // If R2 did not finish, the old upload can no longer be trusted. Restart
-    // once with a fresh upload id, then let the proven multipart path run again.
+    // Otherwise the old upload can no longer be trusted (for example an
+    // expired R2 multipart id). Create exactly one fresh session and retry.
     await forceFreshMultipartSession(resourceId);
     await uploadMultipartResource(resourceId, file, forwardProgress);
   }
@@ -103,20 +105,6 @@ async function reconcileAlreadyStoredRemote(resourceId: string): Promise<boolean
     await db.multipartUploads.delete(version.id);
   });
   return true;
-}
-
-async function restartFinishedButUnfinalizedSession(resourceId: string): Promise<void> {
-  const resource = await db.resources.get(resourceId);
-  if (!resource) throw new Error('Le support local est introuvable.');
-  const session = await db.multipartUploads.get(resource.currentVersionId);
-  if (!session || session.status !== 'error' || !session.uploadId || !session.partSize) return;
-
-  const expectedPartCount = Math.ceil(session.size / session.partSize);
-  const completePartSet = session.parts.length === expectedPartCount
-    && session.parts.every((part, index) => part.partNumber === index + 1);
-  if (!completePartSet) return;
-
-  await forceFreshMultipartSession(resourceId);
 }
 
 async function forceFreshMultipartSession(resourceId: string): Promise<void> {
