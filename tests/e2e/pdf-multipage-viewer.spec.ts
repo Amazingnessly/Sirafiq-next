@@ -5,6 +5,7 @@ const VERSION_ID = '88888888-8888-4888-8888-888888888888';
 const SUBJECT_ID = '99999999-9999-4999-8999-999999999999';
 
 function makeTwoPagePdf(): Buffer {
+  const filler = 'x'.repeat(2 * 1024 * 1024);
   const objects = [
     '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
     '2 0 obj\n<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>\nendobj\n',
@@ -13,6 +14,7 @@ function makeTwoPagePdf(): Buffer {
     '5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n',
     '6 0 obj\n<< /Length 37 >>\nstream\nBT /F1 24 Tf 72 720 Td (Page 1) Tj ET\nendstream\nendobj\n',
     '7 0 obj\n<< /Length 37 >>\nstream\nBT /F1 24 Tf 72 720 Td (Page 2) Tj ET\nendstream\nendobj\n',
+    `8 0 obj\n<< /Length ${filler.length} >>\nstream\n${filler}\nendstream\nendobj\n`,
   ];
 
   let pdf = '%PDF-1.4\n';
@@ -31,8 +33,18 @@ function makeTwoPagePdf(): Buffer {
   return Buffer.from(pdf, 'ascii');
 }
 
-test('affiche et navigue les pages d’un PDF sans iframe Safari', async ({ page }) => {
+function parseRange(header: string, total: number): { start: number; end: number } | null {
+  const match = /^bytes=(\d+)-(\d*)$/i.exec(header.trim());
+  if (!match) return null;
+  const start = Number(match[1]);
+  const requestedEnd = match[2] ? Number(match[2]) : total - 1;
+  if (!Number.isInteger(start) || !Number.isInteger(requestedEnd) || start < 0 || start >= total || requestedEnd < start) return null;
+  return { start, end: Math.min(requestedEnd, total - 1) };
+}
+
+test('affiche et navigue un PDF distant multipage avec des requêtes Range', async ({ page }) => {
   const pdf = makeTwoPagePdf();
+  const rangeRequests: string[] = [];
 
   await page.route('**/api/**', async (route) => {
     const request = route.request();
@@ -44,9 +56,32 @@ test('affiche et navigue les pages d’un PDF sans iframe Safari', async ({ page
     }
 
     if (request.method() === 'GET' && url.pathname === `/api/resource-versions/${VERSION_ID}/blob`) {
+      const rangeHeader = request.headers()['range'];
+      if (rangeHeader) {
+        const range = parseRange(rangeHeader, pdf.length);
+        if (!range) {
+          await route.fulfill({ status: 416, headers: { 'Content-Range': `bytes */${pdf.length}` } });
+          return;
+        }
+        rangeRequests.push(rangeHeader);
+        const body = pdf.subarray(range.start, range.end + 1);
+        await route.fulfill({
+          status: 206,
+          headers: {
+            'Accept-Ranges': 'bytes',
+            'Content-Type': 'application/pdf',
+            'Content-Length': String(body.length),
+            'Content-Range': `bytes ${range.start}-${range.end}/${pdf.length}`,
+          },
+          body,
+        });
+        return;
+      }
+
       await route.fulfill({
         status: 200,
         headers: {
+          'Accept-Ranges': 'bytes',
           'Content-Type': 'application/pdf',
           'Content-Length': String(pdf.length),
         },
@@ -105,9 +140,11 @@ test('affiche et navigue les pages d’un PDF sans iframe Safari', async ({ page
 
   await page.goto(`/bibliotheque/${RESOURCE_ID}`);
 
+  await expect(page.getByText('Synchronisé', { exact: true })).toBeVisible();
   await expect(page.getByText('Page 1 sur 2', { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.pdf-reader canvas')).toBeVisible();
   await expect(page.locator('iframe')).toHaveCount(0);
+  await expect.poll(() => rangeRequests.length, { timeout: 10_000 }).toBeGreaterThan(0);
 
   await page.getByRole('button', { name: 'Page suivante' }).click();
   await expect(page.getByText('Page 2 sur 2', { exact: true })).toBeVisible();
