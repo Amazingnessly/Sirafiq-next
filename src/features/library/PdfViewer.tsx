@@ -121,10 +121,10 @@ export function PdfViewer({ src, title }: PdfViewerProps) {
     setRenderingPage(true);
     setError(null);
 
-    async function renderPage() {
+    async function renderPage(pdfDocument: PdfDocument, canvasElement: HTMLCanvasElement) {
       try {
         renderTaskRef.current?.cancel();
-        const page = await currentDocument.getPage(pageNumber);
+        const page = await pdfDocument.getPage(pageNumber);
         if (cancelled) return;
 
         const baseViewport = page.getViewport({ scale: 1 });
@@ -132,16 +132,16 @@ export function PdfViewer({ src, title }: PdfViewerProps) {
         const cssScale = Math.min(2, availableWidth / baseViewport.width);
         const viewport = page.getViewport({ scale: cssScale });
         const outputScale = Math.min(window.devicePixelRatio || 1, 1.5);
-        const context = currentCanvas.getContext('2d', { alpha: false });
+        const context = canvasElement.getContext('2d', { alpha: false });
         if (!context) throw new Error('Le moteur de dessin du navigateur est indisponible.');
 
-        currentCanvas.width = Math.max(1, Math.floor(viewport.width * outputScale));
-        currentCanvas.height = Math.max(1, Math.floor(viewport.height * outputScale));
-        currentCanvas.style.width = `${Math.floor(viewport.width)}px`;
-        currentCanvas.style.height = `${Math.floor(viewport.height)}px`;
+        canvasElement.width = Math.max(1, Math.floor(viewport.width * outputScale));
+        canvasElement.height = Math.max(1, Math.floor(viewport.height * outputScale));
+        canvasElement.style.width = `${Math.floor(viewport.width)}px`;
+        canvasElement.style.height = `${Math.floor(viewport.height)}px`;
 
         const transform = outputScale === 1 ? undefined : [outputScale, 0, 0, outputScale, 0, 0] as [number, number, number, number, number, number];
-        const renderTask = page.render({ canvasContext: context, viewport, transform, canvas: currentCanvas });
+        const renderTask = page.render({ canvasContext: context, viewport, transform, canvas: canvasElement });
         renderTaskRef.current = renderTask;
         await renderTask.promise;
       } catch (cause) {
@@ -153,7 +153,7 @@ export function PdfViewer({ src, title }: PdfViewerProps) {
       }
     }
 
-    void renderPage();
+    void renderPage(currentDocument, currentCanvas);
     return () => {
       cancelled = true;
       renderTaskRef.current?.cancel();
