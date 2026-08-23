@@ -101,7 +101,7 @@ test('un doublon déjà synchronisé est réutilisé puis extrait sans réenvoye
   await expect(page.getByRole('heading', { name: 'PDF doublon distant' })).toBeVisible();
   await page.getByRole('heading', { name: 'PDF doublon distant' }).click();
 
-  await expect(page.getByText('Prêt', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Synchronisé', { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText('caractères extraits', { exact: true })).toBeVisible();
   await expect(page.getByText('Le support est enregistré localement, mais la synchronisation a échoué.')).toHaveCount(0);
   expect(uploadAttempts).toBe(0);
