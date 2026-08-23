@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { App } from './app/App';
 import { installSyncTriggers } from './lib/sync';
 import './styles/index.css';
+import './styles/pdf-reader.css';
 
 const queryClient = new QueryClient({
   defaultOptions: {
