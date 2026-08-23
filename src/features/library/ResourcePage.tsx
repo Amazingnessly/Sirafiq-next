@@ -15,6 +15,7 @@ import {
 } from '../../lib/sync';
 import { shouldTryServerPdfExtraction } from '../../shared/importPolicy';
 import type { ExtractedPage, ResourceDetailPayload } from '../../shared/contracts';
+import { PdfViewer } from './PdfViewer';
 
 export function ResourcePage() {
   const { resourceId = '' } = useParams();
@@ -206,7 +207,7 @@ export function ResourcePage() {
 
       <div className={`viewer-layout${kind === 'pdf' ? ' viewer-layout--pdf' : ''}`}>
         {kind === 'pdf' ? (
-          pdfUrl ? <section className="document-viewer"><iframe src={pdfUrl} title={`PDF — ${title}`} /></section>
+          pdfUrl ? <PdfViewer src={pdfUrl} title={title} />
             : <div className="loading-card">{multipartSession ? 'Le PDF sera consultable après la finalisation de l’envoi.' : 'Le fichier PDF n’est pas disponible.'}</div>
         ) : (
           <section className="text-viewer">
