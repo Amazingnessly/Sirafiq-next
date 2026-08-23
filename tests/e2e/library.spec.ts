@@ -94,7 +94,7 @@ test('un PDF refusé par le lecteur local peut être récupéré par le fallback
   await expect(page.getByRole('heading', { name: 'PDF fallback' })).toBeVisible();
   await page.getByRole('heading', { name: 'PDF fallback' }).click();
 
-  await expect(page.getByText('Prêt', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText('Synchronisé', { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText('caractères extraits', { exact: true })).toBeVisible();
   await expect(page.getByText('Contenu non exploitable automatiquement')).toHaveCount(0);
 });

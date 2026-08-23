@@ -79,9 +79,12 @@ export function PdfViewer({ src, title }: PdfViewerProps) {
       try {
         const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
         pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+        const isServerDocument = src.startsWith('/api/resource-versions/');
         loadingTask = pdfjs.getDocument({
           url: src,
           rangeChunkSize: 512 * 1024,
+          disableStream: isServerDocument,
+          disableAutoFetch: isServerDocument,
         }) as unknown as PdfLoadingTask;
         const pdfDocument = await loadingTask.promise;
         if (cancelled) {
