@@ -71,7 +71,6 @@ async function seedInterruptedMultipart(page: Parameters<typeof test>[0]['page']
 test('une réponse de finalisation perdue est réconciliée sans renvoyer le fichier', async ({ page }) => {
   const fileBytes = Buffer.alloc(11 * MIB, 3);
   const sha256 = createHash('sha256').update(fileBytes).digest('hex');
-  let resourceReads = 0;
   let completeCalls = 0;
   let partUploads = 0;
   let restartCreates = 0;
@@ -85,8 +84,7 @@ test('une réponse de finalisation perdue est réconciliée sans renvoyer le fic
       return;
     }
     if (request.method() === 'GET' && url.pathname === `/api/resources/${RESOURCE_ID}`) {
-      resourceReads += 1;
-      const stored = resourceReads >= 2;
+      const stored = completeCalls >= 1;
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
