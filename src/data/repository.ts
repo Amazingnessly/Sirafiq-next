@@ -9,7 +9,8 @@ import {
 import { readBlobAsArrayBuffer } from '../lib/blob';
 import { sha256ArrayBuffer, sha256Hex } from '../lib/hash';
 import { isoNow, newId } from '../lib/ids';
-import { requestSync, uploadMultipartResource, type TransferProgress } from '../lib/sync';
+import { uploadMultipartResourceWithRecovery } from '../lib/multipartRecovery';
+import { requestSync, type TransferProgress } from '../lib/sync';
 import {
   MAX_RESOURCE_FILE_BYTES,
   MULTIPART_PART_BYTES,
@@ -61,7 +62,7 @@ export async function importFile(
     const existingResource = await db.resources.get(existingVersion.resourceId);
     if (!existingResource) throw new Error('Le support à reprendre est incomplet dans le stockage local.');
     await requestSync();
-    await uploadMultipartResource(existingResource.id, file, onProgress);
+    await uploadMultipartResourceWithRecovery(existingResource.id, file, onProgress);
     return (await db.resources.get(existingResource.id)) ?? existingResource;
   }
 
@@ -104,7 +105,7 @@ export async function importFile(
 
     // Ensure a newly created subject reaches D1 before resource registration.
     await requestSync();
-    await uploadMultipartResource(resource.id, file, onProgress);
+    await uploadMultipartResourceWithRecovery(resource.id, file, onProgress);
     return (await db.resources.get(resource.id)) ?? resource;
   }
 
