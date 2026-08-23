@@ -7,10 +7,10 @@ import { retrySyncForResource } from '../../data/repository';
 import { useDexieQuery } from '../../data/useDexieQuery';
 import { apiJson } from '../../lib/api';
 import { sha256Hex } from '../../lib/hash';
+import { uploadMultipartResourceWithRecovery } from '../../lib/multipartRecovery';
 import {
   requestSync,
   retryServerExtractionForResource,
-  uploadMultipartResource,
   type TransferProgress,
 } from '../../lib/sync';
 import { shouldTryServerPdfExtraction } from '../../shared/importPolicy';
@@ -108,7 +108,7 @@ export function ResourcePage() {
       });
       if (sha256 !== multipartSession.sha256) throw new Error('Ce n’est pas le même fichier : son empreinte SHA-256 ne correspond pas.');
       await requestSync();
-      await uploadMultipartResource(localResource.id, resumeFile, setTransferProgress);
+      await uploadMultipartResourceWithRecovery(localResource.id, resumeFile, setTransferProgress);
       setResumeFile(null);
     } catch (error) {
       setRetryError(error instanceof Error ? error.message : 'La reprise de l’envoi a échoué.');
