@@ -7,6 +7,7 @@ import { installSyncTriggers } from './lib/sync';
 import './styles/index.css';
 import './styles/pdf-reader.css';
 import './styles/extraction-recovery.css';
+import './styles/build-identity.css';
 
 const queryClient = new QueryClient({
   defaultOptions: {
