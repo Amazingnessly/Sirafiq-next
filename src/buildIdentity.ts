@@ -6,12 +6,10 @@ export type BuildIdentity = {
   isLocal: boolean;
 };
 
-const sha = __SIRAFIQ_BUILD_SHA__;
-
 export const buildIdentity: BuildIdentity = {
-  version: __SIRAFIQ_VERSION__,
-  sha,
-  shortSha: sha === 'local' ? 'local' : sha.slice(0, 8),
-  branch: __SIRAFIQ_BUILD_BRANCH__,
-  isLocal: sha === 'local',
+  version: '0.1.0',
+  sha: 'local',
+  shortSha: 'local',
+  branch: 'local',
+  isLocal: true,
 };
