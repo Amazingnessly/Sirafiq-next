@@ -1,0 +1,46 @@
+{
+  "name": "sirafiq-next",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build:identity": "node scripts/generate-build-identity.mjs",
+    "dev": "npm run build:identity && vite",
+    "build": "npm run build:identity && tsc -b && vite build",
+    "typecheck": "npm run build:identity && tsc -b --pretty false",
+    "cf:types": "wrangler types",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "db:migrate:preview": "wrangler d1 migrations apply DB --config dist/sirafiq_next/wrangler.json --remote",
+    "prepare:local": "npm run cf:types && npm run db:migrate:local",
+    "test": "vitest run tests/unit",
+    "test:e2e": "playwright test",
+    "check": "npm run cf:types && npm run typecheck && npm run test && npm run build",
+    "deploy": "npm run cf:types && npm run build:identity && vite build && npm run db:migrate:remote && wrangler deploy",
+    "deploy:preview": "npm run cf:types && node scripts/ensure-preview-d1.mjs && npm run build:identity && CLOUDFLARE_ENV=preview vite build && npm run db:migrate:preview && CLOUDFLARE_ENV=preview wrangler deploy"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "5.101.4",
+    "dexie": "4.4.5",
+    "pdfjs-dist": "6.2.108",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-router-dom": "7.18.2",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.53.0",
+    "@playwright/test": "1.62.1",
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.0",
+    "@types/react-dom": "19.2.0",
+    "@vitejs/plugin-react": "6.0.5",
+    "typescript": "7.0.2",
+    "vite": "8.2.1",
+    "vitest": "4.1.11",
+    "wrangler": "4.125.0"
+  }
+}
