@@ -10,5 +10,9 @@
     "noEmit": true,
     "types": ["./worker-configuration.d.ts"]
   },
-  "include": ["worker/**/*.ts", "src/shared/**/*.ts"]
+  "include": [
+    "worker/**/*.ts",
+    "src/shared/**/*.ts",
+    "src/buildIdentity.ts"
+  ]
 }

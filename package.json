@@ -7,9 +7,10 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "typecheck": "tsc -b --pretty false",
+    "build:identity": "node scripts/generate-build-identity.mjs",
+    "dev": "npm run build:identity && vite",
+    "build": "npm run build:identity && tsc -b && vite build",
+    "typecheck": "npm run build:identity && tsc -b --pretty false",
     "cf:types": "wrangler types",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
@@ -18,8 +19,8 @@
     "test": "vitest run tests/unit",
     "test:e2e": "playwright test",
     "check": "npm run cf:types && npm run typecheck && npm run test && npm run build",
-    "deploy": "npm run cf:types && vite build && npm run db:migrate:remote && wrangler deploy",
-    "deploy:preview": "npm run cf:types && node scripts/ensure-preview-d1.mjs && CLOUDFLARE_ENV=preview vite build && npm run db:migrate:preview && CLOUDFLARE_ENV=preview wrangler deploy"
+    "deploy": "npm run cf:types && npm run build:identity && vite build && npm run db:migrate:remote && wrangler deploy",
+    "deploy:preview": "npm run cf:types && node scripts/ensure-preview-d1.mjs && npm run build:identity && CLOUDFLARE_ENV=preview vite build && npm run db:migrate:preview && CLOUDFLARE_ENV=preview wrangler deploy"
   },
   "dependencies": {
     "@tanstack/react-query": "5.101.4",

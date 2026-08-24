@@ -1,9 +1,10 @@
 import { NavLink, Outlet } from 'react-router-dom';
+import { buildIdentity } from '../buildIdentity';
 import { SyncIndicator } from '../components/SyncIndicator';
 
 export function AppShell() {
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-build-sha={buildIdentity.sha}>
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark" aria-hidden="true">س</div>
@@ -27,6 +28,14 @@ export function AppShell() {
         <div className="sidebar-spacer" />
         <SyncIndicator />
         <p className="sidebar-note">Seules les fonctions réellement actives sont affichées.</p>
+        <div
+          className="build-identity"
+          aria-label={`Version ${buildIdentity.version}, build ${buildIdentity.shortSha}`}
+          title={`${buildIdentity.branch} · ${buildIdentity.sha}`}
+        >
+          <span>V{buildIdentity.version}</span>
+          <strong>Build {buildIdentity.shortSha}</strong>
+        </div>
       </aside>
 
       <main className="main-content">
