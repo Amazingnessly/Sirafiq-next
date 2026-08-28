@@ -65,6 +65,16 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
+function dataUrlToBlob(dataUrl: string): Blob {
+  const [header, payload] = dataUrl.split(',', 2);
+  if (!header || payload === undefined) throw new Error('Fichier local illisible.');
+  const mime = header.match(/^data:([^;,]+)/)?.[1] || 'application/octet-stream';
+  const bytes = header.includes(';base64') ? atob(payload) : decodeURIComponent(payload);
+  const array = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i += 1) array[i] = bytes.charCodeAt(i);
+  return new Blob([array], { type: mime });
+}
+
 const allowedExtensions = ['pdf', 'txt', 'md', 'doc', 'docx', 'ppt', 'pptx', 'epub'];
 
 function App() {
@@ -88,14 +98,7 @@ function App() {
         if (!allowedExtensions.includes(extension)) throw new Error(`Format non pris en charge : ${file.name}`);
         if (file.size > 25 * 1024 * 1024) throw new Error(`${file.name} dépasse la limite de 25 Mo.`);
         const dataUrl = await fileToDataUrl(file);
-        await saveSupport({
-          id: crypto.randomUUID(),
-          name: file.name,
-          type: file.type || extension,
-          size: file.size,
-          importedAt: new Date().toISOString(),
-          dataUrl,
-        });
+        await saveSupport({ id: crypto.randomUUID(), name: file.name, type: file.type || extension, size: file.size, importedAt: new Date().toISOString(), dataUrl });
       }
       await refresh();
       setStatus(`${files.length} support${files.length > 1 ? 's' : ''} importé${files.length > 1 ? 's' : ''} avec succès.`);
@@ -103,6 +106,18 @@ function App() {
       setStatus(error instanceof Error ? error.message : "Échec de l'import.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const openSupport = (support: Support) => {
+    try {
+      const blob = dataUrlToBlob(support.dataUrl);
+      const objectUrl = URL.createObjectURL(blob);
+      const opened = window.open(objectUrl, '_blank');
+      if (!opened) window.location.assign(objectUrl);
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch {
+      setStatus("Impossible d'ouvrir ce support. Réimporte-le puis réessaie.");
     }
   };
 
@@ -121,14 +136,13 @@ function App() {
       <button className="primary" disabled={busy} onClick={() => inputRef.current?.click()}>{busy ? 'Import en cours…' : 'Importer un support'}</button>
       {status && <p className="status" role="status">{status}</p>}
     </header>
-
     <section className="library">
       <div className="section-title"><div><span>Bibliothèque</span><h2>Mes supports</h2></div><strong>{supports.length}</strong></div>
       {supports.length === 0 ? <div className="empty"><h3>Aucun support importé</h3><p>PDF, documents, présentations, EPUB et fichiers texte sont acceptés.</p></div> :
         <div className="grid">{supports.map(support => <article className="card" key={support.id}>
           <div className="file-mark">{support.name.split('.').pop()?.toUpperCase()}</div>
           <div className="card-copy"><h3>{support.name}</h3><p>{(support.size / 1024 / 1024).toFixed(2)} Mo · {new Date(support.importedAt).toLocaleDateString('fr-FR')}</p></div>
-          <div className="actions"><a href={support.dataUrl} download={support.name}>Ouvrir</a><button onClick={() => remove(support.id)}>Supprimer</button></div>
+          <div className="actions"><button type="button" onClick={() => openSupport(support)}>Ouvrir</button><button type="button" onClick={() => remove(support.id)}>Supprimer</button></div>
         </article>)}</div>}
     </section>
   </main>;
