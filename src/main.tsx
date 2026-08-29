@@ -8,7 +8,8 @@ type Support = {
   type: string;
   size: number;
   importedAt: string;
-  dataUrl: string;
+  blob?: Blob;
+  dataUrl?: string;
 };
 
 const DB_NAME = 'sirafiq-next';
@@ -56,15 +57,6 @@ async function deleteSupport(id: string) {
   });
 }
 
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
-
 function dataUrlToBlob(dataUrl: string): Blob {
   const [header, payload] = dataUrl.split(',', 2);
   if (!header || payload === undefined) throw new Error('Fichier local illisible.');
@@ -73,6 +65,12 @@ function dataUrlToBlob(dataUrl: string): Blob {
   const array = new Uint8Array(bytes.length);
   for (let i = 0; i < bytes.length; i += 1) array[i] = bytes.charCodeAt(i);
   return new Blob([array], { type: mime });
+}
+
+function supportToBlob(support: Support): Blob {
+  if (support.blob instanceof Blob) return support.blob;
+  if (support.dataUrl) return dataUrlToBlob(support.dataUrl);
+  throw new Error('Fichier local illisible.');
 }
 
 const allowedExtensions = ['pdf', 'txt', 'md', 'doc', 'docx', 'ppt', 'pptx', 'epub'];
@@ -97,8 +95,14 @@ function App() {
         const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
         if (!allowedExtensions.includes(extension)) throw new Error(`Format non pris en charge : ${file.name}`);
         if (file.size > 25 * 1024 * 1024) throw new Error(`${file.name} dépasse la limite de 25 Mo.`);
-        const dataUrl = await fileToDataUrl(file);
-        await saveSupport({ id: crypto.randomUUID(), name: file.name, type: file.type || extension, size: file.size, importedAt: new Date().toISOString(), dataUrl });
+        await saveSupport({
+          id: crypto.randomUUID(),
+          name: file.name,
+          type: file.type || extension,
+          size: file.size,
+          importedAt: new Date().toISOString(),
+          blob: file,
+        });
       }
       await refresh();
       setStatus(`${files.length} support${files.length > 1 ? 's' : ''} importé${files.length > 1 ? 's' : ''} avec succès.`);
@@ -111,7 +115,7 @@ function App() {
 
   const openSupport = (support: Support) => {
     try {
-      const blob = dataUrlToBlob(support.dataUrl);
+      const blob = supportToBlob(support);
       const objectUrl = URL.createObjectURL(blob);
       const opened = window.open(objectUrl, '_blank');
       if (!opened) window.location.assign(objectUrl);
