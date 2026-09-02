@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "mammoth": "latest",
-    "pdfjs-dist": "latest",
+    "pdfjs-dist": "3.11.174",
     "react": "latest",
     "react-dom": "latest"
   },
