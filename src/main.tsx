@@ -1,15 +1,18 @@
 import React, { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import * as mammoth from 'mammoth';
-import pdfWorker from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
+import * as pdfjs from 'pdfjs-dist';
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.js?url';
 import './styles.css';
+
+pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 type Extraction = { version: number; text: string; pages?: number; extractedAt: string; };
 type Support = { id: string; name: string; type: string; size: number; importedAt: string; category?: string; blob?: Blob; dataUrl?: string; extraction?: Extraction; };
 type ReadingState = { support: Support; text: string; pages?: number; };
 const DB_NAME = 'sirafiq-next';
 const STORE = 'supports';
-const EXTRACTION_VERSION = 2;
+const EXTRACTION_VERSION = 3;
 const categories = ['Tous', 'Non classé', 'Qour’ān', 'Textes', 'Cours', 'Références'];
 
 function openDb(): Promise<IDBDatabase> { return new Promise((resolve, reject) => { const request = indexedDB.open(DB_NAME, 1); request.onupgradeneeded = () => { const db = request.result; if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' }); }; request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); }
@@ -20,8 +23,7 @@ function dataUrlToBlob(dataUrl: string): Blob { const [header, payload] = dataUr
 function supportToBlob(support: Support): Blob { if (support.blob instanceof Blob) return support.blob; if (support.dataUrl) return dataUrlToBlob(support.dataUrl); throw new Error('Fichier local illisible.'); }
 function extensionOf(support: Support) { return support.name.split('.').pop()?.toLowerCase() ?? ''; }
 function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> { if (typeof blob.arrayBuffer === 'function') return blob.arrayBuffer(); return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => reader.result instanceof ArrayBuffer ? resolve(reader.result) : reject(new Error('Lecture binaire impossible.')); reader.onerror = () => reject(reader.error ?? new Error('Lecture binaire impossible.')); reader.readAsArrayBuffer(blob); }); }
-function ensurePromiseWithResolvers() { const ctor = Promise as typeof Promise & { withResolvers?: <T>() => { promise: Promise<T>; resolve: (value: T | PromiseLike<T>) => void; reject: (reason?: unknown) => void } }; if (!ctor.withResolvers) ctor.withResolvers = function <T>() { let resolve!: (value: T | PromiseLike<T>) => void; let reject!: (reason?: unknown) => void; const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; }); return { promise, resolve, reject }; }; }
-async function extractPdfText(blob: Blob): Promise<{ text: string; pages: number }> { ensurePromiseWithResolvers(); const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs'); pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker; const data = new Uint8Array(await blobToArrayBuffer(blob)); const pdf = await pdfjs.getDocument({ data }).promise; const pages: string[] = []; for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) { const page = await pdf.getPage(pageNumber); const content = await page.getTextContent(); const text = content.items.map((item) => ('str' in item ? item.str : '')).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim(); pages.push(`Page ${pageNumber}\n${text}`); } return { text: pages.join('\n\n'), pages: pdf.numPages }; }
+async function extractPdfText(blob: Blob): Promise<{ text: string; pages: number }> { const data = new Uint8Array(await blobToArrayBuffer(blob)); const pdf = await pdfjs.getDocument({ data }).promise; const pages: string[] = []; for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) { const page = await pdf.getPage(pageNumber); const content = await page.getTextContent(); const text = content.items.map((item) => ('str' in item ? item.str : '')).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim(); pages.push(`Page ${pageNumber}\n${text}`); } return { text: pages.join('\n\n'), pages: pdf.numPages }; }
 async function extractDocxText(blob: Blob): Promise<string> { const result = await mammoth.extractRawText({ arrayBuffer: await blobToArrayBuffer(blob) }); return result.value.replace(/\n{3,}/g, '\n\n').trim(); }
 const allowedExtensions = ['pdf', 'txt', 'md', 'doc', 'docx', 'ppt', 'pptx', 'epub'];
 const readableExtensions = ['txt', 'md', 'pdf', 'docx'];
