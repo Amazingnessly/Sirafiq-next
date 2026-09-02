@@ -1,0 +1,23 @@
+.mind-shell { width: min(1160px, calc(100% - 24px)); }
+.mind-header { padding: clamp(24px, 5vw, 46px); border: 1px solid rgba(91,32,35,.14); border-radius: 24px; background: rgba(255,252,246,.88); box-shadow: 0 20px 60px rgba(76,44,28,.08); }
+.mind-header h1 { margin: 8px 0 12px; font-size: clamp(34px, 6vw, 58px); overflow-wrap: anywhere; }
+.mind-header p:last-child { max-width: 680px; margin: 0; color: #74635c; line-height: 1.65; }
+.mind-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; margin-top: 18px; }
+.mind-canvas { min-height: 62vh; overflow: auto; padding: 28px; border: 1px solid rgba(91,32,35,.13); border-radius: 20px; background: rgba(255,252,246,.78); }
+.mind-tree, .mind-tree ul { list-style: none; margin: 0; padding-left: 26px; position: relative; }
+.mind-tree { padding-left: 0; }
+.mind-tree ul::before { content: ''; position: absolute; left: 8px; top: 0; bottom: 14px; width: 1px; background: rgba(116,29,37,.25); }
+.mind-tree li { position: relative; padding: 7px 0; }
+.mind-tree ul > li::before { content: ''; position: absolute; left: -18px; top: 23px; width: 18px; height: 1px; background: rgba(116,29,37,.25); }
+.mind-tree button { max-width: 360px; border: 1px solid rgba(91,32,35,.16); border-radius: 12px; padding: 10px 13px; background: #fffaf4; color: #3c2925; text-align: left; font-weight: 600; overflow-wrap: anywhere; }
+.mind-tree button.selected { border-color: #741d25; background: #741d25; color: #fffaf4; box-shadow: 0 8px 20px rgba(116,29,37,.18); }
+.mind-editor { align-self: start; position: sticky; top: 18px; padding: 20px; border: 1px solid rgba(91,32,35,.13); border-radius: 18px; background: rgba(255,252,246,.9); }
+.mind-editor h2 { margin: 7px 0 18px; color: #4f171d; overflow-wrap: anywhere; }
+.mind-editor form { display: grid; gap: 12px; }
+.mind-editor label { display: grid; gap: 7px; color: #6d5b55; font-size: 12px; font-weight: 700; }
+.mind-editor input { width: 100%; border: 1px solid rgba(91,32,35,.18); border-radius: 10px; padding: 11px 12px; background: white; color: #302522; }
+.mind-delete { width: 100%; margin-top: 10px; border: 1px solid rgba(91,32,35,.18); border-radius: 10px; padding: 10px 12px; background: transparent; color: #741d25; font-weight: 700; }
+.mind-delete:disabled { opacity: .4; cursor: default; }
+.mind-editor small { display: block; margin-top: 16px; color: #8a756d; }
+@media (max-width: 820px) { .mind-layout { grid-template-columns: 1fr; } .mind-editor { position: static; } .mind-canvas { min-height: 48vh; } }
+@media (max-width: 480px) { .mind-canvas { padding: 16px 10px; } .mind-tree ul { padding-left: 22px; } .mind-tree button { max-width: 250px; } }
