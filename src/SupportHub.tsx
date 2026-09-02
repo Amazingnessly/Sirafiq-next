@@ -21,9 +21,9 @@ export function SupportHub({ name, category, canRead, flashcards, recallAttempts
       <p>Choisis un mode de travail. Chaque outil garde ses données localement avec ce support.</p>
     </header>
     <section className="hub-grid">
-      <button className="hub-card" type="button" onClick={onRead} disabled={!canRead}>
+      <button className="hub-card" type="button" onClick={onRead}>
         <span className="hub-index">01</span>
-        <div><strong>Lire le support</strong><p>{canRead ? 'Reprendre la lecture ou consulter le document.' : 'Ce format utilise uniquement son ouverture externe pour le moment.'}</p>{pdfBookmarks + pdfNotes > 0 && <small>{pdfBookmarks} repère{pdfBookmarks > 1 ? 's' : ''} · {pdfNotes} note{pdfNotes > 1 ? 's' : ''}</small>}</div>
+        <div><strong>{canRead ? 'Lire le support' : 'Ouvrir le support'}</strong><p>{canRead ? 'Reprendre la lecture ou consulter le document.' : 'Ce format s’ouvre avec le lecteur disponible sur cet appareil.'}</p>{pdfBookmarks + pdfNotes > 0 && <small>{pdfBookmarks} repère{pdfBookmarks > 1 ? 's' : ''} · {pdfNotes} note{pdfNotes > 1 ? 's' : ''}</small>}</div>
       </button>
       <button className="hub-card" type="button" onClick={onFlashcards}>
         <span className="hub-index">02</span>
