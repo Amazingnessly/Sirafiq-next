@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import * as pdfjs from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.js?url';
 
@@ -9,8 +9,10 @@ type Props = {
   blob: Blob;
   initialPage?: number;
   initialZoom?: number;
+  bookmarks?: number[];
   onBack: () => void;
   onProgress: (page: number, zoom: number) => void;
+  onBookmarksChange: (pages: number[]) => void;
 };
 
 function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
@@ -23,7 +25,7 @@ function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
   });
 }
 
-export function PdfVisualReader({ name, blob, initialPage = 1, initialZoom = 1, onBack, onProgress }: Props) {
+export function PdfVisualReader({ name, blob, initialPage = 1, initialZoom = 1, bookmarks = [], onBack, onProgress, onBookmarksChange }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const [document, setDocument] = useState<pdfjs.PDFDocumentProxy | null>(null);
@@ -32,6 +34,8 @@ export function PdfVisualReader({ name, blob, initialPage = 1, initialZoom = 1, 
   const [jumpValue, setJumpValue] = useState(String(Math.max(1, initialPage)));
   const [error, setError] = useState('');
   const [rendering, setRendering] = useState(true);
+  const cleanBookmarks = useMemo(() => Array.from(new Set(bookmarks.filter(page => Number.isInteger(page) && page > 0))).sort((a, b) => a - b), [bookmarks]);
+  const isBookmarked = cleanBookmarks.includes(pageNumber);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,6 +100,10 @@ export function PdfVisualReader({ name, blob, initialPage = 1, initialZoom = 1, 
     const requested = Number.parseInt(jumpValue, 10);
     if (Number.isFinite(requested)) goTo(requested);
   };
+  const toggleBookmark = () => {
+    const next = isBookmarked ? cleanBookmarks.filter(page => page !== pageNumber) : [...cleanBookmarks, pageNumber].sort((a, b) => a - b);
+    onBookmarksChange(next);
+  };
 
   return <main className="shell pdf-shell">
     <div className="pdf-toolbar">
@@ -119,7 +127,16 @@ export function PdfVisualReader({ name, blob, initialPage = 1, initialZoom = 1, 
       </div>
     </div>
     <article className="pdf-reader">
-      <header><p className="eyebrow">PDF · RENDU VISUEL FIDÈLE</p><h1>{name}</h1><p>La dernière page et le niveau de zoom sont mémorisés sur cet appareil.</p></header>
+      <header>
+        <p className="eyebrow">PDF · RENDU VISUEL FIDÈLE</p><h1>{name}</h1><p>La progression et les repères de lecture sont mémorisés localement.</p>
+        <div className="pdf-study-tools">
+          <button className={isBookmarked ? 'bookmarked' : ''} type="button" onClick={toggleBookmark}>{isBookmarked ? '★ Page repérée' : '☆ Repérer cette page'}</button>
+          <details className="pdf-bookmarks">
+            <summary>Repères ({cleanBookmarks.length})</summary>
+            {cleanBookmarks.length === 0 ? <p>Aucune page repérée.</p> : <div>{cleanBookmarks.map(page => <button type="button" key={page} onClick={() => goTo(page)}>Page {page}</button>)}</div>}
+          </details>
+        </div>
+      </header>
       {error && <p className="pdf-error" role="alert">Lecture impossible : {error}</p>}
       <div className="pdf-canvas-host" ref={hostRef}>{rendering && <div className="pdf-loading">Rendu de la page…</div>}<canvas ref={canvasRef} aria-label={`Page ${pageNumber} du PDF`} /></div>
     </article>
