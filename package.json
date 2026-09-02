@@ -11,6 +11,7 @@
     "deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
+    "mammoth": "latest",
     "pdfjs-dist": "latest",
     "react": "latest",
     "react-dom": "latest"
