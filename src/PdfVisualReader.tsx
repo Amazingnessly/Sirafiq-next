@@ -4,15 +4,19 @@ import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.js?url';
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker;
 
+export type PdfPageNote = { page: number; text: string; updatedAt: string };
+
 type Props = {
   name: string;
   blob: Blob;
   initialPage?: number;
   initialZoom?: number;
   bookmarks?: number[];
+  notes?: PdfPageNote[];
   onBack: () => void;
   onProgress: (page: number, zoom: number) => void;
   onBookmarksChange: (pages: number[]) => void;
+  onNotesChange: (notes: PdfPageNote[]) => void;
 };
 
 function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
@@ -25,17 +29,20 @@ function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
   });
 }
 
-export function PdfVisualReader({ name, blob, initialPage = 1, initialZoom = 1, bookmarks = [], onBack, onProgress, onBookmarksChange }: Props) {
+export function PdfVisualReader({ name, blob, initialPage = 1, initialZoom = 1, bookmarks = [], notes = [], onBack, onProgress, onBookmarksChange, onNotesChange }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const [document, setDocument] = useState<pdfjs.PDFDocumentProxy | null>(null);
   const [pageNumber, setPageNumber] = useState(Math.max(1, initialPage));
   const [zoom, setZoom] = useState(Math.min(1.8, Math.max(.75, initialZoom)));
   const [jumpValue, setJumpValue] = useState(String(Math.max(1, initialPage)));
+  const [noteDraft, setNoteDraft] = useState('');
   const [error, setError] = useState('');
   const [rendering, setRendering] = useState(true);
   const cleanBookmarks = useMemo(() => Array.from(new Set(bookmarks.filter(page => Number.isInteger(page) && page > 0))).sort((a, b) => a - b), [bookmarks]);
+  const cleanNotes = useMemo(() => notes.filter(note => Number.isInteger(note.page) && note.page > 0 && note.text.trim()).sort((a, b) => a.page - b.page), [notes]);
   const isBookmarked = cleanBookmarks.includes(pageNumber);
+  const currentNote = cleanNotes.find(note => note.page === pageNumber);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,6 +63,7 @@ export function PdfVisualReader({ name, blob, initialPage = 1, initialZoom = 1, 
   }, [blob]);
 
   useEffect(() => setJumpValue(String(pageNumber)), [pageNumber]);
+  useEffect(() => setNoteDraft(currentNote?.text ?? ''), [pageNumber, currentNote?.text]);
 
   useEffect(() => {
     if (!document) return;
@@ -104,6 +112,15 @@ export function PdfVisualReader({ name, blob, initialPage = 1, initialZoom = 1, 
     const next = isBookmarked ? cleanBookmarks.filter(page => page !== pageNumber) : [...cleanBookmarks, pageNumber].sort((a, b) => a - b);
     onBookmarksChange(next);
   };
+  const saveNote = () => {
+    const text = noteDraft.trim();
+    const withoutCurrent = cleanNotes.filter(note => note.page !== pageNumber);
+    onNotesChange(text ? [...withoutCurrent, { page: pageNumber, text, updatedAt: new Date().toISOString() }].sort((a, b) => a.page - b.page) : withoutCurrent);
+  };
+  const deleteNote = () => {
+    setNoteDraft('');
+    onNotesChange(cleanNotes.filter(note => note.page !== pageNumber));
+  };
 
   return <main className="shell pdf-shell">
     <div className="pdf-toolbar">
@@ -128,12 +145,21 @@ export function PdfVisualReader({ name, blob, initialPage = 1, initialZoom = 1, 
     </div>
     <article className="pdf-reader">
       <header>
-        <p className="eyebrow">PDF · RENDU VISUEL FIDÈLE</p><h1>{name}</h1><p>La progression et les repères de lecture sont mémorisés localement.</p>
+        <p className="eyebrow">PDF · RENDU VISUEL FIDÈLE</p><h1>{name}</h1><p>La progression, les repères et les notes de page restent sur cet appareil.</p>
         <div className="pdf-study-tools">
           <button className={isBookmarked ? 'bookmarked' : ''} type="button" onClick={toggleBookmark}>{isBookmarked ? '★ Page repérée' : '☆ Repérer cette page'}</button>
           <details className="pdf-bookmarks">
             <summary>Repères ({cleanBookmarks.length})</summary>
             {cleanBookmarks.length === 0 ? <p>Aucune page repérée.</p> : <div>{cleanBookmarks.map(page => <button type="button" key={page} onClick={() => goTo(page)}>Page {page}</button>)}</div>}
+          </details>
+          <details className="pdf-notes" open={Boolean(currentNote)}>
+            <summary>Notes ({cleanNotes.length})</summary>
+            <div className="pdf-note-editor">
+              <label htmlFor="pdf-page-note">Note de la page {pageNumber}</label>
+              <textarea id="pdf-page-note" value={noteDraft} onChange={event => setNoteDraft(event.target.value)} placeholder="Écris ici ce que tu veux retenir de cette page…" />
+              <div className="pdf-note-actions"><button type="button" onClick={saveNote}>Enregistrer</button>{currentNote && <button type="button" onClick={deleteNote}>Supprimer la note</button>}</div>
+            </div>
+            {cleanNotes.length > 0 && <div className="pdf-note-list">{cleanNotes.map(note => <button type="button" key={note.page} onClick={() => goTo(note.page)}>p. {note.page} · {note.text.slice(0, 48)}{note.text.length > 48 ? '…' : ''}</button>)}</div>}
           </details>
         </div>
       </header>

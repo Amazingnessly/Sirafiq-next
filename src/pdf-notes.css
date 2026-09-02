@@ -1,0 +1,11 @@
+.pdf-notes { min-width: min(340px, 100%); }
+.pdf-notes summary { list-style: none; cursor: pointer; border: 1px solid rgba(91,32,35,.18); border-radius: 10px; padding: 9px 12px; background: #fffaf4; color: #671c23; font-weight: 600; }
+.pdf-notes summary::-webkit-details-marker { display: none; }
+.pdf-note-editor { display: grid; gap: 7px; margin-top: 10px; padding: 10px; border: 1px solid rgba(91,32,35,.12); border-radius: 12px; background: rgba(255,250,244,.78); }
+.pdf-note-editor label { color: #6d5b55; font-size: 12px; font-weight: 700; }
+.pdf-note-editor textarea { width: 100%; min-height: 96px; resize: vertical; border: 1px solid rgba(91,32,35,.18); border-radius: 10px; padding: 10px; background: white; color: #302522; line-height: 1.5; }
+.pdf-note-actions { display: flex; gap: 7px; }
+.pdf-note-actions button, .pdf-note-list button { border: 1px solid rgba(91,32,35,.18); border-radius: 9px; padding: 8px 10px; background: #fffaf4; color: #671c23; font-weight: 600; }
+.pdf-note-list { display: grid; gap: 6px; margin-top: 8px; max-height: 180px; overflow-y: auto; }
+.pdf-note-list button { text-align: left; font-size: 12px; font-weight: 500; }
+@media (max-width: 650px) { .pdf-notes { width: 100%; min-width: 0; } .pdf-notes summary { text-align: center; } .pdf-note-actions { flex-direction: column; } }
