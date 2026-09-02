@@ -15,9 +15,24 @@ function DailyReviewEntry() {
   const [open, setOpen] = useState(false);
   const [count, setCount] = useState(0);
   const refresh = useCallback(() => { void countDue().then(setCount).catch(() => setCount(0)); }, []);
-  useEffect(() => { refresh(); }, [refresh]);
+
+  useEffect(() => {
+    refresh();
+    const timer = window.setInterval(refresh, 1500);
+    const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
+    window.addEventListener('focus', refresh);
+    window.addEventListener('pageshow', refresh);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('pageshow', refresh);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [refresh]);
+
   return <>
-    <button className="daily-launcher" type="button" onClick={() => setOpen(true)}><span>Réviser</span><strong>{count}</strong></button>
+    <button className="daily-launcher" type="button" onClick={() => { refresh(); setOpen(true); }} aria-label={`Ouvrir les révisions du jour, ${count} carte${count > 1 ? 's' : ''} à revoir`}><span>Réviser</span><strong>{count}</strong></button>
     {open && <DailyReview onClose={() => { setOpen(false); refresh(); }} onCountChange={setCount} />}
   </>;
 }
