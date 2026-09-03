@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { MindMap, MindNode } from './MindMap';
+import { MemoryPassage, TextMemorization } from './TextMemorization';
 
 type Props = {
   name: string;
@@ -24,6 +25,7 @@ type StoredSupport = {
   pdfBookmarks?: number[];
   pdfNotes?: unknown[];
   mindMap?: MindNode[];
+  memoryPassages?: MemoryPassage[];
   importedAt?: string;
   [key: string]: unknown;
 };
@@ -60,21 +62,24 @@ async function findSupport(props: Pick<Props, 'name' | 'category' | 'flashcards'
   });
 }
 
-async function saveMindMap(support: StoredSupport, nodes: MindNode[]) {
+async function savePatch(support: StoredSupport, patch: Partial<StoredSupport>) {
   const db = await openDb();
-  return new Promise<void>((resolve, reject) => {
+  return new Promise<StoredSupport>((resolve, reject) => {
+    const next = { ...support, ...patch };
     const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).put({ ...support, mindMap: nodes });
-    tx.oncomplete = () => resolve();
+    tx.objectStore(STORE).put(next);
+    tx.oncomplete = () => resolve(next);
     tx.onerror = () => reject(tx.error);
   });
 }
 
 export function SupportHub({ name, category, canRead, flashcards, recallAttempts, pdfBookmarks = 0, pdfNotes = 0, onRead, onFlashcards, onRecall, onBack }: Props) {
   const [mindMode, setMindMode] = useState(false);
+  const [memoryMode, setMemoryMode] = useState(false);
   const [mindNodes, setMindNodes] = useState<MindNode[]>([]);
+  const [memoryPassages, setMemoryPassages] = useState<MemoryPassage[]>([]);
   const [storedSupport, setStoredSupport] = useState<StoredSupport | null>(null);
-  const [mindStatus, setMindStatus] = useState('');
+  const [saveStatus, setSaveStatus] = useState('');
   const identity = useMemo(() => ({ name, category, flashcards, recallAttempts, pdfBookmarks, pdfNotes }), [name, category, flashcards, recallAttempts, pdfBookmarks, pdfNotes]);
 
   useEffect(() => {
@@ -83,24 +88,35 @@ export function SupportHub({ name, category, canRead, flashcards, recallAttempts
       if (cancelled) return;
       setStoredSupport(support);
       setMindNodes(support?.mindMap ?? []);
-    }).catch(() => !cancelled && setMindStatus('Impossible de charger la carte mentale locale.'));
+      setMemoryPassages(support?.memoryPassages ?? []);
+    }).catch(() => !cancelled && setSaveStatus('Impossible de charger les données d’étude locales.'));
     return () => { cancelled = true; };
   }, [identity]);
 
-  const changeMindMap = (nodes: MindNode[]) => {
-    setMindNodes(nodes);
+  const persist = (patch: Partial<StoredSupport>, successMessage: string) => {
     if (!storedSupport) {
-      setMindStatus('Support local introuvable : la carte ne peut pas être enregistrée.');
+      setSaveStatus('Support local introuvable : impossible d’enregistrer.');
       return;
     }
-    setMindStatus('Enregistrement…');
-    void saveMindMap(storedSupport, nodes).then(() => {
-      setStoredSupport(current => current ? { ...current, mindMap: nodes } : current);
-      setMindStatus('Carte mentale enregistrée.');
-    }).catch(() => setMindStatus('Impossible d’enregistrer la carte mentale.'));
+    setSaveStatus('Enregistrement…');
+    void savePatch(storedSupport, patch).then(next => {
+      setStoredSupport(next);
+      setSaveStatus(successMessage);
+    }).catch(() => setSaveStatus('Impossible d’enregistrer les données locales.'));
   };
 
-  if (mindMode) return <><MindMap supportName={name} nodes={mindNodes} onChange={changeMindMap} onBack={() => setMindMode(false)} />{mindStatus && <div className="mind-save-status" role="status">{mindStatus}</div>}</>;
+  const changeMindMap = (nodes: MindNode[]) => {
+    setMindNodes(nodes);
+    persist({ mindMap: nodes }, 'Carte mentale enregistrée.');
+  };
+
+  const changeMemoryPassages = (passages: MemoryPassage[]) => {
+    setMemoryPassages(passages);
+    persist({ memoryPassages: passages }, 'Mémorisation enregistrée.');
+  };
+
+  if (memoryMode) return <><TextMemorization supportName={name} passages={memoryPassages} onChange={changeMemoryPassages} onBack={() => setMemoryMode(false)} />{saveStatus && <div className="mind-save-status" role="status">{saveStatus}</div>}</>;
+  if (mindMode) return <><MindMap supportName={name} nodes={mindNodes} onChange={changeMindMap} onBack={() => setMindMode(false)} />{saveStatus && <div className="mind-save-status" role="status">{saveStatus}</div>}</>;
 
   return <main className="shell hub-shell">
     <button className="back" type="button" onClick={onBack}>← Bibliothèque</button>
@@ -111,20 +127,19 @@ export function SupportHub({ name, category, canRead, flashcards, recallAttempts
     </header>
     <section className="hub-grid">
       <button className="hub-card" type="button" onClick={onRead}>
-        <span className="hub-index">01</span>
-        <div><strong>{canRead ? 'Lire le support' : 'Ouvrir le support'}</strong><p>{canRead ? 'Reprendre la lecture ou consulter le document.' : 'Ce format s’ouvre avec le lecteur disponible sur cet appareil.'}</p>{pdfBookmarks + pdfNotes > 0 && <small>{pdfBookmarks} repère{pdfBookmarks > 1 ? 's' : ''} · {pdfNotes} note{pdfNotes > 1 ? 's' : ''}</small>}</div>
+        <span className="hub-index">01</span><div><strong>{canRead ? 'Lire le support' : 'Ouvrir le support'}</strong><p>{canRead ? 'Reprendre la lecture ou consulter le document.' : 'Ce format s’ouvre avec le lecteur disponible sur cet appareil.'}</p>{pdfBookmarks + pdfNotes > 0 && <small>{pdfBookmarks} repère{pdfBookmarks > 1 ? 's' : ''} · {pdfNotes} note{pdfNotes > 1 ? 's' : ''}</small>}</div>
       </button>
       <button className="hub-card" type="button" onClick={onFlashcards}>
-        <span className="hub-index">02</span>
-        <div><strong>Cartes mémoire</strong><p>Transformer ce que tu apprends en questions de rappel actif.</p><small>{flashcards} carte{flashcards > 1 ? 's' : ''}</small></div>
+        <span className="hub-index">02</span><div><strong>Cartes mémoire</strong><p>Transformer ce que tu apprends en questions de rappel actif.</p><small>{flashcards} carte{flashcards > 1 ? 's' : ''}</small></div>
       </button>
       <button className="hub-card" type="button" onClick={onRecall}>
-        <span className="hub-index">03</span>
-        <div><strong>Restitution</strong><p>Écrire de mémoire avant de retourner au support.</p><small>{recallAttempts} tentative{recallAttempts > 1 ? 's' : ''}</small></div>
+        <span className="hub-index">03</span><div><strong>Restitution</strong><p>Écrire de mémoire avant de retourner au support.</p><small>{recallAttempts} tentative{recallAttempts > 1 ? 's' : ''}</small></div>
       </button>
       <button className="hub-card" type="button" onClick={() => setMindMode(true)}>
-        <span className="hub-index">04</span>
-        <div><strong>Carte mentale</strong><p>Organiser les notions en branches hiérarchiques pour visualiser les liens.</p><small>{mindNodes.length} notion{mindNodes.length > 1 ? 's' : ''}</small></div>
+        <span className="hub-index">04</span><div><strong>Carte mentale</strong><p>Organiser les notions en branches hiérarchiques pour visualiser les liens.</p><small>{mindNodes.length} notion{mindNodes.length > 1 ? 's' : ''}</small></div>
+      </button>
+      <button className="hub-card" type="button" onClick={() => setMemoryMode(true)}>
+        <span className="hub-index">05</span><div><strong>Mémorisation de textes</strong><p>Découper un texte en passages puis pratiquer lecture, masquage, restitution et comparaison.</p><small>{memoryPassages.length} passage{memoryPassages.length > 1 ? 's' : ''}</small></div>
       </button>
     </section>
   </main>;
