@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 
 export type MindNode = { id: string; parentId: string | null; text: string; createdAt: string };
 
@@ -27,6 +27,14 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(rootNodes[0]?.id ?? null);
   const [text, setText] = useState('');
   const selected = nodes.find(node => node.id === selectedId) ?? null;
+
+  useEffect(() => {
+    if (!nodes.length) {
+      setSelectedId(null);
+      return;
+    }
+    if (!selectedId || !nodes.some(node => node.id === selectedId)) setSelectedId(rootNodes[0]?.id ?? nodes[0].id);
+  }, [nodes, rootNodes, selectedId]);
 
   const ensureRoot = () => {
     if (rootNodes.length > 0) return rootNodes[0];
@@ -61,6 +69,7 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
     <header className="mind-header"><p className="eyebrow">CARTE MENTALE</p><h1>{supportName}</h1><p>Construis progressivement les idées principales et leurs liens. Tout reste enregistré localement.</p></header>
     <div className="mind-layout">
       <section className="mind-canvas" aria-label="Carte mentale">
+        <div className="mind-canvas-title"><div><p className="eyebrow">MES NŒUDS</p><strong>{nodes.length || 1} nœud{(nodes.length || 1) > 1 ? 's' : ''}</strong></div><small>Touche un nœud pour le sélectionner.</small></div>
         <ul className="mind-tree">{roots.map(root => root.id === '__preview__' ? <li key={root.id}><button type="button" onClick={() => { const made = ensureRoot(); setSelectedId(made.id); }}>{root.text}</button></li> : <Branch key={root.id} node={root} nodes={nodes} selectedId={selectedId} onSelect={setSelectedId} />)}</ul>
       </section>
       <aside className="mind-editor">
@@ -68,7 +77,7 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
         <h2>{selected?.text ?? supportName}</h2>
         <form onSubmit={addNode}><label>Ajouter une idée enfant<input value={text} onChange={event => setText(event.target.value)} placeholder="Nouvelle notion…" /></label><button className="primary" type="submit" disabled={!text.trim()}>Ajouter</button></form>
         <button className="mind-delete" type="button" disabled={!selected || selected.parentId === null} onClick={removeSelected}>Supprimer cette branche</button>
-        <small>{nodes.length || 1} nœud{(nodes.length || 1) > 1 ? 's' : ''}</small>
+        <small>{nodes.length || 1} nœud{(nodes.length || 1) > 1 ? 's' : ''} enregistré{(nodes.length || 1) > 1 ? 's' : ''}</small>
       </aside>
     </div>
   </main>;
