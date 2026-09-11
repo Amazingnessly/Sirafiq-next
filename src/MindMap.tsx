@@ -63,11 +63,10 @@ function buildLayout(nodes: MindNode[], root: MindNode) {
   const rightRoots = firstLevel.filter((_, index) => index % 2 === 0);
   const positioned: PositionedNode[] = [];
   const edges: Edge[] = [];
-  const centerX = 700;
-  const horizontalStep = 235;
+  const horizontalStep = 220;
   const verticalStep = 112;
-  let leftCursor = 96;
-  let rightCursor = 96;
+  let leftCursor = 82;
+  let rightCursor = 82;
 
   const placeBranch = (node: MindNode, side: -1 | 1, depth: number): number => {
     const children = childrenOf(node.id);
@@ -83,7 +82,7 @@ function buildLayout(nodes: MindNode[], root: MindNode) {
       });
       y = (Math.min(...ys) + Math.max(...ys)) / 2;
     }
-    positioned.push({ node, x: centerX + side * horizontalStep * depth, y, side, depth });
+    positioned.push({ node, x: side * horizontalStep * depth, y, side, depth });
     return y;
   };
 
@@ -96,10 +95,31 @@ function buildLayout(nodes: MindNode[], root: MindNode) {
     placeBranch(node, -1, 1);
   });
 
-  const contentHeight = Math.max(leftCursor, rightCursor, 500);
-  const rootY = contentHeight / 2;
-  positioned.push({ node: root, x: centerX, y: rootY, side: 0, depth: 0 });
-  return { positioned, edges, width: 1400, height: contentHeight, centerX, rootY, effectiveParent };
+  const branchBottom = Math.max(leftCursor, rightCursor);
+  const rawRootY = Math.max(150, (branchBottom - verticalStep + 82) / 2);
+  positioned.push({ node: root, x: 0, y: rawRootY, side: 0, depth: 0 });
+
+  // Crop the virtual canvas to the actual graph instead of a fixed 1400px stage.
+  // This keeps "Vue entière" useful on phones and removes large blank areas.
+  const horizontalPadding = 54;
+  const verticalPadding = 48;
+  const minX = Math.min(...positioned.map(item => item.x - (item.depth === 0 ? 108 : 92))) - horizontalPadding;
+  const maxX = Math.max(...positioned.map(item => item.x + (item.depth === 0 ? 108 : 92))) + horizontalPadding;
+  const minY = Math.min(...positioned.map(item => item.y - (item.depth === 0 ? 50 : 40))) - verticalPadding;
+  const maxY = Math.max(...positioned.map(item => item.y + (item.depth === 0 ? 50 : 40))) + verticalPadding;
+  const shiftX = -minX;
+  const shiftY = -minY;
+  const compactPositioned = positioned.map(item => ({ ...item, x: item.x + shiftX, y: item.y + shiftY }));
+
+  return {
+    positioned: compactPositioned,
+    edges,
+    width: Math.max(360, maxX - minX),
+    height: Math.max(260, maxY - minY),
+    centerX: shiftX,
+    rootY: rawRootY + shiftY,
+    effectiveParent,
+  };
 }
 
 export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
@@ -164,13 +184,21 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
     if (!viewport || !layout) return;
     const horizontalFit = (viewport.clientWidth - 18) / layout.width;
     const verticalFit = (viewport.clientHeight - 18) / layout.height;
-    const next = clampZoom(Math.min(horizontalFit, verticalFit, 0.8));
+    const next = clampZoom(Math.min(horizontalFit, verticalFit, 0.9));
     setZoom(next);
     window.setTimeout(() => recenter(behavior), 30);
   };
 
+  const showComfortableView = (behavior: ScrollBehavior = 'auto') => {
+    const viewport = viewportRef.current;
+    if (!viewport || !layout) return;
+    const preferred = viewport.clientWidth <= 430 ? 0.58 : viewport.clientWidth <= 820 ? 0.72 : 0.9;
+    setZoom(clampZoom(preferred));
+    window.setTimeout(() => recenter(behavior), 30);
+  };
+
   useEffect(() => {
-    const timer = window.setTimeout(() => showOverview('auto'), 90);
+    const timer = window.setTimeout(() => showComfortableView('auto'), 90);
     return () => window.clearTimeout(timer);
   }, [layout?.width, layout?.height]);
 
@@ -198,7 +226,7 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
           </div>
         </div>
         {!root ? <div className="mind-empty"><button className="mind-root-preview" type="button" onClick={() => { const made = ensureRoot(); setSelectedId(made.id); }}>{supportName}</button><p>Touche le sujet pour commencer la carte.</p></div> : <div className="mind-viewport" ref={viewportRef}>
-          <div className="mind-scaled-stage" style={{ width: (layout?.width ?? 1400) * zoom, height: (layout?.height ?? 500) * zoom }}>
+          <div className="mind-scaled-stage" style={{ width: (layout?.width ?? 720) * zoom, height: (layout?.height ?? 320) * zoom }}>
             <div className="mind-map-stage" style={{ width: layout?.width, height: layout?.height, transform: `scale(${zoom})` }}>
               <svg className="mind-links" width={layout?.width} height={layout?.height} aria-hidden="true">
                 {layout?.edges.map(edge => {
