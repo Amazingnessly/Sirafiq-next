@@ -20,37 +20,41 @@ function clampZoom(value: number) {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(value * 100) / 100));
 }
 
-function descendants(nodes: MindNode[], parentId: string): string[] {
-  const children = nodes.filter(node => node.parentId === parentId);
-  return children.flatMap(child => [child.id, ...descendants(nodes, child.id)]);
-}
-
-function depthOf(nodes: MindNode[], node: MindNode): number {
-  if (!node.parentId) return 0;
-  const parent = nodes.find(candidate => candidate.id === node.parentId);
-  return parent ? depthOf(nodes, parent) + 1 : 0;
+function descendants(nodes: MindNode[], parentId: string, visited = new Set<string>()): string[] {
+  if (visited.has(parentId)) return [];
+  visited.add(parentId);
+  const children = nodes.filter(node => node.parentId === parentId && !visited.has(node.id));
+  return children.flatMap(child => [child.id, ...descendants(nodes, child.id, visited)]);
 }
 
 function buildLayout(nodes: MindNode[], root: MindNode) {
   const ids = new Set(nodes.map(node => node.id));
-
-  const reachesRoot = (node: MindNode) => {
-    const seen = new Set<string>([node.id]);
-    let parentId = node.parentId;
-    while (parentId) {
-      if (parentId === root.id) return true;
-      if (!ids.has(parentId) || seen.has(parentId)) return false;
-      seen.add(parentId);
-      parentId = nodes.find(candidate => candidate.id === parentId)?.parentId ?? null;
-    }
-    return false;
-  };
-
   const effectiveParent = new Map<string, string>();
+
   nodes.forEach(node => {
     if (node.id === root.id) return;
-    const validParent = node.parentId && node.parentId !== node.id && ids.has(node.parentId) && reachesRoot(node);
-    effectiveParent.set(node.id, validParent ? node.parentId! : root.id);
+    const parentId = node.parentId;
+    const validParent = parentId && parentId !== node.id && ids.has(parentId);
+    effectiveParent.set(node.id, validParent ? parentId : root.id);
+  });
+
+  // Preserve existing parent/child chains even when an older map contains several roots.
+  // Only the top of a disconnected component is visually attached to the canonical subject.
+  // Cycles are broken deterministically by attaching the inspected node to the subject.
+  nodes.forEach(node => {
+    if (node.id === root.id) return;
+    const seen = new Set<string>([node.id]);
+    let cursor = node.id;
+    while (true) {
+      const parentId = effectiveParent.get(cursor);
+      if (!parentId || parentId === root.id) break;
+      if (seen.has(parentId)) {
+        effectiveParent.set(node.id, root.id);
+        break;
+      }
+      seen.add(parentId);
+      cursor = parentId;
+    }
   });
 
   const childrenOf = (id: string) => nodes.filter(node => node.id !== root.id && effectiveParent.get(node.id) === id);
@@ -95,7 +99,7 @@ function buildLayout(nodes: MindNode[], root: MindNode) {
   const contentHeight = Math.max(leftCursor, rightCursor, 500);
   const rootY = contentHeight / 2;
   positioned.push({ node: root, x: centerX, y: rootY, side: 0, depth: 0 });
-  return { positioned, edges, width: 1400, height: contentHeight, centerX, rootY };
+  return { positioned, edges, width: 1400, height: contentHeight, centerX, rootY, effectiveParent };
 }
 
 export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
@@ -105,6 +109,10 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
   const [zoom, setZoom] = useState(1);
   const viewportRef = useRef<HTMLDivElement>(null);
   const selected = nodes.find(node => node.id === selectedId) ?? null;
+  const root = rootNodes[0] ?? null;
+  const layout = useMemo(() => root ? buildLayout(nodes, root) : null, [nodes, root]);
+  const byId = useMemo(() => new Map(layout?.positioned.map(item => [item.node.id, item]) ?? []), [layout]);
+  const maxDepth = layout?.positioned.length ? Math.max(...layout.positioned.map(item => item.depth)) : 0;
 
   useEffect(() => {
     if (!nodes.length) {
@@ -116,10 +124,10 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
 
   const ensureRoot = () => {
     if (rootNodes.length > 0) return rootNodes[0];
-    const root: MindNode = { id: crypto.randomUUID(), parentId: null, text: supportName, createdAt: new Date().toISOString() };
-    onChange([root, ...nodes]);
-    setSelectedId(root.id);
-    return root;
+    const madeRoot: MindNode = { id: crypto.randomUUID(), parentId: null, text: supportName, createdAt: new Date().toISOString() };
+    onChange([madeRoot, ...nodes]);
+    setSelectedId(madeRoot.id);
+    return madeRoot;
   };
 
   const addNode = (event: FormEvent) => {
@@ -134,16 +142,12 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
   };
 
   const removeSelected = () => {
-    if (!selected || selected.parentId === null) return;
+    if (!selected || selected.id === root?.id) return;
     const removedIds = new Set([selected.id, ...descendants(nodes, selected.id)]);
+    const visualParent = layout?.effectiveParent.get(selected.id) ?? selected.parentId ?? root?.id ?? null;
     onChange(nodes.filter(node => !removedIds.has(node.id)));
-    setSelectedId(selected.parentId);
+    setSelectedId(visualParent);
   };
-
-  const root = rootNodes[0] ?? null;
-  const layout = useMemo(() => root ? buildLayout(nodes, root) : null, [nodes, root]);
-  const byId = useMemo(() => new Map(layout?.positioned.map(item => [item.node.id, item]) ?? []), [layout]);
-  const maxDepth = nodes.length ? Math.max(...nodes.map(node => depthOf(nodes, node))) : 0;
 
   const recenter = (behavior: ScrollBehavior = 'smooth') => {
     const viewport = viewportRef.current;
@@ -226,7 +230,7 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
         <p className="eyebrow">NŒUD SÉLECTIONNÉ</p>
         <h2>{selected?.text ?? supportName}</h2>
         <form onSubmit={addNode}><label>Ajouter une idée reliée<input value={text} onChange={event => setText(event.target.value)} placeholder="Nouvelle notion…" /></label><button className="primary" type="submit" disabled={!text.trim()}>Ajouter</button></form>
-        <button className="mind-delete" type="button" disabled={!selected || selected.parentId === null} onClick={removeSelected}>Supprimer cette branche</button>
+        <button className="mind-delete" type="button" disabled={!selected || selected.id === root?.id} onClick={removeSelected}>Supprimer cette branche</button>
         <small>{nodes.length || 1} nœud{(nodes.length || 1) > 1 ? 's' : ''} enregistré{(nodes.length || 1) > 1 ? 's' : ''}</small>
       </aside>
     </div>
