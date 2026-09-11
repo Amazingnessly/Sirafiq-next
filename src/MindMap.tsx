@@ -12,7 +12,7 @@ type Props = {
 type PositionedNode = { node: MindNode; x: number; y: number; side: -1 | 0 | 1; depth: number };
 type Edge = { from: string; to: string; side: -1 | 1 };
 
-const MIN_ZOOM = 0.45;
+const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 1.25;
 const ZOOM_STEP = 0.1;
 
@@ -32,7 +32,28 @@ function depthOf(nodes: MindNode[], node: MindNode): number {
 }
 
 function buildLayout(nodes: MindNode[], root: MindNode) {
-  const childrenOf = (id: string) => nodes.filter(node => node.parentId === id);
+  const ids = new Set(nodes.map(node => node.id));
+
+  const reachesRoot = (node: MindNode) => {
+    const seen = new Set<string>([node.id]);
+    let parentId = node.parentId;
+    while (parentId) {
+      if (parentId === root.id) return true;
+      if (!ids.has(parentId) || seen.has(parentId)) return false;
+      seen.add(parentId);
+      parentId = nodes.find(candidate => candidate.id === parentId)?.parentId ?? null;
+    }
+    return false;
+  };
+
+  const effectiveParent = new Map<string, string>();
+  nodes.forEach(node => {
+    if (node.id === root.id) return;
+    const validParent = node.parentId && node.parentId !== node.id && ids.has(node.parentId) && reachesRoot(node);
+    effectiveParent.set(node.id, validParent ? node.parentId! : root.id);
+  });
+
+  const childrenOf = (id: string) => nodes.filter(node => node.id !== root.id && effectiveParent.get(node.id) === id);
   const firstLevel = childrenOf(root.id);
   const leftRoots = firstLevel.filter((_, index) => index % 2 === 1);
   const rightRoots = firstLevel.filter((_, index) => index % 2 === 0);
@@ -40,9 +61,9 @@ function buildLayout(nodes: MindNode[], root: MindNode) {
   const edges: Edge[] = [];
   const centerX = 700;
   const horizontalStep = 235;
-  const verticalStep = 106;
-  let leftCursor = 90;
-  let rightCursor = 90;
+  const verticalStep = 112;
+  let leftCursor = 96;
+  let rightCursor = 96;
 
   const placeBranch = (node: MindNode, side: -1 | 1, depth: number): number => {
     const children = childrenOf(node.id);
@@ -71,7 +92,7 @@ function buildLayout(nodes: MindNode[], root: MindNode) {
     placeBranch(node, -1, 1);
   });
 
-  const contentHeight = Math.max(leftCursor, rightCursor, 520);
+  const contentHeight = Math.max(leftCursor, rightCursor, 500);
   const rootY = contentHeight / 2;
   positioned.push({ node: root, x: centerX, y: rootY, side: 0, depth: 0 });
   return { positioned, edges, width: 1400, height: contentHeight, centerX, rootY };
@@ -134,19 +155,25 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
     });
   };
 
-  const setAndCenterZoom = (nextZoom: number) => {
-    setZoom(clampZoom(nextZoom));
+  const showOverview = (behavior: ScrollBehavior = 'smooth') => {
+    const viewport = viewportRef.current;
+    if (!viewport || !layout) return;
+    const horizontalFit = (viewport.clientWidth - 18) / layout.width;
+    const verticalFit = (viewport.clientHeight - 18) / layout.height;
+    const next = clampZoom(Math.min(horizontalFit, verticalFit, 0.8));
+    setZoom(next);
+    window.setTimeout(() => recenter(behavior), 30);
   };
 
   useEffect(() => {
-    const initialZoom = window.innerWidth <= 480 ? 0.58 : window.innerWidth <= 900 ? 0.72 : 1;
-    setZoom(initialZoom);
-  }, []);
+    const timer = window.setTimeout(() => showOverview('auto'), 90);
+    return () => window.clearTimeout(timer);
+  }, [layout?.width, layout?.height]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => recenter('auto'), 80);
+    const timer = window.setTimeout(() => recenter('auto'), 40);
     return () => window.clearTimeout(timer);
-  }, [zoom, layout?.width, layout?.height]);
+  }, [zoom]);
 
   return <main className="shell mind-shell">
     <button className="back" type="button" onClick={onBack}>← Espace d’étude</button>
@@ -156,17 +183,18 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
         <div className="mind-canvas-title">
           <div><p className="eyebrow">CARTE MENTALE</p><strong>{nodes.length || 1} nœud{(nodes.length || 1) > 1 ? 's' : ''}</strong></div>
           <div className="mind-actions">
-            <small>{maxDepth + 1} niveau{maxDepth > 0 ? 'x' : ''}</small>
+            <small>{maxDepth + 1} niveau{maxDepth > 0 ? 'x' : ''} · {layout?.positioned.length ?? 1}/{nodes.length || 1} affichés</small>
             <div className="mind-zoom" aria-label="Zoom de la carte mentale">
-              <button type="button" onClick={() => setAndCenterZoom(zoom - ZOOM_STEP)} aria-label="Dézoomer">−</button>
+              <button type="button" onClick={() => setZoom(clampZoom(zoom - ZOOM_STEP))} aria-label="Dézoomer">−</button>
               <output>{Math.round(zoom * 100)}%</output>
-              <button type="button" onClick={() => setAndCenterZoom(zoom + ZOOM_STEP)} aria-label="Zoomer">+</button>
+              <button type="button" onClick={() => setZoom(clampZoom(zoom + ZOOM_STEP))} aria-label="Zoomer">+</button>
             </div>
+            <button type="button" onClick={() => showOverview()}>Vue entière</button>
             <button type="button" onClick={() => recenter()}>Recentrer</button>
           </div>
         </div>
         {!root ? <div className="mind-empty"><button className="mind-root-preview" type="button" onClick={() => { const made = ensureRoot(); setSelectedId(made.id); }}>{supportName}</button><p>Touche le sujet pour commencer la carte.</p></div> : <div className="mind-viewport" ref={viewportRef}>
-          <div className="mind-scaled-stage" style={{ width: (layout?.width ?? 1400) * zoom, height: (layout?.height ?? 520) * zoom }}>
+          <div className="mind-scaled-stage" style={{ width: (layout?.width ?? 1400) * zoom, height: (layout?.height ?? 500) * zoom }}>
             <div className="mind-map-stage" style={{ width: layout?.width, height: layout?.height, transform: `scale(${zoom})` }}>
               <svg className="mind-links" width={layout?.width} height={layout?.height} aria-hidden="true">
                 {layout?.edges.map(edge => {
