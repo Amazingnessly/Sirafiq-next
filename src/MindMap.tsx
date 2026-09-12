@@ -162,6 +162,17 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
   const layout = useMemo(() => root ? buildLayout(nodes, root) : null, [nodes, root]);
   const byId = useMemo(() => new Map(layout?.positioned.map(item => [item.node.id, item]) ?? []), [layout]);
   const maxDepth = layout?.positioned.length ? Math.max(...layout.positioned.map(item => item.depth)) : 0;
+  const blockedParentIds = useMemo(() => {
+    if (!selected) return new Set<string>();
+    return new Set([selected.id, ...descendants(nodes, selected.id)]);
+  }, [nodes, selected]);
+  const parentOptions = useMemo(
+    () => nodes.filter(node => !blockedParentIds.has(node.id)),
+    [nodes, blockedParentIds],
+  );
+  const selectedParentId = selected && selected.id !== root?.id
+    ? (layout?.effectiveParent.get(selected.id) ?? root?.id ?? '')
+    : '';
 
   useEffect(() => {
     if (!nodes.length) {
@@ -200,6 +211,18 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
     onChange([...nodes, next]);
     setSelectedId(next.id);
     setText('');
+  };
+
+  const moveSelectedUnder = (parentId: string) => {
+    if (!selected || selected.id === root?.id || blockedParentIds.has(parentId)) return;
+    const currentParentId = layout?.effectiveParent.get(selected.id) ?? selected.parentId ?? root?.id;
+    if (currentParentId === parentId) return;
+    onChange(nodes.map(node => node.id === selected.id ? {
+      ...node,
+      parentId,
+      offsetX: 0,
+      offsetY: 0,
+    } : node));
   };
 
   const removeSelected = () => {
@@ -412,10 +435,18 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
         <p className="eyebrow">NŒUD SÉLECTIONNÉ</p>
         <h2>{selected?.text ?? supportName}</h2>
         {selected && <form onSubmit={renameSelected}><label>Nom du nœud<input value={editText} onChange={event => setEditText(event.target.value)} placeholder="Nom du nœud" /></label><button className="primary" type="submit" disabled={!editText.trim() || editText.trim() === selected.text}>Enregistrer le nom</button></form>}
+        {selected && selected.id !== root?.id && <div className="mind-parent-control">
+          <label>Branche parente
+            <select value={selectedParentId} onChange={event => moveSelectedUnder(event.target.value)}>
+              {parentOptions.map(node => <option key={node.id} value={node.id}>{node.text}</option>)}
+            </select>
+          </label>
+          <small>Changer la branche réorganise ce nœud et tout son sous-arbre. Sa position manuelle est remise à zéro pour éviter un décalage incohérent.</small>
+        </div>}
         <form onSubmit={addNode}><label>Ajouter une idée reliée<input value={text} onChange={event => setText(event.target.value)} placeholder="Nouvelle notion…" /></label><button className="primary" type="submit" disabled={!text.trim()}>Ajouter</button></form>
         {selectedHasManualPosition && <button className="mind-reset-position" type="button" onClick={resetSelectedPosition}>Réinitialiser la position</button>}
         <button className="mind-delete" type="button" disabled={!selected || selected.id === root?.id} onClick={removeSelected}>Supprimer cette branche</button>
-        <small>{selected?.id === root?.id ? 'Le sujet central peut être renommé et déplacé. Il reste le point d’ancrage de la carte.' : 'Sélectionne ou fais glisser un nœud pour l’organiser, le renommer ou lui ajouter une idée.'}</small>
+        <small>{selected?.id === root?.id ? 'Le sujet central peut être renommé et déplacé. Il reste le point d’ancrage de la carte.' : 'Sélectionne ou fais glisser un nœud pour l’organiser, le renommer, le rattacher à une autre branche ou lui ajouter une idée.'}</small>
       </aside>
     </div>
   </main>;
