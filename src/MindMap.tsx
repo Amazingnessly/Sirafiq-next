@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, PointerEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 export type MindNode = { id: string; parentId: string | null; text: string; createdAt: string };
 
@@ -11,6 +11,8 @@ type Props = {
 
 type PositionedNode = { node: MindNode; x: number; y: number; side: -1 | 0 | 1; depth: number };
 type Edge = { from: string; to: string; side: -1 | 1 };
+type Pan = { x: number; y: number };
+type DragState = { pointerId: number; startX: number; startY: number; originX: number; originY: number };
 
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 1.25;
@@ -123,7 +125,10 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
   const [text, setText] = useState('');
   const [editText, setEditText] = useState(rootNodes[0]?.text ?? supportName);
   const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState<Pan>({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<DragState | null>(null);
   const selected = nodes.find(node => node.id === selectedId) ?? null;
   const root = rootNodes[0] ?? null;
   const layout = useMemo(() => root ? buildLayout(nodes, root) : null, [nodes, root]);
@@ -177,43 +182,73 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
     setSelectedId(visualParent);
   };
 
-  const recenter = (behavior: ScrollBehavior = 'smooth') => {
+  const recenter = (targetZoom = zoom) => {
     const viewport = viewportRef.current;
     if (!viewport || !layout) return;
-    viewport.scrollTo({
-      left: Math.max(0, layout.centerX * zoom - viewport.clientWidth / 2),
-      top: Math.max(0, layout.rootY * zoom - viewport.clientHeight / 2),
-      behavior,
+    setPan({
+      x: viewport.clientWidth / 2 - layout.centerX * targetZoom,
+      y: viewport.clientHeight / 2 - layout.rootY * targetZoom,
     });
   };
 
-  const showOverview = (behavior: ScrollBehavior = 'smooth') => {
+  const showOverview = () => {
     const viewport = viewportRef.current;
     if (!viewport || !layout) return;
-    const horizontalFit = (viewport.clientWidth - 18) / layout.width;
-    const verticalFit = (viewport.clientHeight - 18) / layout.height;
+    const horizontalFit = (viewport.clientWidth - 30) / layout.width;
+    const verticalFit = (viewport.clientHeight - 30) / layout.height;
     const next = clampZoom(Math.min(horizontalFit, verticalFit, 0.9));
     setZoom(next);
-    window.setTimeout(() => recenter(behavior), 30);
+    recenter(next);
   };
 
-  const showComfortableView = (behavior: ScrollBehavior = 'auto') => {
+  const showComfortableView = () => {
     const viewport = viewportRef.current;
     if (!viewport || !layout) return;
     const preferred = viewport.clientWidth <= 430 ? 0.58 : viewport.clientWidth <= 820 ? 0.72 : 0.9;
-    setZoom(clampZoom(preferred));
-    window.setTimeout(() => recenter(behavior), 30);
+    const next = clampZoom(preferred);
+    setZoom(next);
+    recenter(next);
+  };
+
+  const startPan = (event: PointerEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest('button')) return;
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: pan.x,
+      originY: pan.y,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setIsPanning(true);
+  };
+
+  const movePan = (event: PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    setPan({
+      x: drag.originX + event.clientX - drag.startX,
+      y: drag.originY + event.clientY - drag.startY,
+    });
+  };
+
+  const stopPan = (event: PointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    setIsPanning(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
   useEffect(() => {
-    const timer = window.setTimeout(() => showComfortableView('auto'), 90);
+    const timer = window.setTimeout(showComfortableView, 90);
     return () => window.clearTimeout(timer);
   }, [layout?.width, layout?.height]);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => recenter('auto'), 40);
-    return () => window.clearTimeout(timer);
-  }, [zoom]);
+  const changeZoom = (nextZoom: number) => {
+    const next = clampZoom(nextZoom);
+    setZoom(next);
+    recenter(next);
+  };
 
   return <main className="shell mind-shell">
     <button className="back" type="button" onClick={onBack}>← Espace d’étude</button>
@@ -225,42 +260,59 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
           <div className="mind-actions">
             <small>{maxDepth + 1} niveau{maxDepth > 0 ? 'x' : ''} · {layout?.positioned.length ?? 1}/{nodes.length || 1} affichés</small>
             <div className="mind-zoom" aria-label="Zoom de la carte mentale">
-              <button type="button" onClick={() => setZoom(clampZoom(zoom - ZOOM_STEP))} aria-label="Dézoomer">−</button>
+              <button type="button" onClick={() => changeZoom(zoom - ZOOM_STEP)} aria-label="Dézoomer">−</button>
               <output>{Math.round(zoom * 100)}%</output>
-              <button type="button" onClick={() => setZoom(clampZoom(zoom + ZOOM_STEP))} aria-label="Zoomer">+</button>
+              <button type="button" onClick={() => changeZoom(zoom + ZOOM_STEP)} aria-label="Zoomer">+</button>
             </div>
-            <button type="button" onClick={() => showOverview()}>Vue entière</button>
+            <button type="button" onClick={showOverview}>Vue entière</button>
             <button type="button" onClick={() => recenter()}>Recentrer</button>
           </div>
         </div>
-        {!root ? <div className="mind-empty"><button className="mind-root-preview" type="button" onClick={() => { const made = ensureRoot(); setSelectedId(made.id); }}>{supportName}</button><p>Touche le sujet pour commencer la carte.</p></div> : <div className="mind-viewport" ref={viewportRef}>
-          <div className="mind-scaled-stage" style={{ width: (layout?.width ?? 720) * zoom, height: (layout?.height ?? 320) * zoom }}>
-            <div className="mind-map-stage" style={{ width: layout?.width, height: layout?.height, transform: `scale(${zoom})` }}>
-              <svg className="mind-links" width={layout?.width} height={layout?.height} aria-hidden="true">
-                {layout?.edges.map(edge => {
-                  const from = byId.get(edge.from);
-                  const to = byId.get(edge.to);
-                  if (!from || !to) return null;
-                  const startX = from.x + edge.side * (from.depth === 0 ? 108 : 92);
-                  const endX = to.x - edge.side * 92;
-                  const control = (startX + endX) / 2;
-                  return <path key={`${edge.from}-${edge.to}`} d={`M ${startX} ${from.y} C ${control} ${from.y}, ${control} ${to.y}, ${endX} ${to.y}`} />;
-                })}
-              </svg>
-              {layout?.positioned.map(item => <button
-                key={item.node.id}
-                type="button"
-                className={`mind-map-node depth-${Math.min(item.depth, 4)}${item.node.id === selectedId ? ' selected' : ''}${item.depth === 0 ? ' root' : ''}`}
-                style={{ left: item.x, top: item.y }}
-                onClick={() => setSelectedId(item.node.id)}
-                aria-pressed={item.node.id === selectedId}
-              >
-                {item.depth === 0 ? <span>Sujet</span> : <span>Niveau {item.depth}</span>}
-                <strong>{item.node.text}</strong>
-              </button>)}
+        {!root ? <div className="mind-empty"><button className="mind-root-preview" type="button" onClick={() => { const made = ensureRoot(); setSelectedId(made.id); }}>{supportName}</button><p>Touche le sujet pour commencer la carte.</p></div> : <>
+          <p className="mind-pan-hint">Glisse le fond de la carte pour la déplacer.</p>
+          <div
+            className={`mind-viewport${isPanning ? ' panning' : ''}`}
+            ref={viewportRef}
+            onPointerDown={startPan}
+            onPointerMove={movePan}
+            onPointerUp={stopPan}
+            onPointerCancel={stopPan}
+          >
+            <div
+              className="mind-scaled-stage"
+              style={{
+                width: (layout?.width ?? 720) * zoom,
+                height: (layout?.height ?? 320) * zoom,
+                transform: `translate3d(${pan.x}px, ${pan.y}px, 0)`,
+              }}
+            >
+              <div className="mind-map-stage" style={{ width: layout?.width, height: layout?.height, transform: `scale(${zoom})` }}>
+                <svg className="mind-links" width={layout?.width} height={layout?.height} aria-hidden="true">
+                  {layout?.edges.map(edge => {
+                    const from = byId.get(edge.from);
+                    const to = byId.get(edge.to);
+                    if (!from || !to) return null;
+                    const startX = from.x + edge.side * (from.depth === 0 ? 108 : 92);
+                    const endX = to.x - edge.side * 92;
+                    const control = (startX + endX) / 2;
+                    return <path key={`${edge.from}-${edge.to}`} d={`M ${startX} ${from.y} C ${control} ${from.y}, ${control} ${to.y}, ${endX} ${to.y}`} />;
+                  })}
+                </svg>
+                {layout?.positioned.map(item => <button
+                  key={item.node.id}
+                  type="button"
+                  className={`mind-map-node depth-${Math.min(item.depth, 4)}${item.node.id === selectedId ? ' selected' : ''}${item.depth === 0 ? ' root' : ''}`}
+                  style={{ left: item.x, top: item.y }}
+                  onClick={() => setSelectedId(item.node.id)}
+                  aria-pressed={item.node.id === selectedId}
+                >
+                  {item.depth === 0 ? <span>Sujet</span> : <span>Niveau {item.depth}</span>}
+                  <strong>{item.node.text}</strong>
+                </button>)}
+              </div>
             </div>
           </div>
-        </div>}
+        </>}
       </section>
       <aside className="mind-editor">
         <p className="eyebrow">NŒUD SÉLECTIONNÉ</p>
