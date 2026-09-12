@@ -1,6 +1,13 @@
 import { FormEvent, PointerEvent, useEffect, useMemo, useRef, useState } from 'react';
 
-export type MindNode = { id: string; parentId: string | null; text: string; createdAt: string };
+export type MindNode = {
+  id: string;
+  parentId: string | null;
+  text: string;
+  createdAt: string;
+  offsetX?: number;
+  offsetY?: number;
+};
 
 type Props = {
   supportName: string;
@@ -12,7 +19,19 @@ type Props = {
 type PositionedNode = { node: MindNode; x: number; y: number; side: -1 | 0 | 1; depth: number };
 type Edge = { from: string; to: string; side: -1 | 1 };
 type Pan = { x: number; y: number };
-type DragState = { pointerId: number; startX: number; startY: number; originX: number; originY: number };
+type PanDrag = { pointerId: number; startX: number; startY: number; originX: number; originY: number };
+type NodeDrag = {
+  pointerId: number;
+  nodeId: string;
+  startX: number;
+  startY: number;
+  originOffsetX: number;
+  originOffsetY: number;
+  dx: number;
+  dy: number;
+};
+
+type NodePreview = { nodeId: string; dx: number; dy: number };
 
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 1.25;
@@ -81,7 +100,7 @@ function buildLayout(nodes: MindNode[], root: MindNode) {
       });
       y = (Math.min(...ys) + Math.max(...ys)) / 2;
     }
-    positioned.push({ node, x: side * horizontalStep * depth, y, side, depth });
+    positioned.push({ node, x: side * horizontalStep * depth + (node.offsetX ?? 0), y: y + (node.offsetY ?? 0), side, depth });
     return y;
   };
 
@@ -96,10 +115,16 @@ function buildLayout(nodes: MindNode[], root: MindNode) {
 
   const branchBottom = Math.max(leftCursor, rightCursor);
   const rawRootY = Math.max(150, (branchBottom - verticalStep + 82) / 2);
-  positioned.push({ node: root, x: 0, y: rawRootY, side: 0, depth: 0 });
+  positioned.push({
+    node: root,
+    x: root.offsetX ?? 0,
+    y: rawRootY + (root.offsetY ?? 0),
+    side: 0,
+    depth: 0,
+  });
 
-  const horizontalPadding = 54;
-  const verticalPadding = 48;
+  const horizontalPadding = 70;
+  const verticalPadding = 64;
   const minX = Math.min(...positioned.map(item => item.x - (item.depth === 0 ? 108 : 92))) - horizontalPadding;
   const maxX = Math.max(...positioned.map(item => item.x + (item.depth === 0 ? 108 : 92))) + horizontalPadding;
   const minY = Math.min(...positioned.map(item => item.y - (item.depth === 0 ? 50 : 40))) - verticalPadding;
@@ -107,14 +132,15 @@ function buildLayout(nodes: MindNode[], root: MindNode) {
   const shiftX = -minX;
   const shiftY = -minY;
   const compactPositioned = positioned.map(item => ({ ...item, x: item.x + shiftX, y: item.y + shiftY }));
+  const compactRoot = compactPositioned.find(item => item.node.id === root.id);
 
   return {
     positioned: compactPositioned,
     edges,
     width: Math.max(360, maxX - minX),
     height: Math.max(260, maxY - minY),
-    centerX: shiftX,
-    rootY: rawRootY + shiftY,
+    centerX: compactRoot?.x ?? shiftX,
+    rootY: compactRoot?.y ?? rawRootY + shiftY,
     effectiveParent,
   };
 }
@@ -127,8 +153,10 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState<Pan>({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
+  const [nodePreview, setNodePreview] = useState<NodePreview | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<DragState | null>(null);
+  const panDragRef = useRef<PanDrag | null>(null);
+  const nodeDragRef = useRef<NodeDrag | null>(null);
   const selected = nodes.find(node => node.id === selectedId) ?? null;
   const root = rootNodes[0] ?? null;
   const layout = useMemo(() => root ? buildLayout(nodes, root) : null, [nodes, root]);
@@ -182,6 +210,11 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
     setSelectedId(visualParent);
   };
 
+  const resetSelectedPosition = () => {
+    if (!selected) return;
+    onChange(nodes.map(node => node.id === selected.id ? { ...node, offsetX: 0, offsetY: 0 } : node));
+  };
+
   const recenter = (targetZoom = zoom) => {
     const viewport = viewportRef.current;
     if (!viewport || !layout) return;
@@ -212,7 +245,7 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
 
   const startPan = (event: PointerEvent<HTMLDivElement>) => {
     if ((event.target as HTMLElement).closest('button')) return;
-    dragRef.current = {
+    panDragRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
@@ -224,7 +257,7 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
   };
 
   const movePan = (event: PointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current;
+    const drag = panDragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     setPan({
       x: drag.originX + event.clientX - drag.startX,
@@ -233,22 +266,75 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
   };
 
   const stopPan = (event: PointerEvent<HTMLDivElement>) => {
-    if (dragRef.current?.pointerId !== event.pointerId) return;
-    dragRef.current = null;
+    if (panDragRef.current?.pointerId !== event.pointerId) return;
+    panDragRef.current = null;
     setIsPanning(false);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+
+  const startNodeDrag = (event: PointerEvent<HTMLButtonElement>, node: MindNode) => {
+    event.stopPropagation();
+    setSelectedId(node.id);
+    nodeDragRef.current = {
+      pointerId: event.pointerId,
+      nodeId: node.id,
+      startX: event.clientX,
+      startY: event.clientY,
+      originOffsetX: node.offsetX ?? 0,
+      originOffsetY: node.offsetY ?? 0,
+      dx: 0,
+      dy: 0,
+    };
+    setNodePreview({ nodeId: node.id, dx: 0, dy: 0 });
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const moveNodeDrag = (event: PointerEvent<HTMLButtonElement>) => {
+    const drag = nodeDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const dx = (event.clientX - drag.startX) / zoom;
+    const dy = (event.clientY - drag.startY) / zoom;
+    drag.dx = dx;
+    drag.dy = dy;
+    setNodePreview({ nodeId: drag.nodeId, dx, dy });
+  };
+
+  const stopNodeDrag = (event: PointerEvent<HTMLButtonElement>) => {
+    const drag = nodeDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    nodeDragRef.current = null;
+    setNodePreview(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    if (Math.hypot(drag.dx, drag.dy) < 3) return;
+    onChange(nodes.map(node => node.id === drag.nodeId ? {
+      ...node,
+      offsetX: drag.originOffsetX + drag.dx,
+      offsetY: drag.originOffsetY + drag.dy,
+    } : node));
+  };
+
+  const visualPosition = (item: PositionedNode) => {
+    if (nodePreview?.nodeId !== item.node.id) return { x: item.x, y: item.y };
+    return { x: item.x + nodePreview.dx, y: item.y + nodePreview.dy };
+  };
+
+  const positionById = (id: string) => {
+    const item = byId.get(id);
+    return item ? { ...item, ...visualPosition(item) } : null;
   };
 
   useEffect(() => {
     const timer = window.setTimeout(showComfortableView, 90);
     return () => window.clearTimeout(timer);
-  }, [layout?.width, layout?.height]);
+  }, [root?.id]);
 
   const changeZoom = (nextZoom: number) => {
     const next = clampZoom(nextZoom);
     setZoom(next);
     recenter(next);
   };
+
+  const selectedHasManualPosition = Boolean(selected && ((selected.offsetX ?? 0) !== 0 || (selected.offsetY ?? 0) !== 0));
 
   return <main className="shell mind-shell">
     <button className="back" type="button" onClick={onBack}>← Espace d’étude</button>
@@ -269,7 +355,7 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
           </div>
         </div>
         {!root ? <div className="mind-empty"><button className="mind-root-preview" type="button" onClick={() => { const made = ensureRoot(); setSelectedId(made.id); }}>{supportName}</button><p>Touche le sujet pour commencer la carte.</p></div> : <>
-          <p className="mind-pan-hint">Glisse le fond de la carte pour la déplacer.</p>
+          <p className="mind-pan-hint">Glisse le fond pour déplacer la carte. Glisse directement un nœud pour le repositionner.</p>
           <div
             className={`mind-viewport${isPanning ? ' panning' : ''}`}
             ref={viewportRef}
@@ -289,8 +375,8 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
               <div className="mind-map-stage" style={{ width: layout?.width, height: layout?.height, transform: `scale(${zoom})` }}>
                 <svg className="mind-links" width={layout?.width} height={layout?.height} aria-hidden="true">
                   {layout?.edges.map(edge => {
-                    const from = byId.get(edge.from);
-                    const to = byId.get(edge.to);
+                    const from = positionById(edge.from);
+                    const to = positionById(edge.to);
                     if (!from || !to) return null;
                     const startX = from.x + edge.side * (from.depth === 0 ? 108 : 92);
                     const endX = to.x - edge.side * 92;
@@ -298,17 +384,25 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
                     return <path key={`${edge.from}-${edge.to}`} d={`M ${startX} ${from.y} C ${control} ${from.y}, ${control} ${to.y}, ${endX} ${to.y}`} />;
                   })}
                 </svg>
-                {layout?.positioned.map(item => <button
-                  key={item.node.id}
-                  type="button"
-                  className={`mind-map-node depth-${Math.min(item.depth, 4)}${item.node.id === selectedId ? ' selected' : ''}${item.depth === 0 ? ' root' : ''}`}
-                  style={{ left: item.x, top: item.y }}
-                  onClick={() => setSelectedId(item.node.id)}
-                  aria-pressed={item.node.id === selectedId}
-                >
-                  {item.depth === 0 ? <span>Sujet</span> : <span>Niveau {item.depth}</span>}
-                  <strong>{item.node.text}</strong>
-                </button>)}
+                {layout?.positioned.map(item => {
+                  const position = visualPosition(item);
+                  const dragging = nodePreview?.nodeId === item.node.id;
+                  return <button
+                    key={item.node.id}
+                    type="button"
+                    className={`mind-map-node depth-${Math.min(item.depth, 4)}${item.node.id === selectedId ? ' selected' : ''}${item.depth === 0 ? ' root' : ''}${dragging ? ' dragging' : ''}`}
+                    style={{ left: position.x, top: position.y }}
+                    onPointerDown={event => startNodeDrag(event, item.node)}
+                    onPointerMove={moveNodeDrag}
+                    onPointerUp={stopNodeDrag}
+                    onPointerCancel={stopNodeDrag}
+                    onClick={() => setSelectedId(item.node.id)}
+                    aria-pressed={item.node.id === selectedId}
+                  >
+                    {item.depth === 0 ? <span>Sujet</span> : <span>Niveau {item.depth}</span>}
+                    <strong>{item.node.text}</strong>
+                  </button>;
+                })}
               </div>
             </div>
           </div>
@@ -319,8 +413,9 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
         <h2>{selected?.text ?? supportName}</h2>
         {selected && <form onSubmit={renameSelected}><label>Nom du nœud<input value={editText} onChange={event => setEditText(event.target.value)} placeholder="Nom du nœud" /></label><button className="primary" type="submit" disabled={!editText.trim() || editText.trim() === selected.text}>Enregistrer le nom</button></form>}
         <form onSubmit={addNode}><label>Ajouter une idée reliée<input value={text} onChange={event => setText(event.target.value)} placeholder="Nouvelle notion…" /></label><button className="primary" type="submit" disabled={!text.trim()}>Ajouter</button></form>
+        {selectedHasManualPosition && <button className="mind-reset-position" type="button" onClick={resetSelectedPosition}>Réinitialiser la position</button>}
         <button className="mind-delete" type="button" disabled={!selected || selected.id === root?.id} onClick={removeSelected}>Supprimer cette branche</button>
-        <small>{selected?.id === root?.id ? 'Le sujet central peut être renommé. Il reste le point d’ancrage de la carte.' : 'Sélectionne un nœud pour le renommer ou lui ajouter une idée.'}</small>
+        <small>{selected?.id === root?.id ? 'Le sujet central peut être renommé et déplacé. Il reste le point d’ancrage de la carte.' : 'Sélectionne ou fais glisser un nœud pour l’organiser, le renommer ou lui ajouter une idée.'}</small>
       </aside>
     </div>
   </main>;
