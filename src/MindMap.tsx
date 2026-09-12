@@ -38,9 +38,6 @@ function buildLayout(nodes: MindNode[], root: MindNode) {
     effectiveParent.set(node.id, validParent ? parentId : root.id);
   });
 
-  // Preserve existing parent/child chains even when an older map contains several roots.
-  // Only the top of a disconnected component is visually attached to the canonical subject.
-  // Cycles are broken deterministically by attaching the inspected node to the subject.
   nodes.forEach(node => {
     if (node.id === root.id) return;
     const seen = new Set<string>([node.id]);
@@ -99,8 +96,6 @@ function buildLayout(nodes: MindNode[], root: MindNode) {
   const rawRootY = Math.max(150, (branchBottom - verticalStep + 82) / 2);
   positioned.push({ node: root, x: 0, y: rawRootY, side: 0, depth: 0 });
 
-  // Crop the virtual canvas to the actual graph instead of a fixed 1400px stage.
-  // This keeps "Vue entière" useful on phones and removes large blank areas.
   const horizontalPadding = 54;
   const verticalPadding = 48;
   const minX = Math.min(...positioned.map(item => item.x - (item.depth === 0 ? 108 : 92))) - horizontalPadding;
@@ -126,6 +121,7 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
   const rootNodes = useMemo(() => nodes.filter(node => node.parentId === null), [nodes]);
   const [selectedId, setSelectedId] = useState<string | null>(rootNodes[0]?.id ?? null);
   const [text, setText] = useState('');
+  const [editText, setEditText] = useState(rootNodes[0]?.text ?? supportName);
   const [zoom, setZoom] = useState(1);
   const viewportRef = useRef<HTMLDivElement>(null);
   const selected = nodes.find(node => node.id === selectedId) ?? null;
@@ -142,12 +138,24 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
     if (!selectedId || !nodes.some(node => node.id === selectedId)) setSelectedId(rootNodes[0]?.id ?? nodes[0].id);
   }, [nodes, rootNodes, selectedId]);
 
+  useEffect(() => {
+    setEditText(selected?.text ?? '');
+  }, [selectedId, selected?.text]);
+
   const ensureRoot = () => {
     if (rootNodes.length > 0) return rootNodes[0];
     const madeRoot: MindNode = { id: crypto.randomUUID(), parentId: null, text: supportName, createdAt: new Date().toISOString() };
     onChange([madeRoot, ...nodes]);
     setSelectedId(madeRoot.id);
     return madeRoot;
+  };
+
+  const renameSelected = (event: FormEvent) => {
+    event.preventDefault();
+    if (!selected) return;
+    const clean = editText.trim();
+    if (!clean || clean === selected.text) return;
+    onChange(nodes.map(node => node.id === selected.id ? { ...node, text: clean } : node));
   };
 
   const addNode = (event: FormEvent) => {
@@ -257,9 +265,10 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
       <aside className="mind-editor">
         <p className="eyebrow">NŒUD SÉLECTIONNÉ</p>
         <h2>{selected?.text ?? supportName}</h2>
+        {selected && <form onSubmit={renameSelected}><label>Nom du nœud<input value={editText} onChange={event => setEditText(event.target.value)} placeholder="Nom du nœud" /></label><button className="primary" type="submit" disabled={!editText.trim() || editText.trim() === selected.text}>Enregistrer le nom</button></form>}
         <form onSubmit={addNode}><label>Ajouter une idée reliée<input value={text} onChange={event => setText(event.target.value)} placeholder="Nouvelle notion…" /></label><button className="primary" type="submit" disabled={!text.trim()}>Ajouter</button></form>
         <button className="mind-delete" type="button" disabled={!selected || selected.id === root?.id} onClick={removeSelected}>Supprimer cette branche</button>
-        <small>{nodes.length || 1} nœud{(nodes.length || 1) > 1 ? 's' : ''} enregistré{(nodes.length || 1) > 1 ? 's' : ''}</small>
+        <small>{selected?.id === root?.id ? 'Le sujet central peut être renommé. Il reste le point d’ancrage de la carte.' : 'Sélectionne un nœud pour le renommer ou lui ajouter une idée.'}</small>
       </aside>
     </div>
   </main>;
