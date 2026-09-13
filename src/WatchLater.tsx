@@ -13,11 +13,12 @@ type Props = {
   items: WatchItem[];
   onChange: (items: WatchItem[]) => void;
   onClose: () => void;
+  storageWarning?: string;
 };
 
 const statuses: WatchItem['status'][] = ['À voir', 'En cours', 'Terminé'];
 
-export function WatchLater({ items, onChange, onClose }: Props) {
+export function WatchLater({ items, onChange, onClose, storageWarning = '' }: Props) {
   const [title, setTitle] = useState('');
   const [url, setUrl] = useState('');
   const [collection, setCollection] = useState('Général');
@@ -69,6 +70,7 @@ export function WatchLater({ items, onChange, onClose }: Props) {
         <div><p className="eyebrow">SIRĀFIQ · À VOIR</p><h1>File de visionnage</h1><p>Range les vidéos et playlists que tu veux retrouver sans les laisser se perdre.</p></div>
         <button className="watch-close" type="button" onClick={onClose}>Fermer</button>
       </header>
+      {storageWarning && <p className="watch-error" role="alert">{storageWarning}</p>}
 
       <form className="watch-form" onSubmit={submit}>
         <label>Titre<input value={title} onChange={event => setTitle(event.target.value)} placeholder="Nom de la vidéo ou playlist" /></label>
