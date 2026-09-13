@@ -313,6 +313,8 @@ function App() {
   };
 
   const remove = async (id: string) => {
+    const support = supports.find(item => item.id === id);
+    if (!support || !window.confirm(`Supprimer définitivement « ${support.name} » ?\n\nLe fichier et toutes ses données d’étude (cartes, restitutions, notes, repères et mémorisation) seront supprimés de cet appareil.`)) return;
     await deleteSupport(id);
     await refresh();
     if (hubSupport?.id === id) setHubSupport(null);

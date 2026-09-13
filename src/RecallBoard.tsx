@@ -42,7 +42,8 @@ export function RecallBoard({ supportName, draft = '', attempts = [], onDraftCha
     draftTimerRef.current = window.setTimeout(() => persistDraft(value), 500);
   };
 
-  const clearDraft = () => {
+  const clearDraft = (askConfirmation = true) => {
+    if (askConfirmation && text.trim() && !window.confirm('Effacer définitivement le brouillon de restitution actuel ?')) return;
     setText('');
     persistDraft('');
   };
@@ -56,10 +57,14 @@ export function RecallBoard({ supportName, draft = '', attempts = [], onDraftCha
     const clean = text.trim();
     if (!clean) return;
     onAttemptsChange([...attempts, { id: crypto.randomUUID(), text: clean, createdAt: new Date().toISOString() }]);
-    clearDraft();
+    clearDraft(false);
   };
 
-  const removeAttempt = (id: string) => onAttemptsChange(attempts.filter(attempt => attempt.id !== id));
+  const removeAttempt = (id: string) => {
+    const attempt = attempts.find(item => item.id === id);
+    if (!attempt || !window.confirm(`Supprimer définitivement cette tentative de restitution (${wordCount(attempt.text)} mots) ?`)) return;
+    onAttemptsChange(attempts.filter(item => item.id !== id));
+  };
 
   return <main className="shell recall-shell">
     <button className="back" type="button" onClick={handleBack}>← Bibliothèque</button>
@@ -71,7 +76,7 @@ export function RecallBoard({ supportName, draft = '', attempts = [], onDraftCha
     <section className="recall-board">
       <div className="recall-meta"><strong>{wordCount(text)} mot{wordCount(text) > 1 ? 's' : ''}</strong><span>Ne consulte le support qu’après avoir terminé ton effort de rappel.</span></div>
       <textarea value={text} onChange={event => change(event.target.value)} placeholder="Commence ta restitution ici…" autoFocus />
-      <div className="recall-actions"><button type="button" onClick={clearDraft} disabled={!text}>Effacer le brouillon</button><button className="primary" type="button" onClick={saveAttempt} disabled={!text.trim()}>Enregistrer cette tentative</button></div>
+      <div className="recall-actions"><button type="button" onClick={() => clearDraft()} disabled={!text}>Effacer le brouillon</button><button className="primary" type="button" onClick={saveAttempt} disabled={!text.trim()}>Enregistrer cette tentative</button></div>
     </section>
     <section className="recall-history">
       <div className="recall-history-title"><span>Historique</span><h2>Tentatives enregistrées</h2></div>

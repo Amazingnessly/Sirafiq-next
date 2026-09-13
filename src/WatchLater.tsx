@@ -57,7 +57,11 @@ export function WatchLater({ items, onChange, onClose }: Props) {
   };
 
   const patch = (id: string, next: Partial<WatchItem>) => onChange(items.map(item => item.id === id ? { ...item, ...next } : item));
-  const remove = (id: string) => onChange(items.filter(item => item.id !== id));
+  const remove = (id: string) => {
+    const item = items.find(entry => entry.id === id);
+    if (!item || !window.confirm(`Supprimer définitivement « ${item.title} » de la file À voir ?`)) return;
+    onChange(items.filter(entry => entry.id !== id));
+  };
 
   return <section className="watch-overlay" role="dialog" aria-modal="true" aria-label="À voir plus tard">
     <div className="watch-shell">

@@ -152,6 +152,7 @@ export function PdfVisualReader({ name, source, initialPage = 1, initialZoom = 1
     onNotesChange(text ? [...withoutCurrent, { page: pageNumber, text, updatedAt: new Date().toISOString() }].sort((a, b) => a.page - b.page) : withoutCurrent);
   };
   const deleteNote = () => {
+    if (!currentNote || !window.confirm(`Supprimer définitivement la note de la page ${pageNumber} ?`)) return;
     setNoteDraft('');
     onNotesChange(cleanNotes.filter(note => note.page !== pageNumber));
   };

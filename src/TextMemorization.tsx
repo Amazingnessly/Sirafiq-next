@@ -66,6 +66,12 @@ export function TextMemorization({ supportName, passages, onChange, onBack }: Pr
     setRecall('');
   };
 
+  const removePassage = (id: string) => {
+    const passage = passages.find(item => item.id === id);
+    if (!passage || !window.confirm(`Supprimer définitivement le passage « ${passage.title} » et son historique de pratique ?`)) return;
+    onChange(passages.filter(item => item.id !== id));
+  };
+
   if (phase !== 'manage' && active) return <main className="shell memory-shell">
     <button className="back" type="button" onClick={() => { setPhase('manage'); setActiveId(null); }}>← Mémorisation</button>
     <header className="memory-header"><p className="eyebrow">MÉMORISATION ACTIVE · {supportName}</p><h1>{active.title}</h1></header>
@@ -86,7 +92,7 @@ export function TextMemorization({ supportName, passages, onChange, onBack }: Pr
       </form>
       <section className="memory-list">
         <div className="memory-list-title"><span>PASSAGES</span><strong>{passages.length}</strong></div>
-        {passages.length === 0 ? <div className="empty"><h3>Aucun passage</h3><p>Ajoute un premier extrait précis à mémoriser.</p></div> : passages.map(item => <article key={item.id}><div><h2>{item.title}</h2><p>{item.text}</p><small>{item.attempts} tentative{item.attempts > 1 ? 's' : ''} · {item.successes} satisfaisante{item.successes > 1 ? 's' : ''}</small></div><div className="memory-actions"><button type="button" onClick={() => start(item.id)}>Mémoriser</button><button type="button" onClick={() => onChange(passages.filter(passage => passage.id !== item.id))}>Supprimer</button></div></article>)}
+        {passages.length === 0 ? <div className="empty"><h3>Aucun passage</h3><p>Ajoute un premier extrait précis à mémoriser.</p></div> : passages.map(item => <article key={item.id}><div><h2>{item.title}</h2><p>{item.text}</p><small>{item.attempts} tentative{item.attempts > 1 ? 's' : ''} · {item.successes} satisfaisante{item.successes > 1 ? 's' : ''}</small></div><div className="memory-actions"><button type="button" onClick={() => start(item.id)}>Mémoriser</button><button type="button" onClick={() => removePassage(item.id)}>Supprimer</button></div></article>)}
       </section>
     </div>
   </main>;
