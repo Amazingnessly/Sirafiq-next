@@ -48,6 +48,8 @@ type PayloadChunk = {
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 let persistencePromise: Promise<boolean> | null = null;
+let cleanupPromise: Promise<void> | null = null;
+const activeImports = new Set<string>();
 
 function notifyMetadataChanged(detail: SupportMetadataChange) {
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent<SupportMetadataChange>(SUPPORT_METADATA_CHANGED_EVENT, { detail }));
@@ -125,7 +127,39 @@ function openDb(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
+function cleanupOrphanedPayloadChunks(): Promise<void> {
+  if (cleanupPromise) return cleanupPromise;
+
+  cleanupPromise = openDb().then(db => new Promise<void>((resolve, reject) => {
+    const tx = db.transaction([META_STORE, CHUNK_STORE], 'readwrite');
+    const metadataKeysRequest = tx.objectStore(META_STORE).getAllKeys();
+
+    metadataKeysRequest.onsuccess = () => {
+      const validIds = new Set(metadataKeysRequest.result.map(key => String(key)));
+      const cursorRequest = tx.objectStore(CHUNK_STORE).index(CHUNK_INDEX).openKeyCursor();
+      cursorRequest.onsuccess = () => {
+        const cursor = cursorRequest.result;
+        if (!cursor) return;
+        const supportId = String(cursor.key);
+        if (!validIds.has(supportId) && !activeImports.has(supportId)) cursor.delete();
+        cursor.continue();
+      };
+      cursorRequest.onerror = () => tx.abort();
+    };
+    metadataKeysRequest.onerror = () => tx.abort();
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error('Nettoyage du stockage local interrompu.'));
+  })).catch(error => {
+    cleanupPromise = null;
+    throw error;
+  });
+
+  return cleanupPromise;
+}
+
 export async function listSupportMetadata<T extends { id: string }>(): Promise<T[]> {
+  await cleanupOrphanedPayloadChunks().catch(() => undefined);
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const request = db.transaction(META_STORE, 'readonly').objectStore(META_STORE).getAll();
@@ -229,7 +263,7 @@ async function deletePayloadChunks(supportId: string): Promise<void> {
       cursor.delete();
       cursor.continue();
     };
-    cursorRequest.onerror = () => reject(cursorRequest.error);
+    cursorRequest.onerror = () => tx.abort();
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error ?? new Error('Nettoyage du fichier interrompu.'));
@@ -239,6 +273,7 @@ async function deletePayloadChunks(supportId: string): Promise<void> {
 export async function saveNewSupportFile<T extends { id: string; size: number; type?: string }>(support: T, file: Blob): Promise<void> {
   await requestPersistentStorage();
   const chunkCount = Math.ceil(file.size / PAYLOAD_CHUNK_SIZE);
+  activeImports.add(support.id);
 
   try {
     for (let index = 0; index < chunkCount; index += 1) {
@@ -258,6 +293,8 @@ export async function saveNewSupportFile<T extends { id: string; size: number; t
   } catch (error) {
     await deletePayloadChunks(support.id).catch(() => undefined);
     throw error;
+  } finally {
+    activeImports.delete(support.id);
   }
 }
 
@@ -291,7 +328,7 @@ export async function deleteSupportRecord(id: string): Promise<void> {
       cursor.delete();
       cursor.continue();
     };
-    cursorRequest.onerror = () => reject(cursorRequest.error);
+    cursorRequest.onerror = () => tx.abort();
     tx.oncomplete = () => {
       notifyMetadataChanged({ id, deleted: true });
       resolve();
