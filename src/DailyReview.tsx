@@ -29,6 +29,7 @@ export function DailyReview({ onClose, onCountChange }: Props) {
   const [revealed, setRevealed] = useState(false);
   const [index, setIndex] = useState(0);
   const [status, setStatus] = useState('Chargement des révisions…');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     void loadSupports().then(items => { setSupports(items); setStatus(''); }).catch(() => setStatus('Impossible de charger les révisions locales.'));
@@ -41,21 +42,26 @@ export function DailyReview({ onClose, onCountChange }: Props) {
   useEffect(() => { if (index >= queue.length && queue.length) setIndex(queue.length - 1); }, [index, queue.length]);
 
   const rate = async (success: boolean) => {
-    if (!current) return;
+    if (!current || saving) return;
+    const queueLengthBeforeSave = queue.length;
     const now = new Date();
     const nextStage = success ? Math.min(intervals.length - 1, current.card.stage + 1) : 0;
     const nextReview = new Date(now.getTime() + intervals[nextStage] * DAY).toISOString();
     const support = supports.find(item => item.id === current.supportId);
     if (!support) return;
     const flashcards = (support.flashcards ?? []).map(card => card.id === current.card.id ? { ...card, stage: nextStage, lastReviewedAt: now.toISOString(), nextReviewAt: nextReview } : card);
+    setSaving(true);
     setStatus('Enregistrement…');
     try {
       const updated = await patchSupportMetadata<StoredSupport>(support.id, { flashcards });
       setSupports(items => items.map(item => item.id === updated.id ? updated : item));
+      if (!success && queueLengthBeforeSave > 1) setIndex(currentIndex => (currentIndex + 1) % queueLengthBeforeSave);
       setRevealed(false);
       setStatus('');
     } catch {
       setStatus('Impossible d’enregistrer cette révision.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -65,8 +71,8 @@ export function DailyReview({ onClose, onCountChange }: Props) {
       {status && <p className="daily-status" role="status">{status}</p>}
       {!current ? <div className="daily-empty"><strong>Tout est à jour</strong><p>Aucune carte n’est due maintenant.</p></div> : <div className="daily-review">
         <div className="daily-meta"><span>{current.supportName}</span><strong>{index + 1} / {queue.length}</strong></div>
-        <article className="daily-card" onClick={() => setRevealed(true)}><small>Question</small><h2>{current.card.front}</h2>{revealed ? <div><small>Réponse</small><p>{current.card.back}</p></div> : <button type="button" onClick={() => setRevealed(true)}>Afficher la réponse</button>}</article>
-        {revealed && <div className="daily-rating"><button type="button" onClick={() => void rate(false)}>À revoir</button><button type="button" onClick={() => void rate(true)}>Acquis</button></div>}
+        <article className="daily-card" onClick={() => !saving && setRevealed(true)}><small>Question</small><h2>{current.card.front}</h2>{revealed ? <div><small>Réponse</small><p>{current.card.back}</p></div> : <button type="button" disabled={saving} onClick={() => setRevealed(true)}>Afficher la réponse</button>}</article>
+        {revealed && <div className="daily-rating"><button type="button" disabled={saving} onClick={() => void rate(false)}>À revoir</button><button type="button" disabled={saving} onClick={() => void rate(true)}>Acquis</button></div>}
       </div>}
     </div>
   </section>;
