@@ -45,7 +45,11 @@ export function Flashcards({ supportName, cards, onChange, onBack }: Props) {
     setBack('');
   };
 
-  const removeCard = (id: string) => onChange(cards.filter(card => card.id !== id));
+  const removeCard = (id: string) => {
+    const card = cards.find(item => item.id === id);
+    if (!card || !window.confirm(`Supprimer définitivement cette carte mémoire ?\n\n${card.front}`)) return;
+    onChange(cards.filter(item => item.id !== id));
+  };
 
   const rate = (success: boolean) => {
     if (!current) return;
