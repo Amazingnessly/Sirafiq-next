@@ -2,10 +2,10 @@ import React, { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState }
 import { createRoot } from 'react-dom/client';
 import * as mammoth from 'mammoth';
 import { Flashcard, Flashcards } from './Flashcards';
-import { PdfPageNote, PdfVisualReader } from './PdfVisualReader';
+import { PdfPageNote, PdfVisualReader, type PdfByteSource } from './PdfVisualReader';
 import { RecallAttempt, RecallBoard } from './RecallBoard';
 import { SupportHub } from './SupportHub';
-import { blobToArrayBuffer, deleteSupportRecord, listSupportMetadata, loadSupportBlob, patchSupportMetadata, saveNewSupport, SUPPORT_METADATA_CHANGED_EVENT, type SupportMetadataChange } from './storage';
+import { blobToArrayBuffer, createSupportByteSource, deleteSupportRecord, listSupportMetadata, loadSupportBlob, patchSupportMetadata, saveNewSupportFile, SUPPORT_METADATA_CHANGED_EVENT, type SupportMetadataChange } from './storage';
 import './styles.css';
 
 type Extraction = { version: number; text: string; pages?: number; extractedAt: string };
@@ -26,7 +26,7 @@ type Support = {
   recallAttempts?: RecallAttempt[];
 };
 type ReadingState = { support: Support; text: string };
-type PdfReadingState = { support: Support; blob: Blob };
+type PdfReadingState = { support: Support; source: PdfByteSource };
 type SupportPatch = Partial<Omit<Support, 'id'>>;
 
 const EXTRACTION_VERSION = 3;
@@ -147,16 +147,15 @@ function App() {
         if (!allowedExtensions.includes(extension)) throw new Error(`Format non pris en charge : ${file.name}`);
         if (file.size > MAX_IMPORT_BYTES) throw new Error(`${file.name} dépasse la limite de sécurité de 500 Mo.`);
         await ensureStorageCapacity(file.size);
-        const bytes = await blobToArrayBuffer(file);
-        await saveNewSupport({
+        if (files.length > 1) setStatus(`Import de ${file.name}…`);
+        await saveNewSupportFile({
           id: crypto.randomUUID(),
           name: file.name,
           type: file.type || extension,
           size: file.size,
           importedAt: new Date().toISOString(),
           category: 'Non classé',
-          bytes,
-        });
+        }, file);
       }
       await refresh();
       setStatus(`${files.length} support${files.length > 1 ? 's' : ''} importé${files.length > 1 ? 's' : ''} avec succès.`);
@@ -182,8 +181,8 @@ function App() {
       setBusy(true);
       setStatus('Ouverture du PDF…');
       try {
-        const blob = await loadSupportBlob(support.id, support.type || 'application/pdf');
-        setPdfReading({ support, blob });
+        const source = await createSupportByteSource(support.id, support.type || 'application/pdf');
+        setPdfReading({ support, source });
         setStatus('');
       } catch (error) {
         console.error(error);
@@ -299,7 +298,7 @@ function App() {
   }
 
   if (pdfReading) {
-    return <PdfVisualReader name={pdfReading.support.name} blob={pdfReading.blob} initialPage={pdfReading.support.pdfProgress?.page} initialZoom={pdfReading.support.pdfProgress?.zoom} bookmarks={pdfReading.support.pdfBookmarks} notes={pdfReading.support.pdfNotes} onBack={() => setPdfReading(null)} onProgress={savePdfProgress} onBookmarksChange={savePdfBookmarks} onNotesChange={savePdfNotes} />;
+    return <PdfVisualReader name={pdfReading.support.name} source={pdfReading.source} initialPage={pdfReading.support.pdfProgress?.page} initialZoom={pdfReading.support.pdfProgress?.zoom} bookmarks={pdfReading.support.pdfBookmarks} notes={pdfReading.support.pdfNotes} onBack={() => setPdfReading(null)} onProgress={savePdfProgress} onBookmarksChange={savePdfBookmarks} onNotesChange={savePdfNotes} />;
   }
 
   if (reading) {
