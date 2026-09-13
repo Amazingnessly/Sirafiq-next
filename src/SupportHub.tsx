@@ -14,6 +14,7 @@ type Props = {
   pdfBookmarks?: number;
   pdfNotes?: number;
   onRead: () => void;
+  onOpenReference: () => void;
   onFlashcards: () => void;
   onRecall: () => void;
   onBack: () => void;
@@ -36,7 +37,7 @@ type StoredSupport = {
 
 type StoredSupportPatch = Partial<Omit<StoredSupport, 'id'>>;
 
-export function SupportHub({ id, name, category, canRead, flashcards, recallAttempts, pdfBookmarks = 0, pdfNotes = 0, onRead, onFlashcards, onRecall, onBack }: Props) {
+export function SupportHub({ id, name, category, canRead, flashcards, recallAttempts, pdfBookmarks = 0, pdfNotes = 0, onRead, onOpenReference, onFlashcards, onRecall, onBack }: Props) {
   const [mindMode, setMindMode] = useState(false);
   const [memoryMode, setMemoryMode] = useState(false);
   const [quranMode, setQuranMode] = useState(false);
@@ -86,7 +87,7 @@ export function SupportHub({ id, name, category, canRead, flashcards, recallAtte
     persist({ quranTargets: targets }, 'Parcours Qour’ān enregistré.');
   };
 
-  if (quranMode) return <><QuranMemorization supportName={name} targets={quranTargets} onChange={changeQuranTargets} onOpenSource={onRead} onBack={() => setQuranMode(false)} />{saveStatus && <div className="mind-save-status" role="status">{saveStatus}</div>}</>;
+  if (quranMode) return <><QuranMemorization supportName={name} targets={quranTargets} onChange={changeQuranTargets} onOpenSource={onOpenReference} onBack={() => setQuranMode(false)} />{saveStatus && <div className="mind-save-status" role="status">{saveStatus}</div>}</>;
   if (memoryMode) return <><TextMemorization supportName={name} passages={memoryPassages} onChange={changeMemoryPassages} onBack={() => setMemoryMode(false)} />{saveStatus && <div className="mind-save-status" role="status">{saveStatus}</div>}</>;
   if (mindMode) return <><MindMap supportName={name} nodes={mindNodes} onChange={changeMindMap} onBack={() => setMindMode(false)} />{saveStatus && <div className="mind-save-status" role="status">{saveStatus}</div>}</>;
 
