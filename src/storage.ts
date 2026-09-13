@@ -270,17 +270,19 @@ async function deletePayloadChunks(supportId: string): Promise<void> {
   });
 }
 
-export async function saveNewSupportFile<T extends { id: string; size: number; type?: string }>(support: T, file: Blob): Promise<void> {
+export async function saveNewSupportFile<T extends { id: string; size: number; type?: string }>(support: T, file: Blob, onProgress?: (progress: number) => void): Promise<void> {
   await requestPersistentStorage();
   const chunkCount = Math.ceil(file.size / PAYLOAD_CHUNK_SIZE);
   activeImports.add(support.id);
 
   try {
+    if (chunkCount === 0) onProgress?.(1);
     for (let index = 0; index < chunkCount; index += 1) {
       const begin = index * PAYLOAD_CHUNK_SIZE;
       const end = Math.min(file.size, begin + PAYLOAD_CHUNK_SIZE);
       const data = await blobToArrayBuffer(file.slice(begin, end));
       await writePayloadChunk(support.id, index, data);
+      onProgress?.((index + 1) / chunkCount);
     }
 
     const metadata = {
