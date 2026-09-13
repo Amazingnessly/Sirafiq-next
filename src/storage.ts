@@ -112,6 +112,38 @@ export async function saveSupportMetadata<T extends { id: string }>(support: T):
   });
 }
 
+export async function patchSupportMetadata<T extends { id: string }>(id: string, patch: Partial<Omit<T, 'id'>>): Promise<T> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(META_STORE, 'readwrite');
+    const store = tx.objectStore(META_STORE);
+    const request = store.get(id);
+    let next: T | null = null;
+
+    request.onsuccess = () => {
+      const current = request.result as T | undefined;
+      if (!current) {
+        tx.abort();
+        reject(new Error('Support local introuvable.'));
+        return;
+      }
+      next = { ...current, ...patch, id } as T;
+      store.put(withoutPayload(next));
+    };
+    request.onerror = () => reject(request.error);
+    tx.oncomplete = () => {
+      if (!next) {
+        reject(new Error('Support local introuvable.'));
+        return;
+      }
+      notifyMetadataChanged();
+      resolve(next);
+    };
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error('Enregistrement local interrompu.'));
+  });
+}
+
 export async function saveNewSupport<T extends { id: string } & PayloadFields>(support: T): Promise<void> {
   const db = await openDb();
   const metadata = withoutPayload(support);

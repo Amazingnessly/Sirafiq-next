@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { MindMap, MindNode } from './MindMap';
 import { MemoryPassage, TextMemorization } from './TextMemorization';
 import { QuranMemorization, QuranTarget } from './QuranMemorization';
-import { getSupportMetadata, saveSupportMetadata } from './storage';
+import { getSupportMetadata, patchSupportMetadata } from './storage';
 
 type Props = {
   id: string;
@@ -34,6 +34,8 @@ type StoredSupport = {
   [key: string]: unknown;
 };
 
+type StoredSupportPatch = Partial<Omit<StoredSupport, 'id'>>;
+
 export function SupportHub({ id, name, category, canRead, flashcards, recallAttempts, pdfBookmarks = 0, pdfNotes = 0, onRead, onFlashcards, onRecall, onBack }: Props) {
   const [mindMode, setMindMode] = useState(false);
   const [memoryMode, setMemoryMode] = useState(false);
@@ -56,15 +58,15 @@ export function SupportHub({ id, name, category, canRead, flashcards, recallAtte
     return () => { cancelled = true; };
   }, [id]);
 
-  const persist = (patch: Partial<StoredSupport>, successMessage: string) => {
+  const persist = (patch: StoredSupportPatch, successMessage: string) => {
     if (!storedSupport) {
       setSaveStatus('Support local introuvable : impossible d’enregistrer.');
       return;
     }
-    const next = { ...storedSupport, ...patch };
-    setStoredSupport(next);
+    setStoredSupport(current => current ? { ...current, ...patch } : current);
     setSaveStatus('Enregistrement…');
-    void saveSupportMetadata(next).then(() => {
+    void patchSupportMetadata<StoredSupport>(id, patch).then(saved => {
+      setStoredSupport(saved);
       setSaveStatus(successMessage);
     }).catch(() => setSaveStatus('Impossible d’enregistrer les données locales.'));
   };

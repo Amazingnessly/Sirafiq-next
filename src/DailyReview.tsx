@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Flashcard } from './Flashcards';
-import { listSupportMetadata, saveSupportMetadata } from './storage';
+import { listSupportMetadata, patchSupportMetadata } from './storage';
 
 type StoredSupport = {
   id: string;
@@ -22,10 +22,6 @@ function isDue(card: Flashcard) {
 
 async function loadSupports(): Promise<StoredSupport[]> {
   return listSupportMetadata<StoredSupport>();
-}
-
-async function saveSupport(support: StoredSupport) {
-  await saveSupportMetadata(support);
 }
 
 export function DailyReview({ onClose, onCountChange }: Props) {
@@ -52,10 +48,9 @@ export function DailyReview({ onClose, onCountChange }: Props) {
     const support = supports.find(item => item.id === current.supportId);
     if (!support) return;
     const flashcards = (support.flashcards ?? []).map(card => card.id === current.card.id ? { ...card, stage: nextStage, lastReviewedAt: now.toISOString(), nextReviewAt: nextReview } : card);
-    const updated = { ...support, flashcards };
     setStatus('Enregistrement…');
     try {
-      await saveSupport(updated);
+      const updated = await patchSupportMetadata<StoredSupport>(support.id, { flashcards });
       setSupports(items => items.map(item => item.id === updated.id ? updated : item));
       setRevealed(false);
       setStatus('');
