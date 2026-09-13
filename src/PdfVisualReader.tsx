@@ -29,6 +29,33 @@ function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
   });
 }
 
+class BlobRangeTransport extends pdfjs.PDFDataRangeTransport {
+  private aborted = false;
+
+  constructor(private readonly blob: Blob) {
+    super(blob.size, null);
+  }
+
+  requestDataRange(begin: number, end: number): void {
+    if (this.aborted) return;
+    const safeBegin = Math.max(0, begin);
+    const safeEnd = Math.min(this.blob.size, Math.max(safeBegin, end));
+    const slice = this.blob.slice(safeBegin, safeEnd);
+
+    void blobToArrayBuffer(slice).then(buffer => {
+      if (this.aborted) return;
+      this.onDataRange(safeBegin, new Uint8Array(buffer));
+      this.onDataProgress(safeEnd, this.blob.size);
+    }).catch(() => {
+      this.abort();
+    });
+  }
+
+  abort(): void {
+    this.aborted = true;
+  }
+}
+
 export function PdfVisualReader({ name, blob, initialPage = 1, initialZoom = 1, bookmarks = [], notes = [], onBack, onProgress, onBookmarksChange, onNotesChange }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -46,20 +73,31 @@ export function PdfVisualReader({ name, blob, initialPage = 1, initialZoom = 1, 
 
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
-      try {
-        const data = new Uint8Array(await blobToArrayBuffer(blob));
-        const pdf = await pdfjs.getDocument({ data }).promise;
-        if (!cancelled) {
-          setDocument(pdf);
-          setPageNumber(page => Math.min(Math.max(1, page), pdf.numPages));
-        }
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'PDF illisible.');
-      }
+    const transport = new BlobRangeTransport(blob);
+    const loadingTask = pdfjs.getDocument({
+      range: transport,
+      rangeChunkSize: 256 * 1024,
+      disableStream: true,
+      disableAutoFetch: true,
+    });
+
+    setDocument(null);
+    setError('');
+    setRendering(true);
+
+    void loadingTask.promise.then(pdf => {
+      if (cancelled) return;
+      setDocument(pdf);
+      setPageNumber(page => Math.min(Math.max(1, page), pdf.numPages));
+    }).catch(err => {
+      if (!cancelled) setError(err instanceof Error ? err.message : 'PDF illisible.');
+    });
+
+    return () => {
+      cancelled = true;
+      transport.abort();
+      void loadingTask.destroy();
     };
-    void load();
-    return () => { cancelled = true; };
   }, [blob]);
 
   useEffect(() => setJumpValue(String(pageNumber)), [pageNumber]);
