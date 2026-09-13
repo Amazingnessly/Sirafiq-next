@@ -71,7 +71,9 @@ export function QuranMemorization({ supportName, targets, onChange, onOpenSource
   };
 
   const remove = (id: string) => {
-    onChange(targets.filter(target => target.id !== id));
+    const target = targets.find(item => item.id === id);
+    if (!target || !window.confirm(`Supprimer définitivement « ${target.label} » et ses ${target.reviews} révision${target.reviews > 1 ? 's' : ''} enregistrée${target.reviews > 1 ? 's' : ''} ?`)) return;
+    onChange(targets.filter(item => item.id !== id));
     if (activeId === id) setActiveId(null);
   };
 
