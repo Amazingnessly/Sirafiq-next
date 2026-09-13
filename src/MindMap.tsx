@@ -204,7 +204,12 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
 
   const removeSelected = () => {
     if (!selected || selected.id === root?.id) return;
-    const removedIds = new Set([selected.id, ...descendants(nodes, selected.id)]);
+    const descendantsToRemove = descendants(nodes, selected.id);
+    const removedIds = new Set([selected.id, ...descendantsToRemove]);
+    const branchDetail = descendantsToRemove.length
+      ? ` Cette action supprimera aussi ${descendantsToRemove.length} sous-nœud${descendantsToRemove.length > 1 ? 's' : ''}.`
+      : '';
+    if (!window.confirm(`Supprimer définitivement la branche « ${selected.text} » ?${branchDetail}`)) return;
     const visualParent = layout?.effectiveParent.get(selected.id) ?? selected.parentId ?? root?.id ?? null;
     onChange(nodes.filter(node => !removedIds.has(node.id)));
     setSelectedId(visualParent);
