@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { DailyReview } from './DailyReview';
 import type { Flashcard } from './Flashcards';
-import { listSupportMetadata } from './storage';
+import { listSupportMetadata, SUPPORT_METADATA_CHANGED_EVENT } from './storage';
 import './daily-review.css';
 
 type StoredSupport = { id: string; flashcards?: Flashcard[] };
@@ -20,15 +20,18 @@ function DailyReviewEntry() {
 
   useEffect(() => {
     refresh();
-    const timer = window.setInterval(refresh, 1500);
+    const timer = window.setInterval(refresh, 30_000);
     const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
+    const onMetadataChanged = () => refresh();
     window.addEventListener('focus', refresh);
     window.addEventListener('pageshow', refresh);
+    window.addEventListener(SUPPORT_METADATA_CHANGED_EVENT, onMetadataChanged);
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       window.clearInterval(timer);
       window.removeEventListener('focus', refresh);
       window.removeEventListener('pageshow', refresh);
+      window.removeEventListener(SUPPORT_METADATA_CHANGED_EVENT, onMetadataChanged);
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [refresh]);
