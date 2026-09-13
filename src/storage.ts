@@ -12,11 +12,18 @@ type StoredRecord = {
   [key: string]: unknown;
 };
 
+type PayloadFields = {
+  bytes?: ArrayBuffer;
+  blob?: Blob;
+  dataUrl?: string;
+};
+
 let dbPromise: Promise<IDBDatabase> | null = null;
 
-function withoutPayload<T extends StoredRecord>(support: T): Omit<T, 'bytes' | 'blob' | 'dataUrl'> {
-  const { bytes: _bytes, blob: _blob, dataUrl: _dataUrl, ...metadata } = support;
-  return metadata;
+function withoutPayload<T extends { id: string }>(support: T): Omit<T, 'bytes' | 'blob' | 'dataUrl'> {
+  const record = support as T & PayloadFields;
+  const { bytes: _bytes, blob: _blob, dataUrl: _dataUrl, ...metadata } = record;
+  return metadata as Omit<T, 'bytes' | 'blob' | 'dataUrl'>;
 }
 
 function openDb(): Promise<IDBDatabase> {
@@ -25,7 +32,7 @@ function openDb(): Promise<IDBDatabase> {
   dbPromise = new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
       const tx = request.transaction;
       if (!tx) return;
@@ -37,7 +44,7 @@ function openDb(): Promise<IDBDatabase> {
         ? tx.objectStore(META_STORE)
         : db.createObjectStore(META_STORE, { keyPath: 'id' });
 
-      if (request.oldVersion < 2) {
+      if (event.oldVersion < 2) {
         const cursorRequest = payloadStore.openCursor();
         cursorRequest.onsuccess = () => {
           const cursor = cursorRequest.result;
@@ -84,7 +91,7 @@ export async function getSupportMetadata<T extends { id: string }>(id: string): 
   });
 }
 
-export async function saveSupportMetadata<T extends StoredRecord>(support: T): Promise<void> {
+export async function saveSupportMetadata<T extends { id: string }>(support: T): Promise<void> {
   const db = await openDb();
   const metadata = withoutPayload(support);
   return new Promise((resolve, reject) => {
@@ -96,7 +103,7 @@ export async function saveSupportMetadata<T extends StoredRecord>(support: T): P
   });
 }
 
-export async function saveNewSupport<T extends StoredRecord>(support: T): Promise<void> {
+export async function saveNewSupport<T extends { id: string } & PayloadFields>(support: T): Promise<void> {
   const db = await openDb();
   const metadata = withoutPayload(support);
   return new Promise((resolve, reject) => {
