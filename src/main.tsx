@@ -96,7 +96,46 @@ function App() {
   const refresh = async () => setSupports(await listSupports());
 
   useEffect(() => {
-    refresh().catch(() => setStatus('Impossible de charger la bibliothèque locale.'));
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const items = await listSupports();
+        if (cancelled) return;
+        setSupports(items);
+
+        const sourceId = new URLSearchParams(window.location.search).get('source');
+        if (!sourceId) return;
+        const support = items.find(item => item.id === sourceId);
+        if (!support) {
+          setStatus('Support de référence introuvable sur cet appareil.');
+          return;
+        }
+        if (extensionOf(support) !== 'pdf') {
+          setStatus('Ce lien de référence est prévu pour les supports PDF.');
+          return;
+        }
+
+        setBusy(true);
+        setStatus('Ouverture du support de référence…');
+        try {
+          const source = await createSupportByteSource(support.id, support.type || 'application/pdf');
+          if (cancelled) {
+            source.close();
+            return;
+          }
+          setPdfReading({ support, source });
+          setStatus('');
+        } catch (error) {
+          if (!cancelled) setStatus(error instanceof Error ? `Lecture impossible : ${error.message}` : 'Impossible de lire ce support.');
+        } finally {
+          if (!cancelled) setBusy(false);
+        }
+      } catch {
+        if (!cancelled) setStatus('Impossible de charger la bibliothèque locale.');
+      }
+    };
+    void load();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -236,11 +275,32 @@ function App() {
   };
 
   const openSupport = async (support: Support) => {
-    const blob = await loadSupportBlob(support.id, support.type || 'application/octet-stream');
-    const objectUrl = URL.createObjectURL(blob);
-    const opened = window.open(objectUrl, '_blank');
-    if (!opened) window.location.assign(objectUrl);
-    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    const opened = window.open('', '_blank');
+    if (opened) opened.opener = null;
+    try {
+      const blob = await loadSupportBlob(support.id, support.type || 'application/octet-stream');
+      const objectUrl = URL.createObjectURL(blob);
+      if (opened) opened.location.href = objectUrl;
+      else window.location.assign(objectUrl);
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch (error) {
+      opened?.close();
+      throw error;
+    }
+  };
+
+  const openReferenceSupport = (support: Support) => {
+    if (extensionOf(support) === 'pdf') {
+      const url = new URL(window.location.href);
+      url.search = '';
+      url.hash = '';
+      url.searchParams.set('source', support.id);
+      const opened = window.open(url.toString(), '_blank');
+      if (opened) opened.opener = null;
+      else setStatus('Impossible d’ouvrir le support de référence dans un nouvel onglet. Autorise les fenêtres contextuelles puis réessaie.');
+      return;
+    }
+    void openSupport(support).catch(() => setStatus("Impossible d'ouvrir ce support de référence."));
   };
 
   const readSupport = async (support: Support) => {
@@ -377,7 +437,7 @@ function App() {
   }
 
   if (hubSupport) {
-    return <SupportHub id={hubSupport.id} name={hubSupport.name} category={hubSupport.category || 'Non classé'} canRead={readableExtensions.includes(extensionOf(hubSupport))} flashcards={hubSupport.flashcards?.length ?? 0} recallAttempts={hubSupport.recallAttempts?.length ?? 0} pdfBookmarks={hubSupport.pdfBookmarks?.length ?? 0} pdfNotes={hubSupport.pdfNotes?.length ?? 0} onRead={() => { const support = hubSupport; setHubSupport(null); void readSupport(support); }} onFlashcards={() => { setFlashSupport(hubSupport); setHubSupport(null); }} onRecall={() => { setRecallSupport(hubSupport); setHubSupport(null); }} onBack={() => setHubSupport(null)} />;
+    return <SupportHub id={hubSupport.id} name={hubSupport.name} category={hubSupport.category || 'Non classé'} canRead={readableExtensions.includes(extensionOf(hubSupport))} flashcards={hubSupport.flashcards?.length ?? 0} recallAttempts={hubSupport.recallAttempts?.length ?? 0} pdfBookmarks={hubSupport.pdfBookmarks?.length ?? 0} pdfNotes={hubSupport.pdfNotes?.length ?? 0} onRead={() => { const support = hubSupport; setHubSupport(null); void readSupport(support); }} onOpenReference={() => openReferenceSupport(hubSupport)} onFlashcards={() => { setFlashSupport(hubSupport); setHubSupport(null); }} onRecall={() => { setRecallSupport(hubSupport); setHubSupport(null); }} onBack={() => setHubSupport(null)} />;
   }
 
   return <main className="shell"><header className="hero"><p className="eyebrow">SIRĀFIQ · BIBLIOTHÈQUE</p><h1>Bibliothèque de savoir</h1><p className="lead">Importe, retrouve et classe tes supports. Les documents restent enregistrés localement sur cet appareil.</p><input ref={inputRef} className="file-input" type="file" multiple accept=".pdf,.txt,.md,.doc,.docx,.ppt,.pptx,.epub" onChange={importFiles} /><button className="primary" disabled={busy} onClick={() => inputRef.current?.click()}>{busy ? 'Traitement en cours…' : 'Importer un support'}</button>{status && <p className="status" role="status">{status}</p>}{importProgress && <div><progress value={importProgress.percent} max={100} aria-label={`Import de ${importProgress.fileName} : ${importProgress.percent} %`} /><button type="button" onClick={() => importAbortRef.current?.abort()}>Annuler l’import</button></div>}</header><section className="library"><div className="section-title"><div><span>Bibliothèque</span><h2>Mes supports</h2></div><strong>{supports.length}</strong></div>{supports.length > 0 && <div className="library-tools"><label className="search"><span>Rechercher</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nom du support…" /></label><div className="filters" aria-label="Filtrer par espace">{categories.map((item) => <button key={item} type="button" className={category === item ? 'active' : ''} onClick={() => setCategory(item)}>{item}</button>)}</div></div>}{supports.length === 0 ? <div className="empty"><h3>Aucun support importé</h3><p>PDF, documents, présentations, EPUB et fichiers texte sont acceptés.</p></div> : visibleSupports.length === 0 ? <div className="empty"><h3>Aucun résultat</h3><p>Modifie la recherche ou le filtre sélectionné.</p></div> : <div className="grid">{visibleSupports.map(support => <article className="card" key={support.id}><div className="file-mark">{extensionOf(support).toUpperCase()}</div><div className="card-copy"><div className="category-tag">{support.category || 'Non classé'}</div><h3>{support.name}</h3><p>{(support.size / 1024 / 1024).toFixed(2)} Mo · {new Date(support.importedAt).toLocaleDateString('fr-FR')}{extensionOf(support) === 'pdf' && support.pdfProgress ? ` · reprise p. ${support.pdfProgress.page}` : ''}{extensionOf(support) === 'pdf' && support.pdfBookmarks?.length ? ` · ${support.pdfBookmarks.length} repère${support.pdfBookmarks.length > 1 ? 's' : ''}` : ''}{extensionOf(support) === 'pdf' && support.pdfNotes?.length ? ` · ${support.pdfNotes.length} note${support.pdfNotes.length > 1 ? 's' : ''}` : ''}{support.flashcards?.length ? ` · ${support.flashcards.length} carte${support.flashcards.length > 1 ? 's' : ''}` : ''}{support.recallAttempts?.length ? ` · ${support.recallAttempts.length} restitution${support.recallAttempts.length > 1 ? 's' : ''}` : ''}{extensionOf(support) === 'docx' && support.extraction?.version === EXTRACTION_VERSION ? ' · texte préparé' : ''}</p></div><div className="card-controls"><select aria-label={`Classer ${support.name}`} value={support.category || 'Non classé'} onChange={(event) => classify(support, event.target.value)}>{categories.filter(item => item !== 'Tous').map(item => <option key={item}>{item}</option>)}</select><div className="actions"><button type="button" disabled={busy} onClick={() => setHubSupport(support)}>Étudier</button><button type="button" disabled={busy} onClick={() => remove(support.id)}>Supprimer</button></div></div></article>)}</div>}</section></main>;
