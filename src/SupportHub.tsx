@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { MindMap, MindNode } from './MindMap';
 import { MemoryPassage, TextMemorization } from './TextMemorization';
 import { QuranMemorization, QuranTarget } from './QuranMemorization';
+import { getSupportMetadata, saveSupportMetadata } from './storage';
 
 type Props = {
+  id: string;
   name: string;
   category: string;
   canRead: boolean;
@@ -32,50 +34,7 @@ type StoredSupport = {
   [key: string]: unknown;
 };
 
-const DB_NAME = 'sirafiq-next';
-const STORE = 'supports';
-
-function openDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-async function findSupport(props: Pick<Props, 'name' | 'category' | 'flashcards' | 'recallAttempts' | 'pdfBookmarks' | 'pdfNotes'>): Promise<StoredSupport | null> {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const request = db.transaction(STORE, 'readonly').objectStore(STORE).getAll();
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => {
-      const matches = (request.result as StoredSupport[]).filter(item =>
-        item.name === props.name &&
-        (item.category || 'Non classé') === props.category &&
-        (item.flashcards?.length ?? 0) === props.flashcards &&
-        (item.recallAttempts?.length ?? 0) === props.recallAttempts &&
-        (item.pdfBookmarks?.length ?? 0) === (props.pdfBookmarks ?? 0) &&
-        (item.pdfNotes?.length ?? 0) === (props.pdfNotes ?? 0)
-      );
-      if (matches.length === 1) resolve(matches[0]);
-      else if (matches.length > 1) resolve([...matches].sort((a, b) => String(b.importedAt ?? '').localeCompare(String(a.importedAt ?? '')))[0]);
-      else resolve(null);
-    };
-  });
-}
-
-async function savePatch(support: StoredSupport, patch: Partial<StoredSupport>) {
-  const db = await openDb();
-  return new Promise<StoredSupport>((resolve, reject) => {
-    const next = { ...support, ...patch };
-    const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).put(next);
-    tx.oncomplete = () => resolve(next);
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-export function SupportHub({ name, category, canRead, flashcards, recallAttempts, pdfBookmarks = 0, pdfNotes = 0, onRead, onFlashcards, onRecall, onBack }: Props) {
+export function SupportHub({ id, name, category, canRead, flashcards, recallAttempts, pdfBookmarks = 0, pdfNotes = 0, onRead, onFlashcards, onRecall, onBack }: Props) {
   const [mindMode, setMindMode] = useState(false);
   const [memoryMode, setMemoryMode] = useState(false);
   const [quranMode, setQuranMode] = useState(false);
@@ -84,11 +43,10 @@ export function SupportHub({ name, category, canRead, flashcards, recallAttempts
   const [quranTargets, setQuranTargets] = useState<QuranTarget[]>([]);
   const [storedSupport, setStoredSupport] = useState<StoredSupport | null>(null);
   const [saveStatus, setSaveStatus] = useState('');
-  const identity = useMemo(() => ({ name, category, flashcards, recallAttempts, pdfBookmarks, pdfNotes }), [name, category, flashcards, recallAttempts, pdfBookmarks, pdfNotes]);
 
   useEffect(() => {
     let cancelled = false;
-    void findSupport(identity).then(support => {
+    void getSupportMetadata<StoredSupport>(id).then(support => {
       if (cancelled) return;
       setStoredSupport(support);
       setMindNodes(support?.mindMap ?? []);
@@ -96,16 +54,17 @@ export function SupportHub({ name, category, canRead, flashcards, recallAttempts
       setQuranTargets(support?.quranTargets ?? []);
     }).catch(() => !cancelled && setSaveStatus('Impossible de charger les données d’étude locales.'));
     return () => { cancelled = true; };
-  }, [identity]);
+  }, [id]);
 
   const persist = (patch: Partial<StoredSupport>, successMessage: string) => {
     if (!storedSupport) {
       setSaveStatus('Support local introuvable : impossible d’enregistrer.');
       return;
     }
+    const next = { ...storedSupport, ...patch };
+    setStoredSupport(next);
     setSaveStatus('Enregistrement…');
-    void savePatch(storedSupport, patch).then(next => {
-      setStoredSupport(next);
+    void saveSupportMetadata(next).then(() => {
       setSaveStatus(successMessage);
     }).catch(() => setSaveStatus('Impossible d’enregistrer les données locales.'));
   };

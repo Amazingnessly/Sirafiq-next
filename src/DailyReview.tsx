@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Flashcard } from './Flashcards';
+import { listSupportMetadata, saveSupportMetadata } from './storage';
 
 type StoredSupport = {
   id: string;
@@ -12,8 +13,6 @@ type ReviewCard = { supportId: string; supportName: string; card: Flashcard };
 
 type Props = { onClose: () => void; onCountChange?: (count: number) => void };
 
-const DB_NAME = 'sirafiq-next';
-const STORE = 'supports';
 const DAY = 24 * 60 * 60 * 1000;
 const intervals = [0, 1, 3, 7, 14, 30];
 
@@ -21,31 +20,12 @@ function isDue(card: Flashcard) {
   return !card.nextReviewAt || new Date(card.nextReviewAt).getTime() <= Date.now();
 }
 
-function openDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
 async function loadSupports(): Promise<StoredSupport[]> {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const request = db.transaction(STORE, 'readonly').objectStore(STORE).getAll();
-    request.onsuccess = () => resolve(request.result as StoredSupport[]);
-    request.onerror = () => reject(request.error);
-  });
+  return listSupportMetadata<StoredSupport>();
 }
 
 async function saveSupport(support: StoredSupport) {
-  const db = await openDb();
-  return new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).put(support);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
+  await saveSupportMetadata(support);
 }
 
 export function DailyReview({ onClose, onCountChange }: Props) {
