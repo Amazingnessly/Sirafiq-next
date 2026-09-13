@@ -67,6 +67,10 @@ async function requestPersistentStorage(): Promise<boolean> {
   return persistencePromise;
 }
 
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw new DOMException('Import annulé.', 'AbortError');
+}
+
 function withoutPayload<T extends { id: string }>(support: T): Omit<T, 'bytes' | 'blob' | 'dataUrl'> {
   const record = support as T & PayloadFields;
   const { bytes: _bytes, blob: _blob, dataUrl: _dataUrl, ...metadata } = record;
@@ -270,21 +274,27 @@ async function deletePayloadChunks(supportId: string): Promise<void> {
   });
 }
 
-export async function saveNewSupportFile<T extends { id: string; size: number; type?: string }>(support: T, file: Blob, onProgress?: (progress: number) => void): Promise<void> {
+export async function saveNewSupportFile<T extends { id: string; size: number; type?: string }>(support: T, file: Blob, onProgress?: (progress: number) => void, signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal);
   await requestPersistentStorage();
+  throwIfAborted(signal);
   const chunkCount = Math.ceil(file.size / PAYLOAD_CHUNK_SIZE);
   activeImports.add(support.id);
 
   try {
     if (chunkCount === 0) onProgress?.(1);
     for (let index = 0; index < chunkCount; index += 1) {
+      throwIfAborted(signal);
       const begin = index * PAYLOAD_CHUNK_SIZE;
       const end = Math.min(file.size, begin + PAYLOAD_CHUNK_SIZE);
       const data = await blobToArrayBuffer(file.slice(begin, end));
+      throwIfAborted(signal);
       await writePayloadChunk(support.id, index, data);
+      throwIfAborted(signal);
       onProgress?.((index + 1) / chunkCount);
     }
 
+    throwIfAborted(signal);
     const metadata = {
       ...withoutPayload(support),
       payloadKind: 'chunks' as const,
