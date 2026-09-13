@@ -5,10 +5,15 @@ import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.js?url';
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 export type PdfPageNote = { page: number; text: string; updatedAt: string };
+export type PdfByteSource = {
+  size: number;
+  readRange: (begin: number, end: number) => Promise<Uint8Array>;
+  close?: () => void;
+};
 
 type Props = {
   name: string;
-  blob: Blob;
+  source: PdfByteSource;
   initialPage?: number;
   initialZoom?: number;
   bookmarks?: number[];
@@ -19,44 +24,35 @@ type Props = {
   onNotesChange: (notes: PdfPageNote[]) => void;
 };
 
-function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
-  if (typeof blob.arrayBuffer === 'function') return blob.arrayBuffer();
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => reader.result instanceof ArrayBuffer ? resolve(reader.result) : reject(new Error('Lecture binaire impossible.'));
-    reader.onerror = () => reject(reader.error ?? new Error('Lecture binaire impossible.'));
-    reader.readAsArrayBuffer(blob);
-  });
-}
-
-class BlobRangeTransport extends pdfjs.PDFDataRangeTransport {
+class SourceRangeTransport extends pdfjs.PDFDataRangeTransport {
   private aborted = false;
 
-  constructor(private readonly blob: Blob) {
-    super(blob.size, null);
+  constructor(private readonly source: PdfByteSource) {
+    super(source.size, null);
   }
 
   requestDataRange(begin: number, end: number): void {
     if (this.aborted) return;
-    const safeBegin = Math.max(0, begin);
-    const safeEnd = Math.min(this.blob.size, Math.max(safeBegin, end));
-    const slice = this.blob.slice(safeBegin, safeEnd);
+    const safeBegin = Math.min(this.source.size, Math.max(0, begin));
+    const safeEnd = Math.min(this.source.size, Math.max(safeBegin, end));
 
-    void blobToArrayBuffer(slice).then(buffer => {
+    void this.source.readRange(safeBegin, safeEnd).then(data => {
       if (this.aborted) return;
-      this.onDataRange(safeBegin, new Uint8Array(buffer));
-      this.onDataProgress(safeEnd, this.blob.size);
+      this.onDataRange(safeBegin, data);
+      this.onDataProgress(safeEnd, this.source.size);
     }).catch(() => {
       this.abort();
     });
   }
 
   abort(): void {
+    if (this.aborted) return;
     this.aborted = true;
+    this.source.close?.();
   }
 }
 
-export function PdfVisualReader({ name, blob, initialPage = 1, initialZoom = 1, bookmarks = [], notes = [], onBack, onProgress, onBookmarksChange, onNotesChange }: Props) {
+export function PdfVisualReader({ name, source, initialPage = 1, initialZoom = 1, bookmarks = [], notes = [], onBack, onProgress, onBookmarksChange, onNotesChange }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const [document, setDocument] = useState<pdfjs.PDFDocumentProxy | null>(null);
@@ -73,7 +69,7 @@ export function PdfVisualReader({ name, blob, initialPage = 1, initialZoom = 1, 
 
   useEffect(() => {
     let cancelled = false;
-    const transport = new BlobRangeTransport(blob);
+    const transport = new SourceRangeTransport(source);
     const loadingTask = pdfjs.getDocument({
       range: transport,
       rangeChunkSize: 256 * 1024,
@@ -98,7 +94,7 @@ export function PdfVisualReader({ name, blob, initialPage = 1, initialZoom = 1, 
       transport.abort();
       void loadingTask.destroy();
     };
-  }, [blob]);
+  }, [source]);
 
   useEffect(() => setJumpValue(String(pageNumber)), [pageNumber]);
   useEffect(() => setNoteDraft(currentNote?.text ?? ''), [pageNumber, currentNote?.text]);
