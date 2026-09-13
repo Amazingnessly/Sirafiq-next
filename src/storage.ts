@@ -3,6 +3,8 @@ const DB_VERSION = 2;
 const PAYLOAD_STORE = 'supports';
 const META_STORE = 'support-meta';
 
+export const SUPPORT_METADATA_CHANGED_EVENT = 'sirafiq:support-metadata-changed';
+
 type StoredRecord = {
   id: string;
   type?: string;
@@ -19,6 +21,10 @@ type PayloadFields = {
 };
 
 let dbPromise: Promise<IDBDatabase> | null = null;
+
+function notifyMetadataChanged() {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(SUPPORT_METADATA_CHANGED_EVENT));
+}
 
 function withoutPayload<T extends { id: string }>(support: T): Omit<T, 'bytes' | 'blob' | 'dataUrl'> {
   const record = support as T & PayloadFields;
@@ -97,7 +103,10 @@ export async function saveSupportMetadata<T extends { id: string }>(support: T):
   return new Promise((resolve, reject) => {
     const tx = db.transaction(META_STORE, 'readwrite');
     tx.objectStore(META_STORE).put(metadata);
-    tx.oncomplete = () => resolve();
+    tx.oncomplete = () => {
+      notifyMetadataChanged();
+      resolve();
+    };
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error ?? new Error('Enregistrement local interrompu.'));
   });
@@ -110,7 +119,10 @@ export async function saveNewSupport<T extends { id: string } & PayloadFields>(s
     const tx = db.transaction([PAYLOAD_STORE, META_STORE], 'readwrite');
     tx.objectStore(PAYLOAD_STORE).put(support);
     tx.objectStore(META_STORE).put(metadata);
-    tx.oncomplete = () => resolve();
+    tx.oncomplete = () => {
+      notifyMetadataChanged();
+      resolve();
+    };
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error ?? new Error('Import local interrompu.'));
   });
@@ -122,7 +134,10 @@ export async function deleteSupportRecord(id: string): Promise<void> {
     const tx = db.transaction([PAYLOAD_STORE, META_STORE], 'readwrite');
     tx.objectStore(PAYLOAD_STORE).delete(id);
     tx.objectStore(META_STORE).delete(id);
-    tx.oncomplete = () => resolve();
+    tx.oncomplete = () => {
+      notifyMetadataChanged();
+      resolve();
+    };
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error ?? new Error('Suppression locale interrompue.'));
   });
