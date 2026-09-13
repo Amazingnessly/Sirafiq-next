@@ -4,6 +4,7 @@ const PAYLOAD_STORE = 'supports';
 const META_STORE = 'support-meta';
 
 export const SUPPORT_METADATA_CHANGED_EVENT = 'sirafiq:support-metadata-changed';
+export type SupportMetadataChange = { id: string; deleted?: boolean; metadata?: { id: string; [key: string]: unknown } };
 
 type StoredRecord = {
   id: string;
@@ -23,8 +24,12 @@ type PayloadFields = {
 let dbPromise: Promise<IDBDatabase> | null = null;
 let persistencePromise: Promise<boolean> | null = null;
 
-function notifyMetadataChanged() {
-  if (typeof window !== 'undefined') window.dispatchEvent(new Event(SUPPORT_METADATA_CHANGED_EVENT));
+function notifyMetadataChanged(detail: SupportMetadataChange) {
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent<SupportMetadataChange>(SUPPORT_METADATA_CHANGED_EVENT, { detail }));
+}
+
+function metadataChange<T extends { id: string }>(metadata: T): SupportMetadataChange {
+  return { id: metadata.id, metadata: metadata as { id: string; [key: string]: unknown } };
 }
 
 async function requestPersistentStorage(): Promise<boolean> {
@@ -113,7 +118,7 @@ export async function saveSupportMetadata<T extends { id: string }>(support: T):
     const tx = db.transaction(META_STORE, 'readwrite');
     tx.objectStore(META_STORE).put(metadata);
     tx.oncomplete = () => {
-      notifyMetadataChanged();
+      notifyMetadataChanged(metadataChange(metadata));
       resolve();
     };
     tx.onerror = () => reject(tx.error);
@@ -145,7 +150,7 @@ export async function patchSupportMetadata<T extends { id: string }>(id: string,
         reject(new Error('Support local introuvable.'));
         return;
       }
-      notifyMetadataChanged();
+      notifyMetadataChanged(metadataChange(next));
       resolve(next);
     };
     tx.onerror = () => reject(tx.error);
@@ -162,7 +167,7 @@ export async function saveNewSupport<T extends { id: string } & PayloadFields>(s
     tx.objectStore(PAYLOAD_STORE).put(support);
     tx.objectStore(META_STORE).put(metadata);
     tx.oncomplete = () => {
-      notifyMetadataChanged();
+      notifyMetadataChanged(metadataChange(metadata));
       resolve();
     };
     tx.onerror = () => reject(tx.error);
@@ -177,7 +182,7 @@ export async function deleteSupportRecord(id: string): Promise<void> {
     tx.objectStore(PAYLOAD_STORE).delete(id);
     tx.objectStore(META_STORE).delete(id);
     tx.oncomplete = () => {
-      notifyMetadataChanged();
+      notifyMetadataChanged({ id, deleted: true });
       resolve();
     };
     tx.onerror = () => reject(tx.error);

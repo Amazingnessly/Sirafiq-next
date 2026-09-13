@@ -5,7 +5,7 @@ import { Flashcard, Flashcards } from './Flashcards';
 import { PdfPageNote, PdfVisualReader } from './PdfVisualReader';
 import { RecallAttempt, RecallBoard } from './RecallBoard';
 import { SupportHub } from './SupportHub';
-import { blobToArrayBuffer, deleteSupportRecord, listSupportMetadata, loadSupportBlob, patchSupportMetadata, saveNewSupport } from './storage';
+import { blobToArrayBuffer, deleteSupportRecord, listSupportMetadata, loadSupportBlob, patchSupportMetadata, saveNewSupport, SUPPORT_METADATA_CHANGED_EVENT, type SupportMetadataChange } from './storage';
 import './styles.css';
 
 type Extraction = { version: number; text: string; pages?: number; extractedAt: string };
@@ -88,6 +88,41 @@ function App() {
 
   useEffect(() => {
     refresh().catch(() => setStatus('Impossible de charger la bibliothèque locale.'));
+  }, []);
+
+  useEffect(() => {
+    const onMetadataChanged = (event: Event) => {
+      const detail = (event as CustomEvent<SupportMetadataChange>).detail;
+      if (!detail?.id) return;
+
+      if (detail.deleted) {
+        setSupports(items => items.filter(item => item.id !== detail.id));
+        setHubSupport(current => current?.id === detail.id ? null : current);
+        setFlashSupport(current => current?.id === detail.id ? null : current);
+        setRecallSupport(current => current?.id === detail.id ? null : current);
+        setReading(current => current?.support.id === detail.id ? null : current);
+        setPdfReading(current => current?.support.id === detail.id ? null : current);
+        return;
+      }
+
+      if (!detail.metadata) return;
+      const metadata = detail.metadata as Support;
+      setSupports(items => {
+        const next = items.some(item => item.id === metadata.id)
+          ? items.map(item => item.id === metadata.id ? { ...item, ...metadata } : item)
+          : [metadata, ...items];
+        return next.sort((a, b) => b.importedAt.localeCompare(a.importedAt));
+      });
+      const mergeSupport = (current: Support | null) => current?.id === metadata.id ? { ...current, ...metadata } : current;
+      setHubSupport(mergeSupport);
+      setFlashSupport(mergeSupport);
+      setRecallSupport(mergeSupport);
+      setReading(current => current?.support.id === metadata.id ? { ...current, support: { ...current.support, ...metadata } } : current);
+      setPdfReading(current => current?.support.id === metadata.id ? { ...current, support: { ...current.support, ...metadata } } : current);
+    };
+
+    window.addEventListener(SUPPORT_METADATA_CHANGED_EVENT, onMetadataChanged);
+    return () => window.removeEventListener(SUPPORT_METADATA_CHANGED_EVENT, onMetadataChanged);
   }, []);
 
   const visibleSupports = useMemo(() => {
