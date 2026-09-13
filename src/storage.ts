@@ -21,9 +21,18 @@ type PayloadFields = {
 };
 
 let dbPromise: Promise<IDBDatabase> | null = null;
+let persistencePromise: Promise<boolean> | null = null;
 
 function notifyMetadataChanged() {
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(SUPPORT_METADATA_CHANGED_EVENT));
+}
+
+async function requestPersistentStorage(): Promise<boolean> {
+  if (typeof navigator === 'undefined' || !navigator.storage?.persist) return false;
+  if (!persistencePromise) {
+    persistencePromise = navigator.storage.persist().catch(() => false);
+  }
+  return persistencePromise;
 }
 
 function withoutPayload<T extends { id: string }>(support: T): Omit<T, 'bytes' | 'blob' | 'dataUrl'> {
@@ -145,6 +154,7 @@ export async function patchSupportMetadata<T extends { id: string }>(id: string,
 }
 
 export async function saveNewSupport<T extends { id: string } & PayloadFields>(support: T): Promise<void> {
+  await requestPersistentStorage();
   const db = await openDb();
   const metadata = withoutPayload(support);
   return new Promise((resolve, reject) => {
