@@ -145,55 +145,70 @@ function App() {
     event.target.value = '';
     if (!files.length) return;
 
-    const knownSignatures = new Set(
-      supports
-        .filter(support => support.sourceLastModified !== undefined)
-        .map(support => sourceSignature(support.name, support.size, support.sourceLastModified!))
-    );
     let importedCount = 0;
     let skippedCount = 0;
+    const failedFiles: string[] = [];
 
     setBusy(true);
     setStatus('Préparation de l’import…');
 
     try {
+      const existingSupports = await listSupports();
+      const knownSignatures = new Set(
+        existingSupports
+          .filter(support => support.sourceLastModified !== undefined)
+          .map(support => sourceSignature(support.name, support.size, support.sourceLastModified!))
+      );
+
       for (const [fileIndex, file] of files.entries()) {
-        const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
-        if (!allowedExtensions.includes(extension)) throw new Error(`Format non pris en charge : ${file.name}`);
-        if (file.size > MAX_IMPORT_BYTES) throw new Error(`${file.name} dépasse la limite de sécurité de 500 Mo.`);
+        try {
+          const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
+          if (!allowedExtensions.includes(extension)) throw new Error(`Format non pris en charge : ${file.name}`);
+          if (file.size > MAX_IMPORT_BYTES) throw new Error(`${file.name} dépasse la limite de sécurité de 500 Mo.`);
 
-        const signature = sourceSignature(file.name, file.size, file.lastModified);
-        if (knownSignatures.has(signature)) {
-          skippedCount += 1;
-          setStatus(`${files.length > 1 ? `${fileIndex + 1}/${files.length} · ` : ''}${file.name} est déjà importé · doublon ignoré.`);
-          continue;
+          const signature = sourceSignature(file.name, file.size, file.lastModified);
+          if (knownSignatures.has(signature)) {
+            skippedCount += 1;
+            setStatus(`${files.length > 1 ? `${fileIndex + 1}/${files.length} · ` : ''}${file.name} est déjà importé · doublon ignoré.`);
+            continue;
+          }
+
+          await ensureStorageCapacity(file.size);
+          setImportProgress({ fileName: file.name, fileIndex, totalFiles: files.length, percent: 0 });
+          await saveNewSupportFile({
+            id: crypto.randomUUID(),
+            name: file.name,
+            type: file.type || extension,
+            size: file.size,
+            importedAt: new Date().toISOString(),
+            sourceLastModified: file.lastModified,
+            category: 'Non classé',
+          }, file, progress => {
+            const percent = Math.min(100, Math.max(0, Math.round(progress * 100)));
+            setImportProgress({ fileName: file.name, fileIndex, totalFiles: files.length, percent });
+            setStatus(`${files.length > 1 ? `${fileIndex + 1}/${files.length} · ` : ''}${file.name} · ${percent} %`);
+          });
+          knownSignatures.add(signature);
+          importedCount += 1;
+        } catch (error) {
+          failedFiles.push(`${file.name} : ${importErrorMessage(error)}`);
+          setImportProgress(null);
+          setStatus(`${files.length > 1 ? `${fileIndex + 1}/${files.length} · ` : ''}${file.name} · échec, poursuite du lot…`);
         }
+      }
 
-        await ensureStorageCapacity(file.size);
-        setImportProgress({ fileName: file.name, fileIndex, totalFiles: files.length, percent: 0 });
-        await saveNewSupportFile({
-          id: crypto.randomUUID(),
-          name: file.name,
-          type: file.type || extension,
-          size: file.size,
-          importedAt: new Date().toISOString(),
-          sourceLastModified: file.lastModified,
-          category: 'Non classé',
-        }, file, progress => {
-          const percent = Math.min(100, Math.max(0, Math.round(progress * 100)));
-          setImportProgress({ fileName: file.name, fileIndex, totalFiles: files.length, percent });
-          setStatus(`${files.length > 1 ? `${fileIndex + 1}/${files.length} · ` : ''}${file.name} · ${percent} %`);
-        });
-        knownSignatures.add(signature);
-        importedCount += 1;
-      }
       await refresh();
-      const importedText = `${importedCount} support${importedCount > 1 ? 's' : ''} importé${importedCount > 1 ? 's' : ''}`;
-      if (skippedCount > 0) {
-        setStatus(`${importedText} · ${skippedCount} doublon${skippedCount > 1 ? 's' : ''} ignoré${skippedCount > 1 ? 's' : ''}.`);
-      } else {
-        setStatus(`${importedText} avec succès.`);
-      }
+      const summary = [
+        `${importedCount} support${importedCount > 1 ? 's' : ''} importé${importedCount > 1 ? 's' : ''}`,
+      ];
+      if (skippedCount > 0) summary.push(`${skippedCount} doublon${skippedCount > 1 ? 's' : ''} ignoré${skippedCount > 1 ? 's' : ''}`);
+      if (failedFiles.length > 0) summary.push(`${failedFiles.length} échec${failedFiles.length > 1 ? 's' : ''}`);
+      const failureDetail = failedFiles.length === 1
+        ? ` ${failedFiles[0]}`
+        : failedFiles.length > 1
+          ? ` Premier échec : ${failedFiles[0]}`
+          : '';
+      setStatus(`${summary.join(' · ')}.${failureDetail}`);
     } catch (error) {
       setStatus(importErrorMessage(error));
     } finally {
