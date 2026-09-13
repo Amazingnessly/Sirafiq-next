@@ -5,7 +5,7 @@ import { Flashcard, Flashcards } from './Flashcards';
 import { PdfPageNote, PdfVisualReader } from './PdfVisualReader';
 import { RecallAttempt, RecallBoard } from './RecallBoard';
 import { SupportHub } from './SupportHub';
-import { blobToArrayBuffer, deleteSupportRecord, listSupportMetadata, loadSupportBlob, saveNewSupport, saveSupportMetadata } from './storage';
+import { blobToArrayBuffer, deleteSupportRecord, listSupportMetadata, loadSupportBlob, patchSupportMetadata, saveNewSupport } from './storage';
 import './styles.css';
 
 type Extraction = { version: number; text: string; pages?: number; extractedAt: string };
@@ -27,6 +27,7 @@ type Support = {
 };
 type ReadingState = { support: Support; text: string };
 type PdfReadingState = { support: Support; blob: Blob };
+type SupportPatch = Partial<Omit<Support, 'id'>>;
 
 const EXTRACTION_VERSION = 3;
 const MAX_IMPORT_BYTES = 500 * 1024 * 1024;
@@ -38,10 +39,6 @@ const readableExtensions = ['txt', 'md', 'pdf', 'docx'];
 async function listSupports(): Promise<Support[]> {
   const supports = await listSupportMetadata<Support>();
   return supports.sort((a, b) => b.importedAt.localeCompare(a.importedAt));
-}
-
-async function saveSupport(support: Support) {
-  await saveSupportMetadata(support);
 }
 
 async function deleteSupport(id: string) {
@@ -191,9 +188,8 @@ function App() {
         const text = await extractDocxText(blob);
         if (!text) throw new Error('Aucun texte exploitable détecté dans ce document DOCX.');
         const extraction: Extraction = { version: EXTRACTION_VERSION, text, extractedAt: new Date().toISOString() };
-        const next = { ...support, extraction };
-        await saveSupport(next);
-        await refresh();
+        const next = await patchSupportMetadata<Support>(support.id, { extraction });
+        setSupports(items => items.map(item => item.id === next.id ? next : item));
         setReading({ support: next, text });
       } else {
         setReading({ support, text: await blob.text() });
@@ -208,8 +204,8 @@ function App() {
   };
 
   const classify = async (support: Support, nextCategory: string) => {
-    await saveSupport({ ...support, category: nextCategory });
-    await refresh();
+    const next = await patchSupportMetadata<Support>(support.id, { category: nextCategory });
+    setSupports(items => items.map(item => item.id === next.id ? next : item));
     setStatus(`Support classé dans « ${nextCategory} ».`);
   };
 
@@ -224,15 +220,15 @@ function App() {
     setStatus('Support supprimé.');
   };
 
-  const updateStoredSupport = useCallback((current: Support, patch: Partial<Support>) => {
+  const updateStoredSupport = useCallback((current: Support, patch: SupportPatch) => {
     const next: Support = { ...current, ...patch };
-    void saveSupport(next)
-      .then(() => setSupports(items => items.map(item => item.id === next.id ? next : item)))
+    void patchSupportMetadata<Support>(current.id, patch)
+      .then(saved => setSupports(items => items.map(item => item.id === saved.id ? saved : item)))
       .catch(() => setStatus('Impossible de mémoriser les données locales.'));
     return next;
   }, []);
 
-  const persistPdfPatch = useCallback((patch: Partial<Support>) => {
+  const persistPdfPatch = useCallback((patch: SupportPatch) => {
     setPdfReading(current => current ? { ...current, support: updateStoredSupport(current.support, patch) } : current);
   }, [updateStoredSupport]);
 
