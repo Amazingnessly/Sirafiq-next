@@ -371,22 +371,37 @@ function App() {
   };
 
   const classify = async (support: Support, nextCategory: string) => {
-    const next = await patchSupportMetadata<Support>(support.id, { category: nextCategory });
-    setSupports(items => items.map(item => item.id === next.id ? next : item));
-    setStatus(`Support classé dans « ${nextCategory} ».`);
+    try {
+      const next = await patchSupportMetadata<Support>(support.id, { category: nextCategory });
+      setSupports(items => items.map(item => item.id === next.id ? next : item));
+      setStatus(`Support classé dans « ${nextCategory} ».`);
+    } catch (error) {
+      console.error(error);
+      setStatus(`Impossible de classer « ${support.name} ». Le support conserve sa catégorie actuelle.`);
+    }
   };
 
   const remove = async (id: string) => {
     const support = supports.find(item => item.id === id);
     if (!support || !window.confirm(`Supprimer définitivement « ${support.name} » ?\n\nLe fichier et toutes ses données d’étude (cartes, restitutions, notes, repères et mémorisation) seront supprimés de cet appareil.`)) return;
-    await deleteSupport(id);
-    await refresh();
-    if (hubSupport?.id === id) setHubSupport(null);
-    if (reading?.support.id === id) setReading(null);
-    if (pdfReading?.support.id === id) setPdfReading(null);
-    if (flashSupport?.id === id) setFlashSupport(null);
-    if (recallSupport?.id === id) setRecallSupport(null);
-    setStatus('Support supprimé.');
+
+    setBusy(true);
+    setStatus(`Suppression de « ${support.name} »…`);
+    try {
+      await deleteSupport(id);
+      setSupports(items => items.filter(item => item.id !== id));
+      if (hubSupport?.id === id) setHubSupport(null);
+      if (reading?.support.id === id) setReading(null);
+      if (pdfReading?.support.id === id) setPdfReading(null);
+      if (flashSupport?.id === id) setFlashSupport(null);
+      if (recallSupport?.id === id) setRecallSupport(null);
+      setStatus('Support supprimé.');
+    } catch (error) {
+      console.error(error);
+      setStatus(`Impossible de supprimer « ${support.name} ». Le support est conservé sur cet appareil.`);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const updateStoredSupport = useCallback((current: Support, patch: SupportPatch) => {
@@ -447,7 +462,7 @@ function App() {
     return <SupportHub id={hubSupport.id} name={hubSupport.name} category={hubSupport.category || 'Non classé'} canRead={readableExtensions.includes(extensionOf(hubSupport))} flashcards={hubSupport.flashcards?.length ?? 0} recallAttempts={hubSupport.recallAttempts?.length ?? 0} pdfBookmarks={hubSupport.pdfBookmarks?.length ?? 0} pdfNotes={hubSupport.pdfNotes?.length ?? 0} onRead={() => { const support = hubSupport; setHubSupport(null); void readSupport(support); }} onOpenReference={() => openReferenceSupport(hubSupport)} onFlashcards={() => { setSaveStatus(''); setFlashSupport(hubSupport); setHubSupport(null); }} onRecall={() => { setSaveStatus(''); setRecallSupport(hubSupport); setHubSupport(null); }} onBack={() => setHubSupport(null)} />;
   }
 
-  return <main className="shell"><header className="hero"><p className="eyebrow">SIRĀFIQ · BIBLIOTHÈQUE</p><h1>Bibliothèque de savoir</h1><p className="lead">Importe, retrouve et classe tes supports. Les documents restent enregistrés localement sur cet appareil.</p><input ref={inputRef} className="file-input" type="file" multiple accept=".pdf,.txt,.md,.doc,.docx,.ppt,.pptx,.epub" onChange={importFiles} /><button className="primary" disabled={busy} onClick={() => inputRef.current?.click()}>{busy ? 'Traitement en cours…' : 'Importer un support'}</button>{status && <p className="status" role="status">{status}</p>}{importProgress && <div><p>{importProgress.totalFiles > 1 ? `${importProgress.fileIndex + 1}/${importProgress.totalFiles} · ` : ''}{importProgress.fileName} · {importProgress.percent} %</p><progress value={importProgress.percent} max={100} aria-label={`Progression de l’import de ${importProgress.fileName}`} aria-valuetext={`${importProgress.percent} %`} /><button type="button" onClick={() => importAbortRef.current?.abort()}>Annuler l’import</button></div>}</header><section className="library"><div className="section-title"><div><span>Bibliothèque</span><h2>Mes supports</h2></div><strong>{supports.length}</strong></div>{supports.length > 0 && <div className="library-tools"><label className="search"><span>Rechercher</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nom du support…" /></label><div className="filters" aria-label="Filtrer par espace">{categories.map((item) => <button key={item} type="button" className={category === item ? 'active' : ''} onClick={() => setCategory(item)}>{item}</button>)}</div></div>}{supports.length === 0 ? <div className="empty"><h3>Aucun support importé</h3><p>PDF, documents, présentations, EPUB et fichiers texte sont acceptés.</p></div> : visibleSupports.length === 0 ? <div className="empty"><h3>Aucun résultat</h3><p>Modifie la recherche ou le filtre sélectionné.</p></div> : <div className="grid">{visibleSupports.map(support => <article className="card" key={support.id}><div className="file-mark">{extensionOf(support).toUpperCase()}</div><div className="card-copy"><div className="category-tag">{support.category || 'Non classé'}</div><h3>{support.name}</h3><p>{(support.size / 1024 / 1024).toFixed(2)} Mo · {new Date(support.importedAt).toLocaleDateString('fr-FR')}{extensionOf(support) === 'pdf' && support.pdfProgress ? ` · reprise p. ${support.pdfProgress.page}` : ''}{extensionOf(support) === 'pdf' && support.pdfBookmarks?.length ? ` · ${support.pdfBookmarks.length} repère${support.pdfBookmarks.length > 1 ? 's' : ''}` : ''}{extensionOf(support) === 'pdf' && support.pdfNotes?.length ? ` · ${support.pdfNotes.length} note${support.pdfNotes.length > 1 ? 's' : ''}` : ''}{support.flashcards?.length ? ` · ${support.flashcards.length} carte${support.flashcards.length > 1 ? 's' : ''}` : ''}{support.recallAttempts?.length ? ` · ${support.recallAttempts.length} restitution${support.recallAttempts.length > 1 ? 's' : ''}` : ''}{extensionOf(support) === 'docx' && support.extraction?.version === EXTRACTION_VERSION ? ' · texte préparé' : ''}</p></div><div className="card-controls"><select aria-label={`Classer ${support.name}`} value={support.category || 'Non classé'} onChange={(event) => classify(support, event.target.value)}>{categories.filter(item => item !== 'Tous').map(item => <option key={item}>{item}</option>)}</select><div className="actions"><button type="button" disabled={busy} onClick={() => setHubSupport(support)}>Étudier</button><button type="button" disabled={busy} onClick={() => remove(support.id)}>Supprimer</button></div></div></article>)}</div>}</section></main>;
+  return <main className="shell"><header className="hero"><p className="eyebrow">SIRĀFIQ · BIBLIOTHÈQUE</p><h1>Bibliothèque de savoir</h1><p className="lead">Importe, retrouve et classe tes supports. Les documents restent enregistrés localement sur cet appareil.</p><input ref={inputRef} className="file-input" type="file" multiple accept=".pdf,.txt,.md,.doc,.docx,.ppt,.pptx,.epub" onChange={importFiles} /><button className="primary" disabled={busy} onClick={() => inputRef.current?.click()}>{busy ? 'Traitement en cours…' : 'Importer un support'}</button>{status && <p className="status" role="status">{status}</p>}{importProgress && <div><p>{importProgress.totalFiles > 1 ? `${importProgress.fileIndex + 1}/${importProgress.totalFiles} · ` : ''}{importProgress.fileName} · {importProgress.percent} %</p><progress value={importProgress.percent} max={100} aria-label={`Progression de l’import de ${importProgress.fileName}`} aria-valuetext={`${importProgress.percent} %`} /><button type="button" onClick={() => importAbortRef.current?.abort()}>Annuler l’import</button></div>}</header><section className="library"><div className="section-title"><div><span>Bibliothèque</span><h2>Mes supports</h2></div><strong>{supports.length}</strong></div>{supports.length > 0 && <div className="library-tools"><label className="search"><span>Rechercher</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nom du support…" /></label><div className="filters" aria-label="Filtrer par espace">{categories.map((item) => <button key={item} type="button" className={category === item ? 'active' : ''} onClick={() => setCategory(item)}>{item}</button>)}</div></div>}{supports.length === 0 ? <div className="empty"><h3>Aucun support importé</h3><p>PDF, documents, présentations, EPUB et fichiers texte sont acceptés.</p></div> : visibleSupports.length === 0 ? <div className="empty"><h3>Aucun résultat</h3><p>Modifie la recherche ou le filtre sélectionné.</p></div> : <div className="grid">{visibleSupports.map(support => <article className="card" key={support.id}><div className="file-mark">{extensionOf(support).toUpperCase()}</div><div className="card-copy"><div className="category-tag">{support.category || 'Non classé'}</div><h3>{support.name}</h3><p>{(support.size / 1024 / 1024).toFixed(2)} Mo · {new Date(support.importedAt).toLocaleDateString('fr-FR')}{extensionOf(support) === 'pdf' && support.pdfProgress ? ` · reprise p. ${support.pdfProgress.page}` : ''}{extensionOf(support) === 'pdf' && support.pdfBookmarks?.length ? ` · ${support.pdfBookmarks.length} repère${support.pdfBookmarks.length > 1 ? 's' : ''}` : ''}{extensionOf(support) === 'pdf' && support.pdfNotes?.length ? ` · ${support.pdfNotes.length} note${support.pdfNotes.length > 1 ? 's' : ''}` : ''}{support.flashcards?.length ? ` · ${support.flashcards.length} carte${support.flashcards.length > 1 ? 's' : ''}` : ''}{support.recallAttempts?.length ? ` · ${support.recallAttempts.length} restitution${support.recallAttempts.length > 1 ? 's' : ''}` : ''}{extensionOf(support) === 'docx' && support.extraction?.version === EXTRACTION_VERSION ? ' · texte préparé' : ''}</p></div><div className="card-controls"><select disabled={busy} aria-label={`Classer ${support.name}`} value={support.category || 'Non classé'} onChange={(event) => void classify(support, event.target.value)}>{categories.filter(item => item !== 'Tous').map(item => <option key={item}>{item}</option>)}</select><div className="actions"><button type="button" disabled={busy} onClick={() => setHubSupport(support)}>Étudier</button><button type="button" disabled={busy} onClick={() => void remove(support.id)}>Supprimer</button></div></div></article>)}</div>}</section></main>;
 }
 
 const root = document.getElementById('root');
