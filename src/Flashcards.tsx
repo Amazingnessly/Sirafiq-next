@@ -1,4 +1,5 @@
 import { FormEvent, useMemo, useState } from 'react';
+import { isReviewDue, scheduleReview } from './spacedRepetition.mjs';
 
 export type Flashcard = {
   id: string;
@@ -17,13 +18,6 @@ type Props = {
   onBack: () => void;
 };
 
-const DAY = 24 * 60 * 60 * 1000;
-const intervals = [0, 1, 3, 7, 14, 30];
-
-function due(card: Flashcard) {
-  return !card.nextReviewAt || new Date(card.nextReviewAt).getTime() <= Date.now();
-}
-
 export function Flashcards({ supportName, cards, onChange, onBack }: Props) {
   const [mode, setMode] = useState<'manage' | 'review'>('manage');
   const [front, setFront] = useState('');
@@ -31,7 +25,7 @@ export function Flashcards({ supportName, cards, onChange, onBack }: Props) {
   const [revealed, setRevealed] = useState(false);
   const [reviewIndex, setReviewIndex] = useState(0);
 
-  const dueCards = useMemo(() => cards.filter(due), [cards]);
+  const dueCards = useMemo(() => cards.filter(card => isReviewDue(card)), [cards]);
   const reviewCards = dueCards.length ? dueCards : cards;
   const current = reviewCards[reviewIndex] ?? null;
 
@@ -53,10 +47,8 @@ export function Flashcards({ supportName, cards, onChange, onBack }: Props) {
 
   const rate = (success: boolean) => {
     if (!current) return;
-    const now = new Date();
-    const nextStage = success ? Math.min(intervals.length - 1, current.stage + 1) : 0;
-    const next = new Date(now.getTime() + intervals[nextStage] * DAY);
-    const updated = cards.map(card => card.id === current.id ? { ...card, stage: nextStage, lastReviewedAt: now.toISOString(), nextReviewAt: next.toISOString() } : card);
+    const schedule = scheduleReview(current.stage, success);
+    const updated = cards.map(card => card.id === current.id ? { ...card, ...schedule } : card);
     onChange(updated);
     setRevealed(false);
     if (reviewIndex >= reviewCards.length - 1) {
@@ -101,7 +93,7 @@ export function Flashcards({ supportName, cards, onChange, onBack }: Props) {
       </form>
       <section className="flash-list-panel">
         <div className="flash-list-title"><div><span>Révision espacée</span><h2>Mes cartes</h2></div><button type="button" onClick={startReview} disabled={!cards.length}>Réviser</button></div>
-        {cards.length === 0 ? <div className="empty"><h3>Aucune carte créée</h3><p>Commence par une question courte et une réponse précise.</p></div> : <div className="flash-list">{cards.map(card => <article key={card.id}><div><strong>{card.front}</strong><p>{card.back}</p><small>Niveau {card.stage} · {due(card) ? 'à revoir' : `prochaine révision ${new Date(card.nextReviewAt!).toLocaleDateString('fr-FR')}`}</small></div><button type="button" onClick={() => removeCard(card.id)}>Supprimer</button></article>)}</div>}
+        {cards.length === 0 ? <div className="empty"><h3>Aucune carte créée</h3><p>Commence par une question courte et une réponse précise.</p></div> : <div className="flash-list">{cards.map(card => <article key={card.id}><div><strong>{card.front}</strong><p>{card.back}</p><small>Niveau {card.stage} · {isReviewDue(card) ? 'à revoir' : `prochaine révision ${new Date(card.nextReviewAt!).toLocaleDateString('fr-FR')}`}</small></div><button type="button" onClick={() => removeCard(card.id)}>Supprimer</button></article>)}</div>}
       </section>
     </div>
   </main>;

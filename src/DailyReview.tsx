@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Flashcard } from './Flashcards';
+import { isReviewDue, scheduleReview } from './spacedRepetition.mjs';
 import { listSupportMetadata, patchSupportMetadata } from './storage';
 
 type StoredSupport = {
@@ -12,13 +13,6 @@ type StoredSupport = {
 type ReviewCard = { supportId: string; supportName: string; card: Flashcard };
 
 type Props = { onClose: () => void; onCountChange?: (count: number) => void };
-
-const DAY = 24 * 60 * 60 * 1000;
-const intervals = [0, 1, 3, 7, 14, 30];
-
-function isDue(card: Flashcard) {
-  return !card.nextReviewAt || new Date(card.nextReviewAt).getTime() <= Date.now();
-}
 
 async function loadSupports(): Promise<StoredSupport[]> {
   return listSupportMetadata<StoredSupport>();
@@ -35,7 +29,7 @@ export function DailyReview({ onClose, onCountChange }: Props) {
     void loadSupports().then(items => { setSupports(items); setStatus(''); }).catch(() => setStatus('Impossible de charger les révisions locales.'));
   }, []);
 
-  const queue = useMemo<ReviewCard[]>(() => supports.flatMap(support => (support.flashcards ?? []).filter(isDue).map(card => ({ supportId: support.id, supportName: support.name, card }))), [supports]);
+  const queue = useMemo<ReviewCard[]>(() => supports.flatMap(support => (support.flashcards ?? []).filter(card => isReviewDue(card)).map(card => ({ supportId: support.id, supportName: support.name, card }))), [supports]);
   const current = queue[index] ?? null;
 
   useEffect(() => { onCountChange?.(queue.length); }, [queue.length, onCountChange]);
@@ -44,12 +38,10 @@ export function DailyReview({ onClose, onCountChange }: Props) {
   const rate = async (success: boolean) => {
     if (!current || saving) return;
     const queueLengthBeforeSave = queue.length;
-    const now = new Date();
-    const nextStage = success ? Math.min(intervals.length - 1, current.card.stage + 1) : 0;
-    const nextReview = new Date(now.getTime() + intervals[nextStage] * DAY).toISOString();
+    const schedule = scheduleReview(current.card.stage, success);
     const support = supports.find(item => item.id === current.supportId);
     if (!support) return;
-    const flashcards = (support.flashcards ?? []).map(card => card.id === current.card.id ? { ...card, stage: nextStage, lastReviewedAt: now.toISOString(), nextReviewAt: nextReview } : card);
+    const flashcards = (support.flashcards ?? []).map(card => card.id === current.card.id ? { ...card, ...schedule } : card);
     setSaving(true);
     setStatus('Enregistrement…');
     try {
