@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { MindMap, MindNode, type MindMapView } from './MindMap';
 import { MemoryPassage, TextMemorization } from './TextMemorization';
 import { QuranMemorization, QuranTarget } from './QuranMemorization';
-import { getSupportMetadata, patchSupportMetadata } from './storage';
+import { getSupportMetadata, patchSupportMetadata, SUPPORT_METADATA_CHANGED_EVENT, type SupportMetadataChange } from './storage';
 
 type Props = {
   id: string;
@@ -49,17 +49,38 @@ export function SupportHub({ id, name, category, canRead, flashcards, recallAtte
   const [storedSupport, setStoredSupport] = useState<StoredSupport | null>(null);
   const [saveStatus, setSaveStatus] = useState('');
 
+  const applyStoredSupport = (support: StoredSupport | null) => {
+    setStoredSupport(support);
+    setMindNodes(support?.mindMap ?? []);
+    setMindMapView(support?.mindMapView);
+    setMemoryPassages(support?.memoryPassages ?? []);
+    setQuranTargets(support?.quranTargets ?? []);
+  };
+
   useEffect(() => {
     let cancelled = false;
     void getSupportMetadata<StoredSupport>(id).then(support => {
       if (cancelled) return;
-      setStoredSupport(support);
-      setMindNodes(support?.mindMap ?? []);
-      setMindMapView(support?.mindMapView);
-      setMemoryPassages(support?.memoryPassages ?? []);
-      setQuranTargets(support?.quranTargets ?? []);
+      applyStoredSupport(support);
     }).catch(() => !cancelled && setSaveStatus('Impossible de charger les données d’étude locales.'));
     return () => { cancelled = true; };
+  }, [id]);
+
+  useEffect(() => {
+    const onMetadataChanged = (event: Event) => {
+      const detail = (event as CustomEvent<SupportMetadataChange>).detail;
+      if (!detail?.id || detail.id !== id) return;
+      if (detail.deleted) {
+        applyStoredSupport(null);
+        setSaveStatus('Ce support vient d’être supprimé sur cet appareil.');
+        return;
+      }
+      if (!detail.metadata) return;
+      applyStoredSupport(detail.metadata as StoredSupport);
+    };
+
+    window.addEventListener(SUPPORT_METADATA_CHANGED_EVENT, onMetadataChanged);
+    return () => window.removeEventListener(SUPPORT_METADATA_CHANGED_EVENT, onMetadataChanged);
   }, [id]);
 
   const persist = (patch: StoredSupportPatch, successMessage: string) => {
