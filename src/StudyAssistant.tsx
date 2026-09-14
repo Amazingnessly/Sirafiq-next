@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { loadAiContext, type AiContext } from './aiContext';
+import './study-assistant.css';
 
 const TOKEN_STORAGE_KEY = 'sirafiq-ai-access-session-v1';
 
