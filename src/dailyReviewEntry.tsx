@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { DailyReview } from './DailyReview';
 import { ErrorBoundary } from './ErrorBoundary';
 import type { Flashcard } from './Flashcards';
-import { isReviewDue } from './spacedRepetition.js';
+import { isReviewDue } from './spacedRepetition.mjs';
 import { listSupportMetadata, SUPPORT_METADATA_CHANGED_EVENT } from './storage';
 import './daily-review.css';
 
