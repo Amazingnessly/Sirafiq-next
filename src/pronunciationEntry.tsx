@@ -29,18 +29,32 @@ function PronunciationEntry() {
   const [open, setOpen] = useState(false);
   const [completed, setCompleted] = useState<string[]>(initialRef.current.completed);
   const [storageWarning, setStorageWarning] = useState(initialRef.current.warning);
+  const dirtyRef = useRef(false);
 
-  const changeCompleted = useCallback((next: string[]) => {
-    setCompleted(next);
+  const persist = useCallback((next: string[]) => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      dirtyRef.current = false;
       setStorageWarning('');
+      return true;
     } catch {
+      dirtyRef.current = true;
       setStorageWarning(STORAGE_WARNING);
+      return false;
     }
   }, []);
 
+  const changeCompleted = useCallback((next: string[]) => {
+    dirtyRef.current = true;
+    setCompleted(next);
+    persist(next);
+  }, [persist]);
+
   const refresh = useCallback(() => {
+    if (dirtyRef.current) {
+      persist(completed);
+      return;
+    }
     const loaded = loadProgress();
     if (loaded.warning) {
       setStorageWarning(loaded.warning);
@@ -48,10 +62,10 @@ function PronunciationEntry() {
     }
     setCompleted(loaded.completed);
     setStorageWarning('');
-  }, []);
+  }, [completed, persist]);
 
   useEffect(() => {
-    const onStorage = (event: StorageEvent) => { if (event.key === STORAGE_KEY) refresh(); };
+    const onStorage = (event: StorageEvent) => { if (event.key === STORAGE_KEY && !dirtyRef.current) refresh(); };
     const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
     window.addEventListener('storage', onStorage);
     window.addEventListener('focus', refresh);
