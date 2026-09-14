@@ -15,7 +15,7 @@ type Props = {
   supportName: string;
   targets: QuranTarget[];
   onChange: (targets: QuranTarget[]) => void;
-  onOpenSource: () => void;
+  onOpenSource: (page?: number) => void;
   onBack: () => void;
 };
 
@@ -85,9 +85,9 @@ export function QuranMemorization({ supportName, targets, onChange, onOpenSource
       <p>{active.page ? `Repère : page ${active.page} du support.` : 'Aucun numéro de page indiqué.'} Le texte arabe n’est pas reconstruit : le document importé reste la référence.</p>
     </header>
     <section className="quran-session">
-      <div className="quran-step"><span>01</span><div><strong>Observer</strong><p>Ouvre la source et lis attentivement le passage dans son rendu original.</p><button type="button" onClick={onOpenSource}>Ouvrir le support de référence</button></div></div>
+      <div className="quran-step"><span>01</span><div><strong>Observer</strong><p>Ouvre la source et lis attentivement le passage dans son rendu original.</p><button type="button" onClick={() => onOpenSource(active.page ?? undefined)}>Ouvrir le support de référence{active.page ? ` · p. ${active.page}` : ''}</button></div></div>
       <div className="quran-step"><span>02</span><div><strong>Réciter sans regarder</strong><p>Ferme ou détourne la source, puis restitue le passage de mémoire.</p></div></div>
-      <div className="quran-step"><span>03</span><div><strong>Comparer</strong><p>Retourne au document original et vérifie mot à mot avant de t’évaluer.</p><button type="button" onClick={onOpenSource}>Comparer avec la source</button></div></div>
+      <div className="quran-step"><span>03</span><div><strong>Comparer</strong><p>Retourne au document original et vérifie mot à mot avant de t’évaluer.</p><button type="button" onClick={() => onOpenSource(active.page ?? undefined)}>Comparer avec la source{active.page ? ` · p. ${active.page}` : ''}</button></div></div>
       {active.note && <div className="quran-note"><strong>Repère personnel</strong><p>{active.note}</p></div>}
       <div className="quran-assessment">
         <p className="eyebrow">APRÈS COMPARAISON</p>
