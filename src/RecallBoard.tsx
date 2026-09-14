@@ -19,24 +19,43 @@ function wordCount(text: string) {
 export function RecallBoard({ supportName, draft = '', attempts = [], onDraftChange, onAttemptsChange, onBack }: Props) {
   const [text, setText] = useState(draft);
   const draftTimerRef = useRef<number | null>(null);
+  const latestDraftRef = useRef(draft);
   const lastSavedDraftRef = useRef(draft);
+  const onDraftChangeRef = useRef(onDraftChange);
   const sortedAttempts = useMemo(() => [...attempts].sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [attempts]);
 
-  useEffect(() => () => {
-    if (draftTimerRef.current !== null) window.clearTimeout(draftTimerRef.current);
-  }, []);
+  useEffect(() => {
+    onDraftChangeRef.current = onDraftChange;
+  }, [onDraftChange]);
 
   const persistDraft = (value: string) => {
+    latestDraftRef.current = value;
     if (draftTimerRef.current !== null) {
       window.clearTimeout(draftTimerRef.current);
       draftTimerRef.current = null;
     }
     if (lastSavedDraftRef.current === value) return;
     lastSavedDraftRef.current = value;
-    onDraftChange(value);
+    onDraftChangeRef.current(value);
   };
 
+  useEffect(() => {
+    const flushPendingDraft = () => persistDraft(latestDraftRef.current);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushPendingDraft();
+    };
+
+    window.addEventListener('pagehide', flushPendingDraft);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      flushPendingDraft();
+      window.removeEventListener('pagehide', flushPendingDraft);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, []);
+
   const change = (value: string) => {
+    latestDraftRef.current = value;
     setText(value);
     if (draftTimerRef.current !== null) window.clearTimeout(draftTimerRef.current);
     draftTimerRef.current = window.setTimeout(() => persistDraft(value), 500);
