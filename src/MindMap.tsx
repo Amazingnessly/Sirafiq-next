@@ -9,10 +9,18 @@ export type MindNode = {
   offsetY?: number;
 };
 
+export type MindMapView = {
+  zoom: number;
+  panX: number;
+  panY: number;
+};
+
 type Props = {
   supportName: string;
   nodes: MindNode[];
+  initialView?: MindMapView;
   onChange: (nodes: MindNode[]) => void;
+  onViewChange?: (view: MindMapView) => void;
   onBack: () => void;
 };
 
@@ -39,6 +47,10 @@ const ZOOM_STEP = 0.1;
 
 function clampZoom(value: number) {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(value * 100) / 100));
+}
+
+function isValidView(view?: MindMapView): view is MindMapView {
+  return Boolean(view && Number.isFinite(view.zoom) && Number.isFinite(view.panX) && Number.isFinite(view.panY));
 }
 
 function descendants(nodes: MindNode[], parentId: string, visited = new Set<string>()): string[] {
@@ -145,13 +157,13 @@ function buildLayout(nodes: MindNode[], root: MindNode) {
   };
 }
 
-export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
+export function MindMap({ supportName, nodes, initialView, onChange, onViewChange, onBack }: Props) {
   const rootNodes = useMemo(() => nodes.filter(node => node.parentId === null), [nodes]);
   const [selectedId, setSelectedId] = useState<string | null>(rootNodes[0]?.id ?? null);
   const [text, setText] = useState('');
   const [editText, setEditText] = useState(rootNodes[0]?.text ?? supportName);
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState<Pan>({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(() => isValidView(initialView) ? clampZoom(initialView.zoom) : 1);
+  const [pan, setPan] = useState<Pan>(() => isValidView(initialView) ? { x: initialView.panX, y: initialView.panY } : { x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [nodePreview, setNodePreview] = useState<NodePreview | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -174,6 +186,16 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
   useEffect(() => {
     setEditText(selected?.text ?? '');
   }, [selectedId, selected?.text]);
+
+  useEffect(() => {
+    if (!isValidView(initialView) || isPanning || nodeDragRef.current) return;
+    setZoom(clampZoom(initialView.zoom));
+    setPan({ x: initialView.panX, y: initialView.panY });
+  }, [initialView?.zoom, initialView?.panX, initialView?.panY, isPanning]);
+
+  const persistView = (nextZoom: number, nextPan: Pan) => {
+    onViewChange?.({ zoom: clampZoom(nextZoom), panX: nextPan.x, panY: nextPan.y });
+  };
 
   const ensureRoot = () => {
     if (rootNodes.length > 0) return rootNodes[0];
@@ -220,13 +242,20 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
     onChange(nodes.map(node => node.id === selected.id ? { ...node, offsetX: 0, offsetY: 0 } : node));
   };
 
-  const recenter = (targetZoom = zoom) => {
+  const centeredPan = (targetZoom: number): Pan | null => {
     const viewport = viewportRef.current;
-    if (!viewport || !layout) return;
-    setPan({
+    if (!viewport || !layout) return null;
+    return {
       x: viewport.clientWidth / 2 - layout.centerX * targetZoom,
       y: viewport.clientHeight / 2 - layout.rootY * targetZoom,
-    });
+    };
+  };
+
+  const recenter = (targetZoom = zoom, save = true) => {
+    const nextPan = centeredPan(targetZoom);
+    if (!nextPan) return;
+    setPan(nextPan);
+    if (save) persistView(targetZoom, nextPan);
   };
 
   const showOverview = () => {
@@ -234,18 +263,21 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
     if (!viewport || !layout) return;
     const horizontalFit = (viewport.clientWidth - 30) / layout.width;
     const verticalFit = (viewport.clientHeight - 30) / layout.height;
-    const next = clampZoom(Math.min(horizontalFit, verticalFit, 0.9));
-    setZoom(next);
-    recenter(next);
+    const nextZoom = clampZoom(Math.min(horizontalFit, verticalFit, 0.9));
+    const nextPan = centeredPan(nextZoom);
+    if (!nextPan) return;
+    setZoom(nextZoom);
+    setPan(nextPan);
+    persistView(nextZoom, nextPan);
   };
 
   const showComfortableView = () => {
     const viewport = viewportRef.current;
     if (!viewport || !layout) return;
     const preferred = viewport.clientWidth <= 430 ? 0.58 : viewport.clientWidth <= 820 ? 0.72 : 0.9;
-    const next = clampZoom(preferred);
-    setZoom(next);
-    recenter(next);
+    const nextZoom = clampZoom(preferred);
+    setZoom(nextZoom);
+    recenter(nextZoom, false);
   };
 
   const startPan = (event: PointerEvent<HTMLDivElement>) => {
@@ -271,9 +303,16 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
   };
 
   const stopPan = (event: PointerEvent<HTMLDivElement>) => {
-    if (panDragRef.current?.pointerId !== event.pointerId) return;
+    const drag = panDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const nextPan = {
+      x: drag.originX + event.clientX - drag.startX,
+      y: drag.originY + event.clientY - drag.startY,
+    };
     panDragRef.current = null;
+    setPan(nextPan);
     setIsPanning(false);
+    persistView(zoom, nextPan);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
@@ -329,14 +368,18 @@ export function MindMap({ supportName, nodes, onChange, onBack }: Props) {
   };
 
   useEffect(() => {
+    if (isValidView(initialView)) return;
     const timer = window.setTimeout(showComfortableView, 90);
     return () => window.clearTimeout(timer);
-  }, [root?.id]);
+  }, [root?.id, initialView?.zoom, initialView?.panX, initialView?.panY]);
 
   const changeZoom = (nextZoom: number) => {
     const next = clampZoom(nextZoom);
+    const nextPan = centeredPan(next);
     setZoom(next);
-    recenter(next);
+    if (!nextPan) return;
+    setPan(nextPan);
+    persistView(next, nextPan);
   };
 
   const selectedHasManualPosition = Boolean(selected && ((selected.offsetX ?? 0) !== 0 || (selected.offsetY ?? 0) !== 0));
