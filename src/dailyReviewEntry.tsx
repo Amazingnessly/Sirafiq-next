@@ -3,15 +3,15 @@ import { createRoot } from 'react-dom/client';
 import { DailyReview } from './DailyReview';
 import { ErrorBoundary } from './ErrorBoundary';
 import type { Flashcard } from './Flashcards';
+import { isReviewDue } from './spacedRepetition.js';
 import { listSupportMetadata, SUPPORT_METADATA_CHANGED_EVENT } from './storage';
 import './daily-review.css';
 
 type StoredSupport = { id: string; flashcards?: Flashcard[] };
 
-function isDue(card: Flashcard) { return !card.nextReviewAt || new Date(card.nextReviewAt).getTime() <= Date.now(); }
 async function countDue(): Promise<number> {
   const supports = await listSupportMetadata<StoredSupport>();
-  return supports.reduce((total, support) => total + (support.flashcards ?? []).filter(isDue).length, 0);
+  return supports.reduce((total, support) => total + (support.flashcards ?? []).filter(card => isReviewDue(card)).length, 0);
 }
 
 function DailyReviewEntry() {
