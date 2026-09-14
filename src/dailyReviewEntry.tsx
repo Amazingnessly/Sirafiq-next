@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { DailyReview } from './DailyReview';
+import { ErrorBoundary } from './ErrorBoundary';
 import type { Flashcard } from './Flashcards';
 import { listSupportMetadata, SUPPORT_METADATA_CHANGED_EVENT } from './storage';
 import './daily-review.css';
@@ -43,4 +44,4 @@ function DailyReviewEntry() {
 }
 
 const root = document.getElementById('daily-review-root');
-if (root) createRoot(root).render(<React.StrictMode><DailyReviewEntry /></React.StrictMode>);
+if (root) createRoot(root).render(<React.StrictMode><ErrorBoundary area="les révisions du jour"><DailyReviewEntry /></ErrorBoundary></React.StrictMode>);
