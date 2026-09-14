@@ -23,11 +23,12 @@ export function Flashcards({ supportName, cards, onChange, onBack }: Props) {
   const [front, setFront] = useState('');
   const [back, setBack] = useState('');
   const [revealed, setRevealed] = useState(false);
+  const [reviewIds, setReviewIds] = useState<string[]>([]);
   const [reviewIndex, setReviewIndex] = useState(0);
 
   const dueCards = useMemo(() => cards.filter(card => isReviewDue(card)), [cards]);
-  const reviewCards = dueCards.length ? dueCards : cards;
-  const current = reviewCards[reviewIndex] ?? null;
+  const currentId = reviewIds[reviewIndex] ?? null;
+  const current = currentId ? cards.find(card => card.id === currentId) ?? null : null;
 
   const addCard = (event: FormEvent) => {
     event.preventDefault();
@@ -45,39 +46,48 @@ export function Flashcards({ supportName, cards, onChange, onBack }: Props) {
     onChange(cards.filter(item => item.id !== id));
   };
 
+  const finishReview = () => {
+    setReviewIds([]);
+    setReviewIndex(0);
+    setRevealed(false);
+    setMode('manage');
+  };
+
   const rate = (success: boolean) => {
     if (!current) return;
     const schedule = scheduleReview(current.stage, success);
     const updated = cards.map(card => card.id === current.id ? { ...card, ...schedule } : card);
     onChange(updated);
     setRevealed(false);
-    if (reviewIndex >= reviewCards.length - 1) {
-      setReviewIndex(0);
-      setMode('manage');
+    if (reviewIndex >= reviewIds.length - 1) {
+      finishReview();
     } else {
       setReviewIndex(index => index + 1);
     }
   };
 
   const startReview = () => {
+    const candidates = dueCards.length ? dueCards : cards;
+    if (!candidates.length) return;
+    setReviewIds(candidates.map(card => card.id));
     setReviewIndex(0);
     setRevealed(false);
     setMode('review');
   };
 
   if (mode === 'review') return <main className="shell flash-shell">
-    <button className="back" type="button" onClick={() => setMode('manage')}>← Cartes</button>
+    <button className="back" type="button" onClick={finishReview}>← Cartes</button>
     <section className="flash-review">
       <p className="eyebrow">RÉVISION ACTIVE · {supportName}</p>
       {current ? <>
-        <div className="flash-progress">Carte {reviewIndex + 1} / {reviewCards.length}</div>
+        <div className="flash-progress">Carte {reviewIndex + 1} / {reviewIds.length}</div>
         <article className="flash-card-review" onClick={() => setRevealed(true)}>
           <span>Question</span>
           <h1>{current.front}</h1>
           {revealed ? <div className="flash-answer"><span>Réponse</span><p>{current.back}</p></div> : <button type="button" onClick={() => setRevealed(true)}>Afficher la réponse</button>}
         </article>
         {revealed && <div className="flash-rating"><button type="button" onClick={() => rate(false)}>À revoir</button><button type="button" onClick={() => rate(true)}>Acquis</button></div>}
-      </> : <div className="empty"><h3>Aucune carte</h3><p>Crée d’abord une carte pour commencer une révision.</p></div>}
+      </> : <div className="empty"><h3>Carte indisponible</h3><p>Cette carte a été modifiée ailleurs. Reviens à la liste puis relance la révision.</p><button type="button" onClick={finishReview}>Retour aux cartes</button></div>}
     </section>
   </main>;
 
