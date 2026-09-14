@@ -1,0 +1,230 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+
+type Criterion = 'articulation' | 'rythme' | 'souffle' | 'intonation' | 'presence';
+type Scores = Record<Criterion, number>;
+type PracticeAttempt = {
+  id: string;
+  promptId: string;
+  createdAt: string;
+  durationSeconds: number;
+  scores: Scores;
+  note?: string;
+};
+
+type Prompt = {
+  id: string;
+  level: string;
+  title: string;
+  focus: string;
+  targetSeconds: number;
+  text: string;
+};
+
+type Props = { onBack: () => void };
+
+const STORAGE_KEY = 'sirafiq-pronunciation-practice-v1';
+const STORAGE_WARNING = 'Impossible d’enregistrer cette séance sur cet appareil. Elle reste visible pour cette session mais pourrait être perdue en fermant la page.';
+
+const criteria: Array<{ id: Criterion; label: string; hint: string }> = [
+  { id: 'articulation', label: 'Articulation', hint: 'Voyelles stables, consonnes nettes, finales maîtrisées.' },
+  { id: 'rythme', label: 'Rythme', hint: 'Groupes réguliers, débit non haché, pauses utiles.' },
+  { id: 'souffle', label: 'Souffle', hint: 'Phrases soutenues sans tension ni fins à bout de souffle.' },
+  { id: 'intonation', label: 'Intonation', hint: 'Mélodie qui signale continuité, conclusion et mise en relief.' },
+  { id: 'presence', label: 'Présence', hint: 'Voix dirigée, intention claire, énergie adaptée au public.' },
+];
+
+const prompts: Prompt[] = [
+  {
+    id: 'voyelles-contrastes',
+    level: 'Précision',
+    title: 'Contrastes vocaliques',
+    focus: 'Distinguer /i y u/, voyelles ouvertes/fermées et voyelles nasales sans ralentir mot par mot.',
+    targetSeconds: 45,
+    text: 'Lucie lui demande où sont les outils utiles pour finir le cours. Paul répond qu’ils sont près du mur, sous une petite étagère. Un instant plus tard, chacun reprend son travail en gardant un débit calme. L’objectif n’est pas de forcer chaque son, mais de conserver des voyelles distinctes tout au long de la phrase.',
+  },
+  {
+    id: 'chaine-parlee',
+    level: 'Fluidité',
+    title: 'Enchaînements et liaisons',
+    focus: 'Lier les groupes sans ajouter de pauses artificielles et sans produire de liaisons partout.',
+    targetSeconds: 50,
+    text: 'Les élèves arrivent à l’heure et ils installent leurs affaires en silence. Vous avez ensuite quelques instants pour expliquer les objectifs du jour. Avec eux, avancez étape par étape : donnez un exemple, vérifiez la compréhension, puis laissez un temps court pour essayer. Une parole liée reste plus facile à suivre qu’une succession de mots isolés.',
+  },
+  {
+    id: 'prosodie-explication',
+    level: 'Prosodie',
+    title: 'Expliquer une idée clairement',
+    focus: 'Découper en groupes rythmiques et mettre en relief uniquement l’information essentielle.',
+    targetSeconds: 60,
+    text: 'Pour mémoriser durablement une notion, il ne suffit pas de la relire. Il faut tenter de la retrouver sans regarder le support, constater ce qui manque, puis recommencer après un délai. Ce qui demande un effort de rappel devient progressivement plus accessible. La difficulté utile n’est donc pas un obstacle : elle fait partie du mécanisme d’apprentissage.',
+  },
+  {
+    id: 'recit-expressif',
+    level: 'Expression',
+    title: 'Récit court',
+    focus: 'Faire entendre les changements d’intention sans théâtraliser chaque phrase.',
+    targetSeconds: 70,
+    text: 'Au début, la salle était presque vide. Quelques personnes parlaient encore près de la porte, tandis que les autres cherchaient leur place. Puis le silence s’est installé. L’orateur a regardé le public, attendu une seconde, et commencé très simplement. Sa voix n’était ni forte ni spectaculaire. Pourtant, chacun a levé les yeux : le rythme, les pauses et la précision donnaient du poids à chaque idée.',
+  },
+  {
+    id: 'consigne-pedagogique',
+    level: 'Transmission',
+    title: 'Donner une consigne',
+    focus: 'Être bref, structuré et audible ; utiliser les pauses pour séparer les étapes.',
+    targetSeconds: 45,
+    text: 'Prenez deux minutes pour relire le passage. Ensuite, fermez le document et écrivez tout ce dont vous vous souvenez. Ne cherchez pas à produire un texte parfait : notez d’abord les idées essentielles. Quand vous aurez terminé, rouvrez le support, comparez votre restitution et marquez seulement les éléments réellement oubliés.',
+  },
+  {
+    id: 'maitrise',
+    level: 'Maîtrise',
+    title: 'Lecture de synthèse',
+    focus: 'Combiner articulation, chaîne parlée, respiration, prosodie et présence sans préparation excessive.',
+    targetSeconds: 90,
+    text: 'Une lecture efficace ne consiste pas à prononcer chaque lettre avec la même force. Elle consiste à guider l’attention. Le lecteur prépare ses groupes de sens, choisit les mots qui doivent ressortir, garde assez de souffle pour finir ses phrases et laisse les silences travailler avec lui. Lorsqu’il explique, il ralentit sur une notion nouvelle, accélère légèrement sur ce qui est déjà connu et conclut avec une intonation qui ferme réellement l’idée. La maîtrise apparaît quand ces choix deviennent souples : ils restent précis sans donner l’impression d’une technique appliquée mécaniquement.',
+  },
+];
+
+function emptyScores(): Scores {
+  return { articulation: 0, rythme: 0, souffle: 0, intonation: 0, presence: 0 };
+}
+
+function formatDuration(seconds: number) {
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return `${minutes}:${String(rest).padStart(2, '0')}`;
+}
+
+function loadAttempts(): PracticeAttempt[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter(item => item && typeof item.id === 'string' && typeof item.promptId === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+export function PronunciationPractice({ onBack }: Props) {
+  const [promptId, setPromptId] = useState(prompts[0].id);
+  const [running, setRunning] = useState(false);
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+  const [scores, setScores] = useState<Scores>(emptyScores);
+  const [note, setNote] = useState('');
+  const [attempts, setAttempts] = useState<PracticeAttempt[]>(loadAttempts);
+  const [warning, setWarning] = useState('');
+  const dirtyRef = useRef(false);
+  const prompt = prompts.find(item => item.id === promptId) ?? prompts[0];
+  const canSave = !running && elapsed > 0 && criteria.every(item => scores[item.id] > 0);
+
+  useEffect(() => {
+    if (!running || startedAt === null) return;
+    const update = () => setElapsed(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+    update();
+    const timer = window.setInterval(update, 250);
+    return () => window.clearInterval(timer);
+  }, [running, startedAt]);
+
+  const persistAttempts = (next: PracticeAttempt[]) => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      dirtyRef.current = false;
+      setWarning('');
+    } catch {
+      dirtyRef.current = true;
+      setWarning(STORAGE_WARNING);
+    }
+  };
+
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== STORAGE_KEY || dirtyRef.current) return;
+      setAttempts(loadAttempts());
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
+  const resetSession = (nextPromptId = promptId) => {
+    setPromptId(nextPromptId);
+    setRunning(false);
+    setStartedAt(null);
+    setElapsed(0);
+    setScores(emptyScores());
+    setNote('');
+  };
+
+  const start = () => {
+    setElapsed(0);
+    setScores(emptyScores());
+    setNote('');
+    setStartedAt(Date.now());
+    setRunning(true);
+  };
+
+  const stop = () => {
+    if (startedAt !== null) setElapsed(Math.max(1, Math.round((Date.now() - startedAt) / 1000)));
+    setRunning(false);
+  };
+
+  const save = () => {
+    if (!canSave) return;
+    const nextAttempt: PracticeAttempt = {
+      id: crypto.randomUUID(),
+      promptId: prompt.id,
+      createdAt: new Date().toISOString(),
+      durationSeconds: elapsed,
+      scores,
+      note: note.trim() || undefined,
+    };
+    const next = [nextAttempt, ...attempts].slice(0, 50);
+    setAttempts(next);
+    persistAttempts(next);
+    resetSession(prompt.id);
+  };
+
+  const averageFor = (attempt: PracticeAttempt) => {
+    const values = criteria.map(item => attempt.scores[item.id] || 0);
+    return values.reduce((sum, value) => sum + value, 0) / values.length;
+  };
+
+  const promptAttempts = useMemo(() => attempts.filter(attempt => attempt.promptId === prompt.id), [attempts, prompt.id]);
+
+  return <section className="pronunciation-practice" aria-label="Mode d’entraînement Lecture et voix">
+    <header className="pronunciation-practice-header">
+      <div><p className="eyebrow">ENTRAÎNEMENT</p><h2>Pratiquer à voix haute</h2><p>Le chronomètre reste entièrement local. Sirāfiq n’enregistre ni n’envoie ton audio : l’évaluation repose ici sur ton écoute et, idéalement, sur un enregistrement réalisé avec l’outil de ton choix.</p></div>
+      <button type="button" onClick={onBack}>← Retour au cursus</button>
+    </header>
+
+    {warning && <p className="pronunciation-warning" role="alert">{warning}</p>}
+
+    <div className="pronunciation-practice-grid">
+      <aside className="pronunciation-prompt-list">
+        {prompts.map(item => <button key={item.id} type="button" className={prompt.id === item.id ? 'active' : ''} disabled={running} onClick={() => resetSession(item.id)}><small>{item.level}</small><strong>{item.title}</strong><span>{item.focus}</span></button>)}
+      </aside>
+
+      <div className="pronunciation-practice-main">
+        <article className="pronunciation-prompt">
+          <div className="pronunciation-prompt-meta"><span>{prompt.level}</span><strong>Cible ≈ {formatDuration(prompt.targetSeconds)}</strong></div>
+          <h3>{prompt.title}</h3>
+          <p className="pronunciation-focus">{prompt.focus}</p>
+          <blockquote>{prompt.text}</blockquote>
+          <div className="pronunciation-timer" aria-live="polite"><strong>{formatDuration(elapsed)}</strong>{running ? <button type="button" onClick={stop}>Arrêter</button> : <button type="button" className="primary" onClick={start}>{elapsed ? 'Recommencer' : 'Démarrer'}</button>}</div>
+        </article>
+
+        {elapsed > 0 && !running && <section className="pronunciation-self-review">
+          <div><p className="eyebrow">AUTO-ÉVALUATION</p><h3>Note chaque axe séparément</h3><p>1 = fragile · 3 = stable · 5 = maîtrisé dans ce passage.</p></div>
+          <div className="pronunciation-score-grid">{criteria.map(item => <div key={item.id} className="pronunciation-score-row"><div><strong>{item.label}</strong><small>{item.hint}</small></div><div>{[1,2,3,4,5].map(value => <button key={value} type="button" className={scores[item.id] === value ? 'active' : ''} onClick={() => setScores(current => ({ ...current, [item.id]: value }))} aria-label={`${item.label} : ${value} sur 5`}>{value}</button>)}</div></div>)}</div>
+          <label className="pronunciation-practice-note">Observation pour la prochaine tentative<textarea value={note} onChange={event => setNote(event.target.value)} placeholder="Ex. : je perds le souffle sur la dernière phrase ; ralentir avant l’idée centrale." /></label>
+          <button className="primary" type="button" disabled={!canSave} onClick={save}>Enregistrer cette séance</button>
+        </section>}
+
+        <section className="pronunciation-practice-history">
+          <div><p className="eyebrow">HISTORIQUE</p><h3>{promptAttempts.length ? `${promptAttempts.length} séance${promptAttempts.length > 1 ? 's' : ''} sur ce texte` : 'Aucune séance enregistrée sur ce texte'}</h3></div>
+          {promptAttempts.length > 0 && <div>{promptAttempts.slice(0, 6).map(attempt => <article key={attempt.id}><div><strong>{new Date(attempt.createdAt).toLocaleString('fr-FR')}</strong><span>{formatDuration(attempt.durationSeconds)} · moyenne {averageFor(attempt).toFixed(1)}/5</span></div><p>{criteria.map(item => `${item.label} ${attempt.scores[item.id]}/5`).join(' · ')}</p>{attempt.note && <blockquote>{attempt.note}</blockquote>}</article>)}</div>}
+        </section>
+      </div>
+    </div>
+  </section>;
+}
