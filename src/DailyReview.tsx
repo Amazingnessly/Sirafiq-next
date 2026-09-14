@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Flashcard } from './Flashcards';
-import { isReviewDue, scheduleReview } from './spacedRepetition.js';
+import { isReviewDue, scheduleReview } from './spacedRepetition.mjs';
 import { listSupportMetadata, patchSupportMetadata } from './storage';
 
 type StoredSupport = {
@@ -38,8 +38,7 @@ export function DailyReview({ onClose, onCountChange }: Props) {
   const rate = async (success: boolean) => {
     if (!current || saving) return;
     const queueLengthBeforeSave = queue.length;
-    const now = new Date();
-    const schedule = scheduleReview(current.card.stage, success, now);
+    const schedule = scheduleReview(current.card.stage, success);
     const support = supports.find(item => item.id === current.supportId);
     if (!support) return;
     const flashcards = (support.flashcards ?? []).map(card => card.id === current.card.id ? { ...card, ...schedule } : card);
