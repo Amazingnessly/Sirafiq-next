@@ -1,5 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { ErrorBoundary } from './ErrorBoundary';
 import { WatchItem, WatchLater } from './WatchLater';
 import './watch-later.css';
 
@@ -87,4 +88,4 @@ function WatchLaterEntry() {
 }
 
 const root = document.getElementById('watch-root');
-if (root) createRoot(root).render(<React.StrictMode><WatchLaterEntry /></React.StrictMode>);
+if (root) createRoot(root).render(<React.StrictMode><ErrorBoundary area="la file À voir"><WatchLaterEntry /></ErrorBoundary></React.StrictMode>);
