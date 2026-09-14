@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { extractOutputText, validateAiPayload } from '../worker/index.js';
+import { extractOutputText, validateAiPayload } from '../worker/index.mjs';
 
 test('validateAiPayload accepte un contexte et une question valides', () => {
   const result = validateAiPayload({ supportName: 'Cours.pdf', context: 'Un contenu utile.', question: 'Que faut-il retenir ?' });
