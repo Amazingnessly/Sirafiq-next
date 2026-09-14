@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isReviewDue, REVIEW_INTERVAL_DAYS, scheduleReview } from '../src/spacedRepetition.js';
+import { isReviewDue, REVIEW_INTERVAL_DAYS, scheduleReview } from '../src/spacedRepetition.mjs';
 
 const NOW = new Date('2026-09-14T09:00:00.000Z');
 const DAY = 24 * 60 * 60 * 1000;
