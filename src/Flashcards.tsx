@@ -1,5 +1,5 @@
 import { FormEvent, useMemo, useState } from 'react';
-import { isReviewDue, scheduleReview } from './spacedRepetition.js';
+import { isReviewDue, scheduleReview } from './spacedRepetition.mjs';
 
 export type Flashcard = {
   id: string;
