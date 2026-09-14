@@ -95,7 +95,22 @@ export function SupportHub({ id, name, category, canRead, flashcards, recallAtte
     persist({ quranTargets: targets }, 'Parcours Qour’ān enregistré.');
   };
 
-  if (quranMode) return <><QuranMemorization supportName={name} targets={quranTargets} onChange={changeQuranTargets} onOpenSource={onOpenReference} onBack={() => setQuranMode(false)} />{saveStatus && <div className="mind-save-status" role="status">{saveStatus}</div>}</>;
+  const openQuranReference = (page?: number) => {
+    if (!page || !Number.isFinite(page) || page < 1) {
+      onOpenReference();
+      return;
+    }
+    const url = new URL(window.location.href);
+    url.search = '';
+    url.hash = '';
+    url.searchParams.set('source', id);
+    url.searchParams.set('page', String(Math.floor(page)));
+    const opened = window.open(url.toString(), '_blank');
+    if (opened) opened.opener = null;
+    else setSaveStatus('Impossible d’ouvrir la page de référence dans un nouvel onglet. Autorise les fenêtres contextuelles puis réessaie.');
+  };
+
+  if (quranMode) return <><QuranMemorization supportName={name} targets={quranTargets} onChange={changeQuranTargets} onOpenSource={openQuranReference} onBack={() => setQuranMode(false)} />{saveStatus && <div className="mind-save-status" role="status">{saveStatus}</div>}</>;
   if (memoryMode) return <><TextMemorization supportName={name} passages={memoryPassages} onChange={changeMemoryPassages} onBack={() => setMemoryMode(false)} />{saveStatus && <div className="mind-save-status" role="status">{saveStatus}</div>}</>;
   if (mindMode) return <><MindMap supportName={name} nodes={mindNodes} initialView={mindMapView} onChange={changeMindMap} onViewChange={changeMindMapView} onBack={() => setMindMode(false)} />{saveStatus && <div className="mind-save-status" role="status">{saveStatus}</div>}</>;
 
