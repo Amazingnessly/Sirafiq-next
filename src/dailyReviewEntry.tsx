@@ -3,15 +3,18 @@ import { createRoot } from 'react-dom/client';
 import { DailyReview } from './DailyReview';
 import { ErrorBoundary } from './ErrorBoundary';
 import type { Flashcard } from './Flashcards';
+import type { MemoryPassage } from './TextMemorization';
 import { isReviewDue } from './spacedRepetition.mjs';
 import { listSupportMetadata, SUPPORT_METADATA_CHANGED_EVENT } from './storage';
 import './daily-review.css';
 
-type StoredSupport = { id: string; flashcards?: Flashcard[] };
+type StoredSupport = { id: string; flashcards?: Flashcard[]; memoryPassages?: MemoryPassage[] };
 
 async function countDue(): Promise<number> {
   const supports = await listSupportMetadata<StoredSupport>();
-  return supports.reduce((total, support) => total + (support.flashcards ?? []).filter(card => isReviewDue(card)).length, 0);
+  return supports.reduce((total, support) => total
+    + (support.flashcards ?? []).filter(card => isReviewDue(card)).length
+    + (support.memoryPassages ?? []).filter(passage => isReviewDue(passage)).length, 0);
 }
 
 function DailyReviewEntry() {
@@ -38,7 +41,7 @@ function DailyReviewEntry() {
   }, [refresh]);
 
   return <>
-    <button className="daily-launcher" type="button" onClick={() => { refresh(); setOpen(true); }} aria-label={`Ouvrir les révisions du jour, ${count} carte${count > 1 ? 's' : ''} à revoir`}><span>Réviser</span><strong>{count}</strong></button>
+    <button className="daily-launcher" type="button" onClick={() => { refresh(); setOpen(true); }} aria-label={`Ouvrir les révisions du jour, ${count} élément${count > 1 ? 's' : ''} à revoir`}><span>Réviser</span><strong>{count}</strong></button>
     {open && <DailyReview onClose={() => { setOpen(false); refresh(); }} onCountChange={setCount} />}
   </>;
 }
