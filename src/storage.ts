@@ -303,7 +303,11 @@ export async function saveNewSupportFile<T extends { id: string; size: number; t
     };
     await saveSupportMetadata(metadata);
   } catch (error) {
-    await deletePayloadChunks(support.id).catch(() => undefined);
+    try {
+      await deletePayloadChunks(support.id);
+    } catch {
+      cleanupPromise = null;
+    }
     throw error;
   } finally {
     activeImports.delete(support.id);
