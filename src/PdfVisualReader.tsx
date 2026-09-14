@@ -24,6 +24,16 @@ type Props = {
   onNotesChange: (notes: PdfPageNote[]) => void;
 };
 
+type ReferenceRequest = { active: boolean; page: number | null };
+
+function referenceRequestFromLocation(): ReferenceRequest {
+  if (typeof window === 'undefined') return { active: false, page: null };
+  const params = new URLSearchParams(window.location.search);
+  if (!params.has('source')) return { active: false, page: null };
+  const requested = Number.parseInt(params.get('page') ?? '', 10);
+  return { active: true, page: Number.isFinite(requested) && requested > 0 ? requested : null };
+}
+
 class SourceRangeTransport extends pdfjs.PDFDataRangeTransport {
   private aborted = false;
 
@@ -57,10 +67,12 @@ class SourceRangeTransport extends pdfjs.PDFDataRangeTransport {
 export function PdfVisualReader({ name, source, initialPage = 1, initialZoom = 1, bookmarks = [], notes = [], onBack, onProgress, onBookmarksChange, onNotesChange }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
+  const referenceRequest = useMemo(referenceRequestFromLocation, []);
+  const startingPage = referenceRequest.page ?? initialPage;
   const [document, setDocument] = useState<pdfjs.PDFDocumentProxy | null>(null);
-  const [pageNumber, setPageNumber] = useState(Math.max(1, initialPage));
+  const [pageNumber, setPageNumber] = useState(Math.max(1, startingPage));
   const [zoom, setZoom] = useState(Math.min(1.8, Math.max(.75, initialZoom)));
-  const [jumpValue, setJumpValue] = useState(String(Math.max(1, initialPage)));
+  const [jumpValue, setJumpValue] = useState(String(Math.max(1, startingPage)));
   const [noteDraft, setNoteDraft] = useState('');
   const [error, setError] = useState('');
   const [rendering, setRendering] = useState(true);
@@ -141,7 +153,7 @@ export function PdfVisualReader({ name, source, initialPage = 1, initialZoom = 1
         canvas.style.height = `${Math.floor(viewport.height)}px`;
         task = page.render({ canvasContext: context, viewport, transform: outputScale === 1 ? undefined : [outputScale, 0, 0, outputScale, 0, 0] });
         await task.promise;
-        if (!cancelled) onProgress(pageNumber, zoom);
+        if (!cancelled && !referenceRequest.active) onProgress(pageNumber, zoom);
       } catch (err) {
         if (!cancelled && (err as { name?: string }).name !== 'RenderingCancelledException') setError(err instanceof Error ? err.message : 'Impossible de rendre cette page.');
       } finally {
@@ -150,7 +162,7 @@ export function PdfVisualReader({ name, source, initialPage = 1, initialZoom = 1
     };
     void render();
     return () => { cancelled = true; task?.cancel(); };
-  }, [document, pageNumber, zoom, onProgress]);
+  }, [document, pageNumber, zoom, onProgress, referenceRequest.active]);
 
   const pages = document?.numPages ?? 0;
   const goTo = (page: number) => setPageNumber(Math.min(Math.max(1, page), Math.max(1, pages)));
@@ -197,7 +209,7 @@ export function PdfVisualReader({ name, source, initialPage = 1, initialZoom = 1
     </div>
     <article className="pdf-reader">
       <header>
-        <p className="eyebrow">PDF · RENDU VISUEL FIDÈLE</p><h1>{name}</h1><p>La progression, les repères et les notes de page restent sur cet appareil.</p>
+        <p className="eyebrow">PDF · RENDU VISUEL FIDÈLE</p><h1>{name}</h1><p>{referenceRequest.active ? 'Vue de référence : la navigation ici ne remplace pas ta dernière page de lecture. Les repères et notes restent disponibles.' : 'La progression, les repères et les notes de page restent sur cet appareil.'}</p>
         <div className="pdf-study-tools">
           <button className={isBookmarked ? 'bookmarked' : ''} type="button" disabled={!document} onClick={toggleBookmark}>{isBookmarked ? '★ Page repérée' : '☆ Repérer cette page'}</button>
           <details className="pdf-bookmarks">
