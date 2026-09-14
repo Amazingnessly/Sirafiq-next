@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { MindMap, MindNode, type MindMapView } from './MindMap';
 import { MemoryPassage, TextMemorization } from './TextMemorization';
 import { QuranMemorization, QuranTarget } from './QuranMemorization';
+import { StudyAssistant } from './StudyAssistant';
 import { getSupportMetadata, patchSupportMetadata, SUPPORT_METADATA_CHANGED_EVENT, type SupportMetadataChange } from './storage';
 
 type Props = {
@@ -38,10 +39,15 @@ type StoredSupport = {
 
 type StoredSupportPatch = Partial<Omit<StoredSupport, 'id'>>;
 
+function extensionOf(name: string) {
+  return name.split('.').pop()?.toLowerCase() ?? '';
+}
+
 export function SupportHub({ id, name, category, canRead, flashcards, recallAttempts, pdfBookmarks = 0, pdfNotes = 0, onRead, onOpenReference, onFlashcards, onRecall, onBack }: Props) {
   const [mindMode, setMindMode] = useState(false);
   const [memoryMode, setMemoryMode] = useState(false);
   const [quranMode, setQuranMode] = useState(false);
+  const [aiMode, setAiMode] = useState(false);
   const [mindNodes, setMindNodes] = useState<MindNode[]>([]);
   const [mindMapView, setMindMapView] = useState<MindMapView | undefined>();
   const [memoryPassages, setMemoryPassages] = useState<MemoryPassage[]>([]);
@@ -131,11 +137,13 @@ export function SupportHub({ id, name, category, canRead, flashcards, recallAtte
     else setSaveStatus('Impossible d’ouvrir la page de référence dans un nouvel onglet. Autorise les fenêtres contextuelles puis réessaie.');
   };
 
+  if (aiMode) return <StudyAssistant supportId={id} supportName={name} onBack={() => setAiMode(false)} />;
   if (quranMode) return <><QuranMemorization supportName={name} targets={quranTargets} onChange={changeQuranTargets} onOpenSource={openQuranReference} onBack={() => setQuranMode(false)} />{saveStatus && <div className="mind-save-status" role="status">{saveStatus}</div>}</>;
   if (memoryMode) return <><TextMemorization supportName={name} passages={memoryPassages} onChange={changeMemoryPassages} onBack={() => setMemoryMode(false)} />{saveStatus && <div className="mind-save-status" role="status">{saveStatus}</div>}</>;
   if (mindMode) return <><MindMap supportName={name} nodes={mindNodes} initialView={mindMapView} onChange={changeMindMap} onViewChange={changeMindMapView} onBack={() => setMindMode(false)} />{saveStatus && <div className="mind-save-status" role="status">{saveStatus}</div>}</>;
 
   const isQuranSupport = category === 'Qour’ān';
+  const canUseAi = ['pdf', 'docx', 'txt', 'md'].includes(extensionOf(name));
 
   return <main className="shell hub-shell">
     <button className="back" type="button" onClick={onBack}>← Bibliothèque</button>
@@ -163,6 +171,9 @@ export function SupportHub({ id, name, category, canRead, flashcards, recallAtte
       <button className="hub-card" type="button" onClick={() => setMemoryMode(true)}>
         <span className="hub-index">{isQuranSupport ? '06' : '05'}</span><div><strong>Mémorisation de textes</strong><p>Découper un texte en passages puis pratiquer lecture, masquage, restitution et comparaison.</p><small>{memoryPassages.length} passage{memoryPassages.length > 1 ? 's' : ''}</small></div>
       </button>
+      {canUseAi && <button className="hub-card" type="button" onClick={() => setAiMode(true)}>
+        <span className="hub-index">IA</span><div><strong>Assistant d’étude</strong><p>Interroger le support, demander une explication ou générer des questions de rappel à partir de son contenu.</p><small>PDF · DOCX · TXT · Markdown</small></div>
+      </button>}
     </section>
   </main>;
 }
