@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MindMap, MindNode } from './MindMap';
+import { MindMap, MindNode, type MindMapView } from './MindMap';
 import { MemoryPassage, TextMemorization } from './TextMemorization';
 import { QuranMemorization, QuranTarget } from './QuranMemorization';
 import { getSupportMetadata, patchSupportMetadata } from './storage';
@@ -29,6 +29,7 @@ type StoredSupport = {
   pdfBookmarks?: number[];
   pdfNotes?: unknown[];
   mindMap?: MindNode[];
+  mindMapView?: MindMapView;
   memoryPassages?: MemoryPassage[];
   quranTargets?: QuranTarget[];
   importedAt?: string;
@@ -42,6 +43,7 @@ export function SupportHub({ id, name, category, canRead, flashcards, recallAtte
   const [memoryMode, setMemoryMode] = useState(false);
   const [quranMode, setQuranMode] = useState(false);
   const [mindNodes, setMindNodes] = useState<MindNode[]>([]);
+  const [mindMapView, setMindMapView] = useState<MindMapView | undefined>();
   const [memoryPassages, setMemoryPassages] = useState<MemoryPassage[]>([]);
   const [quranTargets, setQuranTargets] = useState<QuranTarget[]>([]);
   const [storedSupport, setStoredSupport] = useState<StoredSupport | null>(null);
@@ -53,6 +55,7 @@ export function SupportHub({ id, name, category, canRead, flashcards, recallAtte
       if (cancelled) return;
       setStoredSupport(support);
       setMindNodes(support?.mindMap ?? []);
+      setMindMapView(support?.mindMapView);
       setMemoryPassages(support?.memoryPassages ?? []);
       setQuranTargets(support?.quranTargets ?? []);
     }).catch(() => !cancelled && setSaveStatus('Impossible de charger les données d’étude locales.'));
@@ -77,6 +80,11 @@ export function SupportHub({ id, name, category, canRead, flashcards, recallAtte
     persist({ mindMap: nodes }, 'Carte mentale enregistrée.');
   };
 
+  const changeMindMapView = (view: MindMapView) => {
+    setMindMapView(view);
+    persist({ mindMapView: view }, 'Cadrage de la carte enregistré.');
+  };
+
   const changeMemoryPassages = (passages: MemoryPassage[]) => {
     setMemoryPassages(passages);
     persist({ memoryPassages: passages }, 'Mémorisation enregistrée.');
@@ -89,7 +97,7 @@ export function SupportHub({ id, name, category, canRead, flashcards, recallAtte
 
   if (quranMode) return <><QuranMemorization supportName={name} targets={quranTargets} onChange={changeQuranTargets} onOpenSource={onOpenReference} onBack={() => setQuranMode(false)} />{saveStatus && <div className="mind-save-status" role="status">{saveStatus}</div>}</>;
   if (memoryMode) return <><TextMemorization supportName={name} passages={memoryPassages} onChange={changeMemoryPassages} onBack={() => setMemoryMode(false)} />{saveStatus && <div className="mind-save-status" role="status">{saveStatus}</div>}</>;
-  if (mindMode) return <><MindMap supportName={name} nodes={mindNodes} onChange={changeMindMap} onBack={() => setMindMode(false)} />{saveStatus && <div className="mind-save-status" role="status">{saveStatus}</div>}</>;
+  if (mindMode) return <><MindMap supportName={name} nodes={mindNodes} initialView={mindMapView} onChange={changeMindMap} onViewChange={changeMindMapView} onBack={() => setMindMode(false)} />{saveStatus && <div className="mind-save-status" role="status">{saveStatus}</div>}</>;
 
   const isQuranSupport = category === 'Qour’ān';
 
