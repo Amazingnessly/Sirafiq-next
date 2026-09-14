@@ -27,7 +27,7 @@ type Props = {
 class SourceRangeTransport extends pdfjs.PDFDataRangeTransport {
   private aborted = false;
 
-  constructor(private readonly source: PdfByteSource) {
+  constructor(private readonly source: PdfByteSource, private readonly onReadError: (error: unknown) => void) {
     super(source.size, null);
   }
 
@@ -40,8 +40,10 @@ class SourceRangeTransport extends pdfjs.PDFDataRangeTransport {
       if (this.aborted) return;
       this.onDataRange(safeBegin, data);
       this.onDataProgress(safeEnd, this.source.size);
-    }).catch(() => {
+    }).catch(error => {
+      if (this.aborted) return;
       this.abort();
+      this.onReadError(error);
     });
   }
 
@@ -69,8 +71,17 @@ export function PdfVisualReader({ name, source, initialPage = 1, initialZoom = 1
 
   useEffect(() => {
     let cancelled = false;
-    const transport = new SourceRangeTransport(source);
-    const loadingTask = pdfjs.getDocument({
+    let loadingTask: pdfjs.PDFDocumentLoadingTask | null = null;
+    let rangeReadFailed = false;
+    const transport = new SourceRangeTransport(source, err => {
+      if (cancelled) return;
+      rangeReadFailed = true;
+      setDocument(null);
+      setRendering(false);
+      setError(err instanceof Error ? err.message : 'Une partie du PDF local est illisible.');
+      if (loadingTask) void loadingTask.destroy();
+    });
+    loadingTask = pdfjs.getDocument({
       range: transport,
       rangeChunkSize: 256 * 1024,
       disableStream: true,
@@ -82,17 +93,23 @@ export function PdfVisualReader({ name, source, initialPage = 1, initialZoom = 1
     setRendering(true);
 
     void loadingTask.promise.then(pdf => {
-      if (cancelled) return;
+      if (cancelled || rangeReadFailed) {
+        void pdf.destroy();
+        return;
+      }
       setDocument(pdf);
       setPageNumber(page => Math.min(Math.max(1, page), pdf.numPages));
     }).catch(err => {
-      if (!cancelled) setError(err instanceof Error ? err.message : 'PDF illisible.');
+      if (!cancelled && !rangeReadFailed) {
+        setRendering(false);
+        setError(err instanceof Error ? err.message : 'PDF illisible.');
+      }
     });
 
     return () => {
       cancelled = true;
       transport.abort();
-      void loadingTask.destroy();
+      if (loadingTask) void loadingTask.destroy();
     };
   }, [source]);
 
@@ -162,7 +179,7 @@ export function PdfVisualReader({ name, source, initialPage = 1, initialZoom = 1
       <button className="back" type="button" onClick={onBack}>← Bibliothèque</button>
       <div className="pdf-nav">
         <button type="button" disabled={!document || pageNumber <= 1 || rendering} onClick={() => goTo(pageNumber - 1)}>Précédente</button>
-        <strong>{document ? `Page ${pageNumber} / ${pages}` : 'Chargement…'}</strong>
+        <strong>{document ? `Page ${pageNumber} / ${pages}` : error ? 'Lecture interrompue' : 'Chargement…'}</strong>
         <button type="button" disabled={!document || pageNumber >= pages || rendering} onClick={() => goTo(pageNumber + 1)}>Suivante</button>
       </div>
       <div className="pdf-secondary-controls">
@@ -182,19 +199,19 @@ export function PdfVisualReader({ name, source, initialPage = 1, initialZoom = 1
       <header>
         <p className="eyebrow">PDF · RENDU VISUEL FIDÈLE</p><h1>{name}</h1><p>La progression, les repères et les notes de page restent sur cet appareil.</p>
         <div className="pdf-study-tools">
-          <button className={isBookmarked ? 'bookmarked' : ''} type="button" onClick={toggleBookmark}>{isBookmarked ? '★ Page repérée' : '☆ Repérer cette page'}</button>
+          <button className={isBookmarked ? 'bookmarked' : ''} type="button" disabled={!document} onClick={toggleBookmark}>{isBookmarked ? '★ Page repérée' : '☆ Repérer cette page'}</button>
           <details className="pdf-bookmarks">
             <summary>Repères ({cleanBookmarks.length})</summary>
-            {cleanBookmarks.length === 0 ? <p>Aucune page repérée.</p> : <div>{cleanBookmarks.map(page => <button type="button" key={page} onClick={() => goTo(page)}>Page {page}</button>)}</div>}
+            {cleanBookmarks.length === 0 ? <p>Aucune page repérée.</p> : <div>{cleanBookmarks.map(page => <button type="button" key={page} disabled={!document} onClick={() => goTo(page)}>Page {page}</button>)}</div>}
           </details>
           <details className="pdf-notes" open={Boolean(currentNote)}>
             <summary>Notes ({cleanNotes.length})</summary>
             <div className="pdf-note-editor">
               <label htmlFor="pdf-page-note">Note de la page {pageNumber}</label>
-              <textarea id="pdf-page-note" value={noteDraft} onChange={event => setNoteDraft(event.target.value)} placeholder="Écris ici ce que tu veux retenir de cette page…" />
-              <div className="pdf-note-actions"><button type="button" onClick={saveNote}>Enregistrer</button>{currentNote && <button type="button" onClick={deleteNote}>Supprimer la note</button>}</div>
+              <textarea id="pdf-page-note" value={noteDraft} disabled={!document} onChange={event => setNoteDraft(event.target.value)} placeholder="Écris ici ce que tu veux retenir de cette page…" />
+              <div className="pdf-note-actions"><button type="button" disabled={!document} onClick={saveNote}>Enregistrer</button>{currentNote && <button type="button" disabled={!document} onClick={deleteNote}>Supprimer la note</button>}</div>
             </div>
-            {cleanNotes.length > 0 && <div className="pdf-note-list">{cleanNotes.map(note => <button type="button" key={note.page} onClick={() => goTo(note.page)}>p. {note.page} · {note.text.slice(0, 48)}{note.text.length > 48 ? '…' : ''}</button>)}</div>}
+            {cleanNotes.length > 0 && <div className="pdf-note-list">{cleanNotes.map(note => <button type="button" key={note.page} disabled={!document} onClick={() => goTo(note.page)}>p. {note.page} · {note.text.slice(0, 48)}{note.text.length > 48 ? '…' : ''}</button>)}</div>}
           </details>
         </div>
       </header>
