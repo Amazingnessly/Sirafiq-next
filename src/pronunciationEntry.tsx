@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ErrorBoundary } from './ErrorBoundary';
 import { PronunciationCourse } from './PronunciationCourse';
+import { PronunciationPractice } from './PronunciationPractice';
 import './pronunciation.css';
 
 const STORAGE_KEY = 'sirafiq-pronunciation-progress-v1';
@@ -27,6 +28,7 @@ function PronunciationEntry() {
   const initialRef = useRef<LoadResult | null>(null);
   if (!initialRef.current) initialRef.current = loadProgress();
   const [open, setOpen] = useState(false);
+  const [practiceMode, setPracticeMode] = useState(false);
   const [completed, setCompleted] = useState<string[]>(initialRef.current.completed);
   const [storageWarning, setStorageWarning] = useState(initialRef.current.warning);
   const dirtyRef = useRef(false);
@@ -77,11 +79,17 @@ function PronunciationEntry() {
     };
   }, [refresh]);
 
+  const close = () => {
+    setPracticeMode(false);
+    setOpen(false);
+  };
+
   return <>
-    <button className="pronunciation-launcher" type="button" onClick={() => { refresh(); setOpen(true); }} aria-label={`Ouvrir le cursus Lecture et voix, ${completed.length} leçons terminées`}>
+    <button className="pronunciation-launcher" type="button" onClick={() => { refresh(); setPracticeMode(false); setOpen(true); }} aria-label={`Ouvrir le cursus Lecture et voix, ${completed.length} leçons terminées`}>
       <span>Lecture & voix</span><strong>{completed.length}</strong>
     </button>
-    {open && <PronunciationCourse completed={completed} onCompletedChange={changeCompleted} storageWarning={storageWarning} onClose={() => setOpen(false)} />}
+    {open && practiceMode && <section className="pronunciation-overlay" role="dialog" aria-modal="true" aria-label="Entraînement Lecture et voix"><div className="pronunciation-shell"><PronunciationPractice onBack={() => setPracticeMode(false)} /><button className="pronunciation-practice-close" type="button" onClick={close}>Fermer</button></div></section>}
+    {open && !practiceMode && <><PronunciationCourse completed={completed} onCompletedChange={changeCompleted} storageWarning={storageWarning} onClose={close} /><button className="pronunciation-practice-shortcut" type="button" onClick={() => setPracticeMode(true)}>S’entraîner à voix haute</button></>}
   </>;
 }
 
