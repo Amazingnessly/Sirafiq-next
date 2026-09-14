@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useMemo, useRef, useState } from 'react';
 
 export type QuranTarget = {
   id: string;
@@ -30,6 +30,7 @@ export function QuranMemorization({ supportName, targets, onChange, onOpenSource
   const [page, setPage] = useState('');
   const [note, setNote] = useState('');
   const [activeId, setActiveId] = useState<string | null>(null);
+  const assessmentLockedRef = useRef(false);
   const active = targets.find(target => target.id === activeId) ?? null;
 
   const totals = useMemo(() => ({
@@ -37,6 +38,16 @@ export function QuranMemorization({ supportName, targets, onChange, onOpenSource
     consolidation: targets.filter(target => target.status === 'consolidation').length,
     solide: targets.filter(target => target.status === 'solide').length,
   }), [targets]);
+
+  const startTarget = (id: string) => {
+    assessmentLockedRef.current = false;
+    setActiveId(id);
+  };
+
+  const closeSession = () => {
+    assessmentLockedRef.current = false;
+    setActiveId(null);
+  };
 
   const addTarget = (event: FormEvent) => {
     event.preventDefault();
@@ -56,29 +67,32 @@ export function QuranMemorization({ supportName, targets, onChange, onOpenSource
     setLabel('');
     setPage('');
     setNote('');
-    setActiveId(target.id);
+    startTarget(target.id);
   };
 
   const assess = (status: QuranTarget['status']) => {
-    if (!active) return;
+    if (!active || assessmentLockedRef.current) return;
+    assessmentLockedRef.current = true;
     const now = new Date().toISOString();
-    onChange(targets.map(target => target.id === active.id ? {
+    const nextTargets = targets.map(target => target.id === active.id ? {
       ...target,
       status,
       reviews: target.reviews + 1,
       lastReviewedAt: now,
-    } : target));
+    } : target);
+    onChange(nextTargets);
+    setActiveId(null);
   };
 
   const remove = (id: string) => {
     const target = targets.find(item => item.id === id);
     if (!target || !window.confirm(`Supprimer définitivement « ${target.label} » et ses ${target.reviews} révision${target.reviews > 1 ? 's' : ''} enregistrée${target.reviews > 1 ? 's' : ''} ?`)) return;
     onChange(targets.filter(item => item.id !== id));
-    if (activeId === id) setActiveId(null);
+    if (activeId === id) closeSession();
   };
 
   if (active) return <main className="shell quran-shell">
-    <button className="back" type="button" onClick={() => setActiveId(null)}>← Parcours Qour’ān</button>
+    <button className="back" type="button" onClick={closeSession}>← Parcours Qour’ān</button>
     <header className="quran-header">
       <p className="eyebrow">MÉMORISATION · SOURCE VISUELLE FIDÈLE</p>
       <h1>{active.label}</h1>
@@ -90,9 +104,10 @@ export function QuranMemorization({ supportName, targets, onChange, onOpenSource
       <div className="quran-step"><span>03</span><div><strong>Comparer</strong><p>Retourne au document original et vérifie mot à mot avant de t’évaluer.</p><button type="button" onClick={() => onOpenSource(active.page ?? undefined)}>Comparer avec la source{active.page ? ` · p. ${active.page}` : ''}</button></div></div>
       {active.note && <div className="quran-note"><strong>Repère personnel</strong><p>{active.note}</p></div>}
       <div className="quran-assessment">
-        <p className="eyebrow">APRÈS COMPARAISON</p>
+        <p className="eyebrow">APRÈS COMPARAISON · FIN DE SÉANCE</p>
+        <p>Choisis une seule évaluation. La séance sera enregistrée puis refermée.</p>
         <div><button type="button" onClick={() => assess('nouveau')}>À reprendre</button><button type="button" onClick={() => assess('consolidation')}>En consolidation</button><button type="button" onClick={() => assess('solide')}>Solide</button></div>
-        <small>{active.reviews} révision{active.reviews > 1 ? 's' : ''} enregistrée{active.reviews > 1 ? 's' : ''}</small>
+        <small>{active.reviews} révision{active.reviews > 1 ? 's' : ''} enregistrée{active.reviews > 1 ? 's' : ''} avant cette séance</small>
       </div>
     </section>
   </main>;
@@ -118,7 +133,7 @@ export function QuranMemorization({ supportName, targets, onChange, onOpenSource
       <div className="quran-list-head"><div><p className="eyebrow">PARCOURS</p><h2>Mes passages</h2></div><strong>{targets.length}</strong></div>
       {targets.length === 0 ? <div className="quran-empty"><strong>Aucun passage préparé</strong><p>Ajoute un premier repère puis travaille toujours à partir du support original.</p></div> : <div className="quran-grid">{targets.map(target => <article key={target.id} className="quran-card">
         <div><span>{statusLabel[target.status]}</span><h3>{target.label}</h3><p>{target.page ? `Page ${target.page}` : 'Page non précisée'} · {target.reviews} révision{target.reviews > 1 ? 's' : ''}</p></div>
-        <div className="quran-actions"><button type="button" onClick={() => setActiveId(target.id)}>Travailler</button><button type="button" onClick={() => remove(target.id)}>Supprimer</button></div>
+        <div className="quran-actions"><button type="button" onClick={() => startTarget(target.id)}>Travailler</button><button type="button" onClick={() => remove(target.id)}>Supprimer</button></div>
       </article>)}</div>}
     </section>
   </main>;
