@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { aiConfigurationStatus, extractOutputText, parseFlashcardsOutput, parseMindMapOutput, validateAiPayload, validateFlashcardPayload } from '../worker/index.mjs';
+import { aiConfigurationStatus, extractOutputText, parseFlashcardsOutput, parseMemoryPassagesOutput, parseMindMapOutput, validateAiPayload, validateFlashcardPayload, validatePassagePayload } from '../worker/index.mjs';
 
 test('aiConfigurationStatus signale uniquement si les secrets requis existent', () => {
-  assert.deepEqual(aiConfigurationStatus({}), { configured: false, model: 'gpt-5.6-terra', version: 3 });
-  assert.deepEqual(aiConfigurationStatus({ OPENAI_API_KEY: 'secret', SIRAFIQ_AI_ACCESS_TOKEN: 'access', OPENAI_MODEL: 'custom-model' }), { configured: true, model: 'custom-model', version: 3 });
+  assert.deepEqual(aiConfigurationStatus({}), { configured: false, model: 'gpt-5.6-terra', version: 4 });
+  assert.deepEqual(aiConfigurationStatus({ OPENAI_API_KEY: 'secret', SIRAFIQ_AI_ACCESS_TOKEN: 'access', OPENAI_MODEL: 'custom-model' }), { configured: true, model: 'custom-model', version: 4 });
 });
 
 test('validateAiPayload accepte un contexte et une question valides', () => {
@@ -35,6 +35,12 @@ test('validateFlashcardPayload refuse un nombre de cartes hors limites', () => {
   const tooMany = validateFlashcardPayload({ supportName: 'Cours.pdf', context: 'Contenu', count: 11 });
   assert.equal(tooFew.ok, false);
   assert.equal(tooMany.ok, false);
+});
+
+test('validatePassagePayload accepte seulement 3 ou 5 passages', () => {
+  assert.equal(validatePassagePayload({ supportName: 'Cours.pdf', context: 'Contenu', count: 3 }).ok, true);
+  assert.equal(validatePassagePayload({ supportName: 'Cours.pdf', context: 'Contenu', count: 5 }).ok, true);
+  assert.equal(validatePassagePayload({ supportName: 'Cours.pdf', context: 'Contenu', count: 4 }).ok, false);
 });
 
 test('extractOutputText utilise output_text quand il existe', () => {
@@ -97,4 +103,25 @@ test('parseMindMapOutput refuse parent absent, doublon et cycle', () => {
   assert.deepEqual(parseMindMapOutput({ output_text: JSON.stringify(missingParent) }), []);
   assert.deepEqual(parseMindMapOutput({ output_text: JSON.stringify(duplicate) }), []);
   assert.deepEqual(parseMindMapOutput({ output_text: JSON.stringify(cycle) }), []);
+});
+
+test('parseMemoryPassagesOutput conserve uniquement des extraits présents dans le contexte', () => {
+  const context = 'Première définition importante avec suffisamment de mots pour constituer un passage utile.\n\nDeuxième passage fidèle qui doit aussi être conservé malgré les retours à la ligne du document.';
+  const passages = parseMemoryPassagesOutput({
+    output_text: JSON.stringify({ passages: [
+      { title: 'Définition', text: 'Première définition importante avec suffisamment de mots pour constituer un passage utile.' },
+      { title: 'Suite', text: 'Deuxième passage fidèle qui doit aussi être conservé malgré les retours à la ligne du document.' },
+    ] }),
+  }, context);
+  assert.equal(passages.length, 2);
+});
+
+test('parseMemoryPassagesOutput rejette une paraphrase absente du contexte', () => {
+  const context = 'Le texte original contient une formulation exacte et suffisamment longue pour être mémorisée telle quelle.';
+  const passages = parseMemoryPassagesOutput({
+    output_text: JSON.stringify({ passages: [
+      { title: 'Paraphrase', text: 'Le document présente une idée équivalente mais formulée différemment pour la mémorisation.' },
+    ] }),
+  }, context);
+  assert.deepEqual(passages, []);
 });
