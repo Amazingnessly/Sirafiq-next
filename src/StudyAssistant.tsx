@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import type { Flashcard } from './Flashcards';
+import { AiMindMapGenerator } from './AiMindMapGenerator';
 import { loadAiContext, type AiContext } from './aiContext';
 import { getSupportMetadata, patchSupportMetadata } from './storage';
 import './study-assistant.css';
@@ -214,7 +215,7 @@ export function StudyAssistant({ supportId, supportName, onBack }: Props) {
     <header className="ai-header">
       <p className="eyebrow">ASSISTANT D’ÉTUDE · IA</p>
       <h1>{supportName}</h1>
-      <p>L’assistant travaille à partir du contenu extrait de ce support. Le document reste local tant que tu ne l’interroges pas ou ne demandes pas de cartes ; dans ces deux cas, le contexte préparé est envoyé au service IA.</p>
+      <p>L’assistant travaille à partir du contenu extrait de ce support. Le document reste local tant que tu ne l’interroges pas ou ne demandes pas de génération ; dans ces cas, le contexte préparé est envoyé au service IA.</p>
       <div className={`ai-service-status ${serviceState}`} role="status"><strong>{serviceState === 'ready' ? 'Service IA prêt' : serviceState === 'unconfigured' ? 'Configuration IA incomplète' : serviceState === 'unavailable' ? 'Déploiement IA à vérifier' : 'Vérification IA'}</strong><span>{serviceMessage}</span></div>
     </header>
 
@@ -228,7 +229,7 @@ export function StudyAssistant({ supportId, supportName, onBack }: Props) {
             <strong>Contexte prêt</strong>
             <span>{Math.round(context.text.length / 1000)} k caractères{context.pagesRead ? ` · ${context.pagesRead} page${context.pagesRead > 1 ? 's' : ''} parcourue${context.pagesRead > 1 ? 's' : ''}` : ''}</span>
           </div>
-          {context.truncated && <p className="ai-warning">Le support est volumineux : cette version envoie une portion limitée du texte. Une question ou une carte portant sur une partie non incluse peut donc manquer de contexte.</p>}
+          {context.truncated && <p className="ai-warning">Le support est volumineux : cette version envoie une portion limitée du texte. Une question, une carte mémoire ou une carte mentale portant sur une partie non incluse peut donc manquer de contexte.</p>}
 
           <label className="ai-token">Code d’accès IA
             <input type="password" autoComplete="off" value={accessToken} onChange={event => saveAccessToken(event.target.value)} placeholder="Code configuré côté Cloudflare" />
@@ -262,6 +263,8 @@ export function StudyAssistant({ supportId, supportName, onBack }: Props) {
         {generatedCards.length > 0 && <div className="ai-generated-cards">{generatedCards.map((card, index) => <article key={`${card.front}-${index}`}><span>Carte {index + 1}</span><strong>{card.front}</strong><p>{card.back}</p></article>)}</div>}
         {generatedCards.length > 0 && <div className="ai-card-actions"><button type="button" disabled={savingCards} onClick={() => setGeneratedCards([])}>Annuler</button><button className="primary" type="button" disabled={savingCards} onClick={() => void saveGeneratedCards()}>{savingCards ? 'Enregistrement…' : 'Ajouter aux cartes mémoire'}</button></div>}
       </section>
+
+      <AiMindMapGenerator supportId={supportId} supportName={supportName} context={context.text} accessToken={accessToken} />
     </>}
   </main>;
 }
