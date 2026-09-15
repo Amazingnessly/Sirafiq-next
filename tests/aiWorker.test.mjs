@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { aiConfigurationStatus, extractOutputText, parseFlashcardsOutput, validateAiPayload, validateFlashcardPayload } from '../worker/index.mjs';
+import { aiConfigurationStatus, extractOutputText, parseFlashcardsOutput, parseMindMapOutput, validateAiPayload, validateFlashcardPayload } from '../worker/index.mjs';
 
 test('aiConfigurationStatus signale uniquement si les secrets requis existent', () => {
-  assert.deepEqual(aiConfigurationStatus({}), { configured: false, model: 'gpt-5.6-terra', version: 2 });
-  assert.deepEqual(aiConfigurationStatus({ OPENAI_API_KEY: 'secret', SIRAFIQ_AI_ACCESS_TOKEN: 'access', OPENAI_MODEL: 'custom-model' }), { configured: true, model: 'custom-model', version: 2 });
+  assert.deepEqual(aiConfigurationStatus({}), { configured: false, model: 'gpt-5.6-terra', version: 3 });
+  assert.deepEqual(aiConfigurationStatus({ OPENAI_API_KEY: 'secret', SIRAFIQ_AI_ACCESS_TOKEN: 'access', OPENAI_MODEL: 'custom-model' }), { configured: true, model: 'custom-model', version: 3 });
 });
 
 test('validateAiPayload accepte un contexte et une question valides', () => {
@@ -69,4 +69,32 @@ test('parseFlashcardsOutput normalise les cartes structurées', () => {
 test('parseFlashcardsOutput refuse un JSON inutilisable', () => {
   assert.deepEqual(parseFlashcardsOutput({ output_text: 'pas du json' }), []);
   assert.deepEqual(parseFlashcardsOutput({ output_text: '{"cards":[{"front":"","back":"x"}]}' }), []);
+});
+
+test('parseMindMapOutput accepte une hiérarchie valide', () => {
+  const nodes = parseMindMapOutput({
+    output_text: JSON.stringify({
+      nodes: [
+        { key: 'root', parentKey: '', text: 'Sujet' },
+        { key: 'a', parentKey: 'root', text: 'Idée A' },
+        { key: 'b', parentKey: 'root', text: 'Idée B' },
+        { key: 'a1', parentKey: 'a', text: 'Détail A1' },
+      ],
+    }),
+  });
+  assert.deepEqual(nodes, [
+    { key: 'root', parentKey: '', text: 'Sujet' },
+    { key: 'a', parentKey: 'root', text: 'Idée A' },
+    { key: 'b', parentKey: 'root', text: 'Idée B' },
+    { key: 'a1', parentKey: 'a', text: 'Détail A1' },
+  ]);
+});
+
+test('parseMindMapOutput refuse parent absent, doublon et cycle', () => {
+  const missingParent = { nodes: [{ key: 'root', parentKey: '', text: 'Sujet' }, { key: 'a', parentKey: 'absent', text: 'A' }] };
+  const duplicate = { nodes: [{ key: 'root', parentKey: '', text: 'Sujet' }, { key: 'root', parentKey: 'root', text: 'A' }] };
+  const cycle = { nodes: [{ key: 'root', parentKey: '', text: 'Sujet' }, { key: 'a', parentKey: 'b', text: 'A' }, { key: 'b', parentKey: 'a', text: 'B' }] };
+  assert.deepEqual(parseMindMapOutput({ output_text: JSON.stringify(missingParent) }), []);
+  assert.deepEqual(parseMindMapOutput({ output_text: JSON.stringify(duplicate) }), []);
+  assert.deepEqual(parseMindMapOutput({ output_text: JSON.stringify(cycle) }), []);
 });

@@ -16,7 +16,7 @@ export function aiConfigurationStatus(env = {}) {
   return {
     configured: Boolean(env.OPENAI_API_KEY && env.SIRAFIQ_AI_ACCESS_TOKEN),
     model: env.OPENAI_MODEL || 'gpt-5.6-terra',
-    version: 2,
+    version: 3,
   };
 }
 
@@ -77,6 +77,54 @@ export function parseFlashcardsOutput(response) {
     }))
     .filter(card => card.front && card.back)
     .slice(0, 10);
+}
+
+export function parseMindMapOutput(response) {
+  const text = extractOutputText(response);
+  if (!text) return [];
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed?.nodes)) return [];
+
+  const nodes = parsed.nodes
+    .map(node => ({
+      key: typeof node?.key === 'string' ? node.key.trim() : '',
+      parentKey: typeof node?.parentKey === 'string' ? node.parentKey.trim() : '',
+      text: typeof node?.text === 'string' ? node.text.trim() : '',
+    }))
+    .filter(node => node.key && node.text)
+    .slice(0, 20);
+
+  if (nodes.length < 2) return [];
+  const keys = new Set();
+  for (const node of nodes) {
+    if (keys.has(node.key)) return [];
+    keys.add(node.key);
+  }
+
+  const roots = nodes.filter(node => !node.parentKey);
+  if (roots.length !== 1) return [];
+  const rootKey = roots[0].key;
+
+  for (const node of nodes) {
+    if (node.key === rootKey) continue;
+    if (!node.parentKey || node.parentKey === node.key || !keys.has(node.parentKey)) return [];
+    const seen = new Set([node.key]);
+    let cursor = node.parentKey;
+    while (cursor !== rootKey) {
+      if (seen.has(cursor)) return [];
+      seen.add(cursor);
+      const parent = nodes.find(candidate => candidate.key === cursor);
+      if (!parent?.parentKey) return [];
+      cursor = parent.parentKey;
+    }
+  }
+
+  return nodes;
 }
 
 async function matchesSecret(candidate, expected) {
@@ -223,6 +271,64 @@ async function handleFlashcards(request, env) {
   return json({ cards, model: data.model || env.OPENAI_MODEL || 'gpt-5.6-terra' });
 }
 
+function mindMapSchema() {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['nodes'],
+    properties: {
+      nodes: {
+        type: 'array',
+        minItems: 7,
+        maxItems: 20,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['key', 'parentKey', 'text'],
+          properties: {
+            key: { type: 'string', minLength: 1, maxLength: 40 },
+            parentKey: { type: 'string', maxLength: 40 },
+            text: { type: 'string', minLength: 1, maxLength: 180 },
+          },
+        },
+      },
+    },
+  };
+}
+
+async function handleMindMap(request, env) {
+  const denied = await authorize(request, env);
+  if (denied) return denied;
+  const payload = await readPayload(request);
+  if (!payload.ok) return payload.response;
+  const validated = basePayload(payload.value);
+  if (!validated.ok) return json({ error: validated.error }, 400);
+  const { supportName, context } = validated.value;
+
+  const upstream = await callOpenAI(env, {
+    model: env.OPENAI_MODEL || 'gpt-5.6-terra',
+    store: false,
+    reasoning: { effort: 'low' },
+    max_output_tokens: 3000,
+    text: {
+      format: {
+        type: 'json_schema',
+        name: 'sirafiq_mind_map',
+        strict: true,
+        schema: mindMapSchema(),
+      },
+    },
+    instructions: 'Tu construis une carte mentale pédagogique pour Sirāfiq uniquement à partir du contexte fourni. Organise les notions du général vers le précis. Crée exactement une racine avec parentKey vide, puis des branches et sous-branches reliées par parentKey. Les textes doivent être courts, précis et autonomes. N’ajoute aucune information absente du contexte. Évite les doublons et limite la profondeur à quatre niveaux.',
+    input: `SUPPORT : ${supportName}\n\nCONTEXTE FOURNI PAR L’UTILISATEUR :\n${context}\n\nCrée une carte mentale de 7 à 20 nœuds couvrant la structure et les notions les plus importantes de ce contexte. Utilise des clés courtes et uniques.`,
+  });
+
+  if (!upstream.ok) return upstreamError(upstream);
+  const data = await upstream.json();
+  const nodes = parseMindMapOutput(data);
+  if (nodes.length < 2) return json({ error: 'Le service IA n’a pas produit une carte mentale hiérarchique exploitable.' }, 502);
+  return json({ nodes, model: data.model || env.OPENAI_MODEL || 'gpt-5.6-terra' });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -232,6 +338,7 @@ export default {
     }
     if (url.pathname === '/api/ai/ask') return handleAsk(request, env);
     if (url.pathname === '/api/ai/flashcards') return handleFlashcards(request, env);
+    if (url.pathname === '/api/ai/mindmap') return handleMindMap(request, env);
     if (url.pathname.startsWith('/api/')) return json({ error: 'Route API inconnue.' }, 404);
     return env.ASSETS.fetch(request);
   },
