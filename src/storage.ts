@@ -196,7 +196,7 @@ export async function saveSupportMetadata<T extends { id: string }>(support: T):
   });
 }
 
-export async function patchSupportMetadata<T extends { id: string }>(id: string, patch: Partial<Omit<T, 'id'>>): Promise<T> {
+export async function mutateSupportMetadata<T extends { id: string }>(id: string, mutate: (current: T) => T): Promise<T> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(META_STORE, 'readwrite');
@@ -211,8 +211,14 @@ export async function patchSupportMetadata<T extends { id: string }>(id: string,
         reject(new Error('Support local introuvable.'));
         return;
       }
-      next = { ...current, ...patch, id } as T;
-      store.put(withoutPayload(next));
+      try {
+        const mutated = mutate(current);
+        next = { ...mutated, id } as T;
+        store.put(withoutPayload(next));
+      } catch (error) {
+        tx.abort();
+        reject(error);
+      }
     };
     request.onerror = () => reject(request.error);
     tx.oncomplete = () => {
@@ -226,6 +232,10 @@ export async function patchSupportMetadata<T extends { id: string }>(id: string,
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error ?? new Error('Enregistrement local interrompu.'));
   });
+}
+
+export async function patchSupportMetadata<T extends { id: string }>(id: string, patch: Partial<Omit<T, 'id'>>): Promise<T> {
+  return mutateSupportMetadata<T>(id, current => ({ ...current, ...patch, id } as T));
 }
 
 async function writePayloadChunk(supportId: string, index: number, data: ArrayBuffer): Promise<void> {
