@@ -1,4 +1,5 @@
 import { FormEvent, useMemo, useState } from 'react';
+import { normalizeWatchUrl } from './watchLaterData.mjs';
 
 export type WatchItem = {
   id: string;
@@ -64,21 +65,18 @@ export function WatchLater({ items, onChange, onClose, storageWarning = '' }: Pr
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const cleanTitle = title.trim();
-    const cleanUrl = url.trim();
+    const normalizedUrl = normalizeWatchUrl(url);
     const cleanCollection = collection.trim() || 'Général';
-    if (!cleanTitle || !cleanUrl) return;
-    try {
-      const parsed = new URL(cleanUrl);
-      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('invalid');
-    } catch {
+    if (!cleanTitle || !url.trim()) return;
+    if (!normalizedUrl) {
       setError('Ajoute une adresse web complète commençant par http:// ou https://.');
       return;
     }
-    if (items.some(item => item.url === cleanUrl)) {
+    if (items.some(item => normalizeWatchUrl(item.url) === normalizedUrl)) {
       setError('Ce lien est déjà enregistré.');
       return;
     }
-    onChange([{ id: crypto.randomUUID(), title: cleanTitle, url: cleanUrl, collection: cleanCollection, status: 'À voir', priority, addedAt: new Date().toISOString() }, ...items]);
+    onChange([{ id: crypto.randomUUID(), title: cleanTitle, url: normalizedUrl, collection: cleanCollection, status: 'À voir', priority, addedAt: new Date().toISOString() }, ...items]);
     setTitle('');
     setUrl('');
     setCollection(cleanCollection);
@@ -112,9 +110,9 @@ export function WatchLater({ items, onChange, onClose, storageWarning = '' }: Pr
       {storageWarning && <p className="watch-error" role="alert">{storageWarning}</p>}
 
       <form className="watch-form" onSubmit={submit}>
-        <label>Titre<input value={title} onChange={event => setTitle(event.target.value)} placeholder="Nom de la vidéo ou playlist" /></label>
-        <label>Lien<input type="url" value={url} onChange={event => setUrl(event.target.value)} placeholder="https://…" /></label>
-        <label>Collection<input value={collection} onChange={event => setCollection(event.target.value)} list="watch-collections" placeholder="Cours, conférence…" /><datalist id="watch-collections">{collections.map(item => <option key={item} value={item} />)}</datalist></label>
+        <label>Titre<input value={title} onChange={event => setTitle(event.target.value)} maxLength={300} placeholder="Nom de la vidéo ou playlist" /></label>
+        <label>Lien<input type="url" value={url} onChange={event => setUrl(event.target.value)} maxLength={4000} placeholder="https://…" /></label>
+        <label>Collection<input value={collection} onChange={event => setCollection(event.target.value)} maxLength={120} list="watch-collections" placeholder="Cours, conférence…" /><datalist id="watch-collections">{collections.map(item => <option key={item} value={item} />)}</datalist></label>
         <label>Priorité<select value={priority} onChange={event => setPriority(event.target.value as NonNullable<WatchItem['priority']>)}>{priorities.map(item => <option key={item}>{item}</option>)}</select></label>
         <button className="primary" type="submit" disabled={!title.trim() || !url.trim()}>Ajouter</button>
       </form>
@@ -134,7 +132,7 @@ export function WatchLater({ items, onChange, onClose, storageWarning = '' }: Pr
           <span>{item.collection} · {priorityOf(item)}</span>
           <h2>{item.title}</h2>
           <small>{item.status === 'En cours' ? 'Reprendre' : item.status} · ajouté le {new Date(item.addedAt).toLocaleDateString('fr-FR')}{item.lastOpenedAt ? ` · ouvert le ${new Date(item.lastOpenedAt).toLocaleDateString('fr-FR')}` : ''}</small>
-          <label className="watch-resume">Repère de reprise<input key={`${item.id}:${item.resumeNote ?? ''}`} defaultValue={item.resumeNote ?? ''} onBlur={event => saveResumeNote(item, event.currentTarget.value)} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }} placeholder="18:40, épisode 6, chapitre…" /></label>
+          <label className="watch-resume">Repère de reprise<input key={`${item.id}:${item.resumeNote ?? ''}`} defaultValue={item.resumeNote ?? ''} maxLength={300} onBlur={event => saveResumeNote(item, event.currentTarget.value)} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }} placeholder="18:40, épisode 6, chapitre…" /></label>
         </div>
         <div className="watch-actions">
           <select value={priorityOf(item)} onChange={event => patch(item.id, { priority: event.target.value as NonNullable<WatchItem['priority']> })} aria-label={`Priorité de ${item.title}`}>{priorities.map(itemPriority => <option key={itemPriority}>{itemPriority}</option>)}</select>
