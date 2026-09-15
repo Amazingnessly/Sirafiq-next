@@ -146,10 +146,64 @@ export function PronunciationPractice({ onBack }: Props) {
   const [note, setNote] = useState('');
   const [attempts, setAttempts] = useState<PracticeAttempt[]>(initialRef.current.attempts);
   const [warning, setWarning] = useState(initialRef.current.warning);
+  const [recordingUrl, setRecordingUrl] = useState('');
+  const [recordingError, setRecordingError] = useState('');
+  const [recordingActive, setRecordingActive] = useState(false);
+  const [requestingMicrophone, setRequestingMicrophone] = useState(false);
   const dirtyRef = useRef(false);
   const storageWritableRef = useRef(initialRef.current.writable);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingUrlRef = useRef('');
+  const discardRecordingRef = useRef(false);
+  const mountedRef = useRef(true);
   const prompt = prompts.find(item => item.id === promptId) ?? prompts[0];
   const canSave = !running && elapsed > 0 && criteria.every(item => scores[item.id] > 0);
+  const canUseMicrophone = typeof MediaRecorder !== 'undefined' && Boolean(navigator.mediaDevices?.getUserMedia);
+
+  const releaseStream = useCallback(() => {
+    streamRef.current?.getTracks().forEach(track => track.stop());
+    streamRef.current = null;
+  }, []);
+
+  const clearRecordingUrl = useCallback(() => {
+    if (recordingUrlRef.current) URL.revokeObjectURL(recordingUrlRef.current);
+    recordingUrlRef.current = '';
+    if (mountedRef.current) setRecordingUrl('');
+  }, []);
+
+  const discardRecording = useCallback(() => {
+    discardRecordingRef.current = true;
+    const recorder = recorderRef.current;
+    if (recorder && recorder.state !== 'inactive') {
+      try { recorder.stop(); } catch { releaseStream(); }
+    } else {
+      recorderRef.current = null;
+      releaseStream();
+    }
+    audioChunksRef.current = [];
+    clearRecordingUrl();
+    if (mountedRef.current) {
+      setRecordingActive(false);
+      setRecordingError('');
+    }
+  }, [clearRecordingUrl, releaseStream]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      discardRecordingRef.current = true;
+      const recorder = recorderRef.current;
+      if (recorder && recorder.state !== 'inactive') {
+        try { recorder.stop(); } catch { /* rien à faire */ }
+      }
+      releaseStream();
+      if (recordingUrlRef.current) URL.revokeObjectURL(recordingUrlRef.current);
+      recordingUrlRef.current = '';
+    };
+  }, [releaseStream]);
 
   useEffect(() => {
     if (!running || startedAt === null) return;
@@ -208,26 +262,112 @@ export function PronunciationPractice({ onBack }: Props) {
     };
   }, [refreshStorage]);
 
-  const resetSession = (nextPromptId = promptId) => {
-    setPromptId(nextPromptId);
-    setRunning(false);
-    setStartedAt(null);
+  const resetPracticeFields = () => {
     setElapsed(0);
     setScores(emptyScores());
     setNote('');
   };
 
-  const start = () => {
-    setElapsed(0);
-    setScores(emptyScores());
-    setNote('');
+  const resetSession = (nextPromptId = promptId) => {
+    discardRecording();
+    setPromptId(nextPromptId);
+    setRunning(false);
+    setStartedAt(null);
+    resetPracticeFields();
+  };
+
+  const startWithoutMicrophone = () => {
+    discardRecording();
+    resetPracticeFields();
     setStartedAt(Date.now());
     setRunning(true);
+  };
+
+  const startWithMicrophone = async () => {
+    if (running || requestingMicrophone) return;
+    if (!canUseMicrophone) {
+      setRecordingError('L’enregistrement micro n’est pas disponible dans ce navigateur. Le chronomètre reste utilisable sans micro.');
+      return;
+    }
+
+    discardRecording();
+    setRequestingMicrophone(true);
+    setRecordingError('');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!mountedRef.current) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+
+      const recorder = new MediaRecorder(stream);
+      streamRef.current = stream;
+      recorderRef.current = recorder;
+      audioChunksRef.current = [];
+      discardRecordingRef.current = false;
+
+      recorder.addEventListener('dataavailable', event => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      });
+      recorder.addEventListener('stop', () => {
+        const chunks = audioChunksRef.current;
+        audioChunksRef.current = [];
+        recorderRef.current = null;
+        releaseStream();
+        if (!mountedRef.current) return;
+        setRecordingActive(false);
+        if (discardRecordingRef.current) {
+          discardRecordingRef.current = false;
+          return;
+        }
+        if (!chunks.length) {
+          setRecordingError('Aucun son exploitable n’a été produit par le navigateur. Tu peux recommencer sans perdre ton évaluation.');
+          return;
+        }
+        const blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+        clearRecordingUrl();
+        const url = URL.createObjectURL(blob);
+        recordingUrlRef.current = url;
+        setRecordingUrl(url);
+      });
+      recorder.addEventListener('error', () => {
+        if (!mountedRef.current) return;
+        setRecordingError('L’enregistrement audio a été interrompu par le navigateur.');
+      });
+
+      recorder.start();
+      resetPracticeFields();
+      setStartedAt(Date.now());
+      setRunning(true);
+      setRecordingActive(true);
+    } catch (error) {
+      recorderRef.current = null;
+      audioChunksRef.current = [];
+      releaseStream();
+      if (!mountedRef.current) return;
+      setRunning(false);
+      setStartedAt(null);
+      setRecordingActive(false);
+      const denied = error instanceof DOMException && (error.name === 'NotAllowedError' || error.name === 'SecurityError');
+      setRecordingError(denied
+        ? 'Le navigateur n’a pas autorisé le micro. Tu peux continuer avec le chronomètre sans enregistrement.'
+        : 'Impossible de démarrer le micro sur cet appareil. Tu peux continuer avec le chronomètre sans enregistrement.');
+    } finally {
+      if (mountedRef.current) setRequestingMicrophone(false);
+    }
   };
 
   const stop = () => {
     if (startedAt !== null) setElapsed(Math.max(1, Math.round((Date.now() - startedAt) / 1000)));
     setRunning(false);
+    const recorder = recorderRef.current;
+    if (recorder && recorder.state !== 'inactive') {
+      discardRecordingRef.current = false;
+      try { recorder.stop(); } catch { releaseStream(); }
+    } else {
+      releaseStream();
+      setRecordingActive(false);
+    }
   };
 
   const save = () => {
@@ -256,7 +396,7 @@ export function PronunciationPractice({ onBack }: Props) {
 
   return <section className="pronunciation-practice" aria-label="Mode d’entraînement Lecture et voix">
     <header className="pronunciation-practice-header">
-      <div><p className="eyebrow">ENTRAÎNEMENT</p><h2>Pratiquer à voix haute</h2><p>Le chronomètre reste entièrement local. Sirāfiq n’enregistre ni n’envoie ton audio : l’évaluation repose ici sur ton écoute et, idéalement, sur un enregistrement réalisé avec l’outil de ton choix.</p></div>
+      <div><p className="eyebrow">ENTRAÎNEMENT</p><h2>Pratiquer à voix haute</h2><p>Le chronomètre reste local. Si tu choisis d’utiliser le micro, l’enregistrement reste uniquement en mémoire dans cet onglet : il n’est ni envoyé, ni ajouté à l’historique, et il est supprimé dès que tu recommences, changes de texte, enregistres la séance ou quittes cet écran.</p></div>
       <button type="button" onClick={onBack}>← Retour au cursus</button>
     </header>
 
@@ -264,7 +404,7 @@ export function PronunciationPractice({ onBack }: Props) {
 
     <div className="pronunciation-practice-grid">
       <aside className="pronunciation-prompt-list">
-        {prompts.map(item => <button key={item.id} type="button" className={prompt.id === item.id ? 'active' : ''} disabled={running} onClick={() => resetSession(item.id)}><small>{item.level}</small><strong>{item.title}</strong><span>{item.focus}</span></button>)}
+        {prompts.map(item => <button key={item.id} type="button" className={prompt.id === item.id ? 'active' : ''} disabled={running || requestingMicrophone} onClick={() => resetSession(item.id)}><small>{item.level}</small><strong>{item.title}</strong><span>{item.focus}</span></button>)}
       </aside>
 
       <div className="pronunciation-practice-main">
@@ -273,7 +413,17 @@ export function PronunciationPractice({ onBack }: Props) {
           <h3>{prompt.title}</h3>
           <p className="pronunciation-focus">{prompt.focus}</p>
           <blockquote>{prompt.text}</blockquote>
-          <div className="pronunciation-timer" aria-live="polite"><strong>{formatDuration(elapsed)}</strong>{running ? <button type="button" onClick={stop}>Arrêter</button> : <button type="button" className="primary" onClick={start}>{elapsed ? 'Recommencer' : 'Démarrer'}</button>}</div>
+          <div className="pronunciation-timer" aria-live="polite">
+            <strong>{formatDuration(elapsed)}</strong>
+            {running
+              ? <button type="button" onClick={stop}>{recordingActive ? 'Arrêter et réécouter' : 'Arrêter'}</button>
+              : <div className="pronunciation-start-actions">
+                  <button type="button" className="primary" disabled={requestingMicrophone} onClick={startWithoutMicrophone}>{elapsed ? 'Recommencer sans micro' : 'Démarrer sans micro'}</button>
+                  <button type="button" disabled={!canUseMicrophone || requestingMicrophone} onClick={() => void startWithMicrophone()}>{requestingMicrophone ? 'Autorisation du micro…' : 'Démarrer avec le micro'}</button>
+                </div>}
+          </div>
+          {recordingError && <p className="pronunciation-recording-error" role="alert">{recordingError}</p>}
+          {recordingUrl && !running && <div className="pronunciation-recording-playback"><div><strong>Réécouter cette tentative</strong><span>Audio temporaire · non enregistré</span></div><audio controls preload="metadata" src={recordingUrl}>Ton navigateur ne peut pas lire cet enregistrement.</audio></div>}
         </article>
 
         {elapsed > 0 && !running && <section className="pronunciation-self-review">
