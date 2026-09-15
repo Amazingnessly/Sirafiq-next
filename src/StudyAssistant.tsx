@@ -1,13 +1,15 @@
 import { FormEvent, useEffect, useState } from 'react';
+import type { Flashcard } from './Flashcards';
 import { loadAiContext, type AiContext } from './aiContext';
+import { getSupportMetadata, patchSupportMetadata } from './storage';
 import './study-assistant.css';
 
 const TOKEN_STORAGE_KEY = 'sirafiq-ai-access-session-v1';
 
 const suggestions = [
   'Quels sont les points essentiels à retenir de ce support ?',
-  'Fais-moi 5 questions de rappel actif à partir de ce support.',
   'Explique les notions les plus difficiles avec des mots simples, sans ajouter d’informations absentes du support.',
+  'Quels liens logiques faut-il comprendre entre les notions principales de ce support ?',
 ];
 
 type Props = {
@@ -16,12 +18,19 @@ type Props = {
   onBack: () => void;
 };
 
+type GeneratedCard = { front: string; back: string };
+type StoredSupport = { id: string; flashcards?: Flashcard[]; [key: string]: unknown };
+
 function initialAccessToken() {
   try {
     return sessionStorage.getItem(TOKEN_STORAGE_KEY) ?? '';
   } catch {
     return '';
   }
+}
+
+function cardSignature(card: { front: string; back: string }) {
+  return `${card.front.trim().toLocaleLowerCase('fr')}\u0000${card.back.trim().toLocaleLowerCase('fr')}`;
 }
 
 export function StudyAssistant({ supportId, supportName, onBack }: Props) {
@@ -32,11 +41,18 @@ export function StudyAssistant({ supportId, supportName, onBack }: Props) {
   const [error, setError] = useState('');
   const [asking, setAsking] = useState(false);
   const [accessToken, setAccessToken] = useState(initialAccessToken);
+  const [cardCount, setCardCount] = useState<3 | 5 | 10>(5);
+  const [generatingCards, setGeneratingCards] = useState(false);
+  const [generatedCards, setGeneratedCards] = useState<GeneratedCard[]>([]);
+  const [cardStatus, setCardStatus] = useState('');
+  const [savingCards, setSavingCards] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setContext(null);
     setContextError('');
+    setGeneratedCards([]);
+    setCardStatus('');
     void loadAiContext(supportId, supportName).then(next => {
       if (!cancelled) setContext(next);
     }).catch(reason => {
@@ -55,14 +71,17 @@ export function StudyAssistant({ supportId, supportName, onBack }: Props) {
     }
   };
 
+  const ensureAccessToken = () => {
+    if (accessToken.trim()) return true;
+    setError('Saisis d’abord le code d’accès IA configuré pour ce déploiement Sirāfiq.');
+    return false;
+  };
+
   const ask = async (event: FormEvent) => {
     event.preventDefault();
     const cleanQuestion = question.trim();
     if (!context || !cleanQuestion || asking) return;
-    if (!accessToken.trim()) {
-      setError('Saisis d’abord le code d’accès IA configuré pour ce déploiement Sirāfiq.');
-      return;
-    }
+    if (!ensureAccessToken()) return;
 
     setAsking(true);
     setError('');
@@ -87,45 +106,130 @@ export function StudyAssistant({ supportId, supportName, onBack }: Props) {
     }
   };
 
+  const generateFlashcards = async () => {
+    if (!context || generatingCards) return;
+    if (!ensureAccessToken()) return;
+    setGeneratingCards(true);
+    setGeneratedCards([]);
+    setCardStatus('Génération des cartes…');
+    setError('');
+    try {
+      const response = await fetch('/api/ai/flashcards', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-sirafiq-ai-token': accessToken.trim(),
+        },
+        body: JSON.stringify({ supportName, context: context.text, count: cardCount }),
+      });
+      const data = await response.json().catch(() => null) as { cards?: GeneratedCard[]; error?: string } | null;
+      if (!response.ok) throw new Error(data?.error || 'Impossible de générer les cartes.');
+      if (!Array.isArray(data?.cards) || !data.cards.length) throw new Error('Aucune carte exploitable n’a été générée.');
+      setGeneratedCards(data.cards);
+      setCardStatus(`${data.cards.length} carte${data.cards.length > 1 ? 's' : ''} prête${data.cards.length > 1 ? 's' : ''} à enregistrer.`);
+    } catch (reason) {
+      setCardStatus('');
+      setError(reason instanceof Error ? reason.message : 'Impossible de générer les cartes.');
+    } finally {
+      setGeneratingCards(false);
+    }
+  };
+
+  const saveGeneratedCards = async () => {
+    if (!generatedCards.length || savingCards) return;
+    setSavingCards(true);
+    setCardStatus('Enregistrement des cartes…');
+    setError('');
+    try {
+      const support = await getSupportMetadata<StoredSupport>(supportId);
+      if (!support) throw new Error('Support local introuvable.');
+      const existing = support.flashcards ?? [];
+      const signatures = new Set(existing.map(cardSignature));
+      const now = new Date().toISOString();
+      const additions: Flashcard[] = generatedCards
+        .filter(card => {
+          const signature = cardSignature(card);
+          if (signatures.has(signature)) return false;
+          signatures.add(signature);
+          return true;
+        })
+        .map(card => ({
+          id: crypto.randomUUID(),
+          front: card.front.trim(),
+          back: card.back.trim(),
+          stage: 0,
+          createdAt: now,
+        }));
+
+      if (!additions.length) {
+        setGeneratedCards([]);
+        setCardStatus('Ces cartes existent déjà dans ce support. Aucun doublon n’a été ajouté.');
+        return;
+      }
+
+      await patchSupportMetadata<StoredSupport>(supportId, { flashcards: [...existing, ...additions] });
+      setGeneratedCards([]);
+      setCardStatus(`${additions.length} carte${additions.length > 1 ? 's' : ''} ajoutée${additions.length > 1 ? 's' : ''} aux cartes mémoire.`);
+    } catch (reason) {
+      setCardStatus('');
+      setError(reason instanceof Error ? reason.message : 'Impossible d’enregistrer les cartes générées.');
+    } finally {
+      setSavingCards(false);
+    }
+  };
+
   return <main className="shell ai-shell">
     <button className="back" type="button" onClick={onBack}>← Espace d’étude</button>
     <header className="ai-header">
       <p className="eyebrow">ASSISTANT D’ÉTUDE · IA</p>
       <h1>{supportName}</h1>
-      <p>L’assistant répond à partir du contenu extrait de ce support. Le document reste local tant que tu ne poses pas de question ; lors d’une question, le contexte préparé et ta question sont envoyés au service IA.</p>
+      <p>L’assistant travaille à partir du contenu extrait de ce support. Le document reste local tant que tu ne l’interroges pas ou ne demandes pas de cartes ; dans ces deux cas, le contexte préparé est envoyé au service IA.</p>
     </header>
 
     {!context && !contextError && <section className="ai-panel ai-loading" role="status"><strong>Préparation locale du support…</strong><p>Sirāfiq extrait le texte utile avant tout envoi.</p></section>}
     {contextError && <section className="ai-panel ai-error" role="alert"><strong>Assistant indisponible pour ce support</strong><p>{contextError}</p></section>}
 
-    {context && <div className="ai-layout">
-      <section className="ai-panel ai-ask-panel">
-        <div className="ai-context-status">
-          <strong>Contexte prêt</strong>
-          <span>{Math.round(context.text.length / 1000)} k caractères{context.pagesRead ? ` · ${context.pagesRead} page${context.pagesRead > 1 ? 's' : ''} parcourue${context.pagesRead > 1 ? 's' : ''}` : ''}</span>
+    {context && <>
+      <div className="ai-layout">
+        <section className="ai-panel ai-ask-panel">
+          <div className="ai-context-status">
+            <strong>Contexte prêt</strong>
+            <span>{Math.round(context.text.length / 1000)} k caractères{context.pagesRead ? ` · ${context.pagesRead} page${context.pagesRead > 1 ? 's' : ''} parcourue${context.pagesRead > 1 ? 's' : ''}` : ''}</span>
+          </div>
+          {context.truncated && <p className="ai-warning">Le support est volumineux : cette version envoie une portion limitée du texte. Une question ou une carte portant sur une partie non incluse peut donc manquer de contexte.</p>}
+
+          <label className="ai-token">Code d’accès IA
+            <input type="password" autoComplete="off" value={accessToken} onChange={event => saveAccessToken(event.target.value)} placeholder="Code configuré côté Cloudflare" />
+            <small>Ce code n’est pas la clé OpenAI. Il reste uniquement dans cet onglet de navigation.</small>
+          </label>
+
+          <div className="ai-suggestions" aria-label="Questions suggérées">
+            {suggestions.map(suggestion => <button type="button" key={suggestion} onClick={() => setQuestion(suggestion)}>{suggestion}</button>)}
+          </div>
+
+          <form onSubmit={ask}>
+            <label>Ta question<textarea value={question} onChange={event => setQuestion(event.target.value)} maxLength={3000} placeholder="Interroge le support ou demande une explication précise…" /></label>
+            <button className="primary" type="submit" disabled={!question.trim() || asking}>{asking ? 'Analyse du support…' : 'Interroger le support'}</button>
+          </form>
+          {error && <p className="ai-error-message" role="alert">{error}</p>}
+        </section>
+
+        <section className="ai-panel ai-answer-panel" aria-live="polite">
+          <p className="eyebrow">RÉPONSE</p>
+          {asking ? <p>Réflexion en cours…</p> : answer ? <div className="ai-answer">{answer}</div> : <div className="ai-empty-answer"><strong>Aucune question envoyée</strong><p>Choisis une suggestion ou écris une question précise sur le support.</p></div>}
+        </section>
+      </div>
+
+      <section className="ai-panel ai-flashcard-panel">
+        <div className="ai-flashcard-head">
+          <div><p className="eyebrow">CRÉATION ASSISTÉE</p><h2>Cartes mémoire depuis le support</h2><p>Sirāfiq demande à l’IA des questions de rappel actif strictement fondées sur le contexte préparé, puis te laisse les vérifier avant de les enregistrer.</p></div>
+          <label>Nombre de cartes<select value={cardCount} onChange={event => setCardCount(Number(event.target.value) as 3 | 5 | 10)}><option value={3}>3</option><option value={5}>5</option><option value={10}>10</option></select></label>
         </div>
-        {context.truncated && <p className="ai-warning">Le support est volumineux : cette première version envoie une portion limitée du texte. Une question portant sur une partie non incluse peut donc manquer de contexte.</p>}
-
-        <label className="ai-token">Code d’accès IA
-          <input type="password" autoComplete="off" value={accessToken} onChange={event => saveAccessToken(event.target.value)} placeholder="Code configuré côté Cloudflare" />
-          <small>Ce code n’est pas la clé OpenAI. Il reste uniquement dans cet onglet de navigation.</small>
-        </label>
-
-        <div className="ai-suggestions" aria-label="Questions suggérées">
-          {suggestions.map(suggestion => <button type="button" key={suggestion} onClick={() => setQuestion(suggestion)}>{suggestion}</button>)}
-        </div>
-
-        <form onSubmit={ask}>
-          <label>Ta question<textarea value={question} onChange={event => setQuestion(event.target.value)} maxLength={3000} placeholder="Interroge le support, demande une explication, des questions de rappel actif…" /></label>
-          <button className="primary" type="submit" disabled={!question.trim() || asking}>{asking ? 'Analyse du support…' : 'Interroger le support'}</button>
-        </form>
-        {error && <p className="ai-error-message" role="alert">{error}</p>}
+        <button className="primary ai-generate-cards" type="button" disabled={generatingCards || savingCards} onClick={() => void generateFlashcards()}>{generatingCards ? 'Génération…' : `Générer ${cardCount} cartes`}</button>
+        {cardStatus && <p className="ai-card-status" role="status">{cardStatus}</p>}
+        {generatedCards.length > 0 && <div className="ai-generated-cards">{generatedCards.map((card, index) => <article key={`${card.front}-${index}`}><span>Carte {index + 1}</span><strong>{card.front}</strong><p>{card.back}</p></article>)}</div>}
+        {generatedCards.length > 0 && <div className="ai-card-actions"><button type="button" disabled={savingCards} onClick={() => setGeneratedCards([])}>Annuler</button><button className="primary" type="button" disabled={savingCards} onClick={() => void saveGeneratedCards()}>{savingCards ? 'Enregistrement…' : 'Ajouter aux cartes mémoire'}</button></div>}
       </section>
-
-      <section className="ai-panel ai-answer-panel" aria-live="polite">
-        <p className="eyebrow">RÉPONSE</p>
-        {asking ? <p>Réflexion en cours…</p> : answer ? <div className="ai-answer">{answer}</div> : <div className="ai-empty-answer"><strong>Aucune question envoyée</strong><p>Choisis une suggestion ou écris une question précise sur le support.</p></div>}
-      </section>
-    </div>}
+    </>}
   </main>;
 }
