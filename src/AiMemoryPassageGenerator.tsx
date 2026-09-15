@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { MemoryPassage } from './TextMemorization';
-import { getSupportMetadata, patchSupportMetadata } from './storage';
+import { mutateSupportMetadata } from './storage';
 
 type GeneratedPassage = {
   title: string;
@@ -69,37 +69,37 @@ export function AiMemoryPassageGenerator({ supportId, supportName, context, acce
     setSaving(true);
     setError('');
     try {
-      const support = await getSupportMetadata<StoredSupport>(supportId);
-      if (!support) throw new Error('Support local introuvable.');
-      const existing = support.memoryPassages ?? [];
-      const signatures = new Set(existing.map(item => passageSignature(item.text)));
       const createdAt = new Date().toISOString();
-      const additions: MemoryPassage[] = generated
-        .filter(item => {
-          const signature = passageSignature(item.text);
-          if (signatures.has(signature)) return false;
-          signatures.add(signature);
-          return true;
-        })
-        .map(item => ({
-          id: crypto.randomUUID(),
-          title: item.title.trim(),
-          text: item.text.trim(),
-          createdAt,
-          attempts: 0,
-          successes: 0,
-          stage: 0,
-        }));
+      let addedCount = 0;
+      await mutateSupportMetadata<StoredSupport>(supportId, current => {
+        const existing = current.memoryPassages ?? [];
+        const signatures = new Set(existing.map(item => passageSignature(item.text)));
+        const additions: MemoryPassage[] = generated
+          .filter(item => {
+            const signature = passageSignature(item.text);
+            if (signatures.has(signature)) return false;
+            signatures.add(signature);
+            return true;
+          })
+          .map(item => ({
+            id: crypto.randomUUID(),
+            title: item.title.trim(),
+            text: item.text.trim(),
+            createdAt,
+            attempts: 0,
+            successes: 0,
+            stage: 0,
+          }));
+        addedCount = additions.length;
+        return additions.length ? { ...current, memoryPassages: [...additions, ...existing] } : current;
+      });
 
-      if (!additions.length) {
-        setGenerated([]);
+      setGenerated([]);
+      if (!addedCount) {
         setStatus('Ces passages sont déjà présents dans la mémorisation. Aucun doublon n’a été ajouté.');
         return;
       }
-
-      await patchSupportMetadata<StoredSupport>(supportId, { memoryPassages: [...additions, ...existing] });
-      setGenerated([]);
-      setStatus(`${additions.length} passage${additions.length > 1 ? 's' : ''} ajouté${additions.length > 1 ? 's' : ''} à la mémorisation et dû${additions.length > 1 ? 's' : ''} dès maintenant.`);
+      setStatus(`${addedCount} passage${addedCount > 1 ? 's' : ''} ajouté${addedCount > 1 ? 's' : ''} à la mémorisation et dû${addedCount > 1 ? 's' : ''} dès maintenant.`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Impossible d’enregistrer les passages.');
     } finally {
