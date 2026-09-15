@@ -3,7 +3,7 @@ import type { Flashcard } from './Flashcards';
 import { AiMemoryPassageGenerator } from './AiMemoryPassageGenerator';
 import { AiMindMapGenerator } from './AiMindMapGenerator';
 import { loadAiContext, type AiContext } from './aiContext';
-import { getSupportMetadata, patchSupportMetadata } from './storage';
+import { mutateSupportMetadata } from './storage';
 import './study-assistant.css';
 
 const TOKEN_STORAGE_KEY = 'sirafiq-ai-access-session-v1';
@@ -166,35 +166,35 @@ export function StudyAssistant({ supportId, supportName, onBack }: Props) {
     setCardStatus('Enregistrement des cartes…');
     setError('');
     try {
-      const support = await getSupportMetadata<StoredSupport>(supportId);
-      if (!support) throw new Error('Support local introuvable.');
-      const existing = support.flashcards ?? [];
-      const signatures = new Set(existing.map(cardSignature));
       const now = new Date().toISOString();
-      const additions: Flashcard[] = generatedCards
-        .filter(card => {
-          const signature = cardSignature(card);
-          if (signatures.has(signature)) return false;
-          signatures.add(signature);
-          return true;
-        })
-        .map(card => ({
-          id: crypto.randomUUID(),
-          front: card.front.trim(),
-          back: card.back.trim(),
-          stage: 0,
-          createdAt: now,
-        }));
+      let addedCount = 0;
+      await mutateSupportMetadata<StoredSupport>(supportId, current => {
+        const existing = current.flashcards ?? [];
+        const signatures = new Set(existing.map(cardSignature));
+        const additions: Flashcard[] = generatedCards
+          .filter(card => {
+            const signature = cardSignature(card);
+            if (signatures.has(signature)) return false;
+            signatures.add(signature);
+            return true;
+          })
+          .map(card => ({
+            id: crypto.randomUUID(),
+            front: card.front.trim(),
+            back: card.back.trim(),
+            stage: 0,
+            createdAt: now,
+          }));
+        addedCount = additions.length;
+        return additions.length ? { ...current, flashcards: [...existing, ...additions] } : current;
+      });
 
-      if (!additions.length) {
-        setGeneratedCards([]);
+      setGeneratedCards([]);
+      if (!addedCount) {
         setCardStatus('Ces cartes existent déjà dans ce support. Aucun doublon n’a été ajouté.');
         return;
       }
-
-      await patchSupportMetadata<StoredSupport>(supportId, { flashcards: [...existing, ...additions] });
-      setGeneratedCards([]);
-      setCardStatus(`${additions.length} carte${additions.length > 1 ? 's' : ''} ajoutée${additions.length > 1 ? 's' : ''} aux cartes mémoire.`);
+      setCardStatus(`${addedCount} carte${addedCount > 1 ? 's' : ''} ajoutée${addedCount > 1 ? 's' : ''} aux cartes mémoire.`);
     } catch (reason) {
       setCardStatus('');
       setError(reason instanceof Error ? reason.message : 'Impossible d’enregistrer les cartes générées.');
