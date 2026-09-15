@@ -190,16 +190,19 @@ export function PronunciationPractice({ onBack }: Props) {
     }
   }, [clearRecordingUrl, releaseStream]);
 
-  useEffect(() => () => {
-    mountedRef.current = false;
-    discardRecordingRef.current = true;
-    const recorder = recorderRef.current;
-    if (recorder && recorder.state !== 'inactive') {
-      try { recorder.stop(); } catch { /* rien à faire */ }
-    }
-    releaseStream();
-    if (recordingUrlRef.current) URL.revokeObjectURL(recordingUrlRef.current);
-    recordingUrlRef.current = '';
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      discardRecordingRef.current = true;
+      const recorder = recorderRef.current;
+      if (recorder && recorder.state !== 'inactive') {
+        try { recorder.stop(); } catch { /* rien à faire */ }
+      }
+      releaseStream();
+      if (recordingUrlRef.current) URL.revokeObjectURL(recordingUrlRef.current);
+      recordingUrlRef.current = '';
+    };
   }, [releaseStream]);
 
   useEffect(() => {
@@ -332,14 +335,19 @@ export function PronunciationPractice({ onBack }: Props) {
         setRecordingError('L’enregistrement audio a été interrompu par le navigateur.');
       });
 
+      recorder.start();
       resetPracticeFields();
       setStartedAt(Date.now());
       setRunning(true);
       setRecordingActive(true);
-      recorder.start();
     } catch (error) {
+      recorderRef.current = null;
+      audioChunksRef.current = [];
       releaseStream();
       if (!mountedRef.current) return;
+      setRunning(false);
+      setStartedAt(null);
+      setRecordingActive(false);
       const denied = error instanceof DOMException && (error.name === 'NotAllowedError' || error.name === 'SecurityError');
       setRecordingError(denied
         ? 'Le navigateur n’a pas autorisé le micro. Tu peux continuer avec le chronomètre sans enregistrement.'
