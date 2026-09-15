@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { type ReactNode, useMemo, useState } from 'react';
 import type { MindNode } from './MindMap';
 import { getSupportMetadata, patchSupportMetadata } from './storage';
 
@@ -107,7 +107,7 @@ export function AiMindMapGenerator({ supportId, supportName, context, accessToke
     }
   };
 
-  const renderBranch = (parentKey: string, depth = 0) => {
+  const renderBranch = (parentKey: string, depth = 0): ReactNode => {
     const children = childrenByParent.get(parentKey) ?? [];
     if (!children.length || depth > 4) return null;
     return <ul>{children.map(node => <li key={node.key}><strong>{node.text}</strong>{renderBranch(node.key, depth + 1)}</li>)}</ul>;
