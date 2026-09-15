@@ -12,6 +12,14 @@ function json(body, status = 200) {
   });
 }
 
+export function aiConfigurationStatus(env = {}) {
+  return {
+    configured: Boolean(env.OPENAI_API_KEY && env.SIRAFIQ_AI_ACCESS_TOKEN),
+    model: env.OPENAI_MODEL || 'gpt-5.6-terra',
+    version: 2,
+  };
+}
+
 function basePayload(payload) {
   if (!payload || typeof payload !== 'object') return { ok: false, error: 'Requête invalide.' };
   const supportName = typeof payload.supportName === 'string' ? payload.supportName.trim() : '';
@@ -218,6 +226,10 @@ async function handleFlashcards(request, env) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === '/api/ai/status') {
+      if (request.method !== 'GET') return json({ error: 'Méthode non autorisée.' }, 405);
+      return json(aiConfigurationStatus(env));
+    }
     if (url.pathname === '/api/ai/ask') return handleAsk(request, env);
     if (url.pathname === '/api/ai/flashcards') return handleFlashcards(request, env);
     if (url.pathname.startsWith('/api/')) return json({ error: 'Route API inconnue.' }, 404);

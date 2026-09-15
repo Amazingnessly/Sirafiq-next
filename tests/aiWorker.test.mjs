@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { extractOutputText, parseFlashcardsOutput, validateAiPayload, validateFlashcardPayload } from '../worker/index.mjs';
+import { aiConfigurationStatus, extractOutputText, parseFlashcardsOutput, validateAiPayload, validateFlashcardPayload } from '../worker/index.mjs';
+
+test('aiConfigurationStatus signale uniquement si les secrets requis existent', () => {
+  assert.deepEqual(aiConfigurationStatus({}), { configured: false, model: 'gpt-5.6-terra', version: 2 });
+  assert.deepEqual(aiConfigurationStatus({ OPENAI_API_KEY: 'secret', SIRAFIQ_AI_ACCESS_TOKEN: 'access', OPENAI_MODEL: 'custom-model' }), { configured: true, model: 'custom-model', version: 2 });
+});
 
 test('validateAiPayload accepte un contexte et une question valides', () => {
   const result = validateAiPayload({ supportName: 'Cours.pdf', context: 'Un contenu utile.', question: 'Que faut-il retenir ?' });

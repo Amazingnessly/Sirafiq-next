@@ -20,6 +20,7 @@ type Props = {
 
 type GeneratedCard = { front: string; back: string };
 type StoredSupport = { id: string; flashcards?: Flashcard[]; [key: string]: unknown };
+type ServiceState = 'checking' | 'ready' | 'unconfigured' | 'unavailable';
 
 function initialAccessToken() {
   try {
@@ -46,6 +47,28 @@ export function StudyAssistant({ supportId, supportName, onBack }: Props) {
   const [generatedCards, setGeneratedCards] = useState<GeneratedCard[]>([]);
   const [cardStatus, setCardStatus] = useState('');
   const [savingCards, setSavingCards] = useState(false);
+  const [serviceState, setServiceState] = useState<ServiceState>('checking');
+  const [serviceModel, setServiceModel] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 6_000);
+    void fetch('/api/ai/status', { headers: { accept: 'application/json' }, signal: controller.signal }).then(async response => {
+      const data = await response.json().catch(() => null) as { configured?: boolean; model?: string; version?: number } | null;
+      if (!response.ok || typeof data?.configured !== 'boolean') throw new Error('status unavailable');
+      if (cancelled) return;
+      setServiceState(data.configured ? 'ready' : 'unconfigured');
+      setServiceModel(typeof data.model === 'string' ? data.model : '');
+    }).catch(() => {
+      if (!cancelled) setServiceState('unavailable');
+    }).finally(() => window.clearTimeout(timer));
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -178,12 +201,21 @@ export function StudyAssistant({ supportId, supportName, onBack }: Props) {
     }
   };
 
+  const serviceMessage = serviceState === 'ready'
+    ? `Worker IA déployé et secrets serveur détectés${serviceModel ? ` · ${serviceModel}` : ''}.`
+    : serviceState === 'unconfigured'
+      ? 'Le Worker IA répond, mais la clé OpenAI ou le code d’accès serveur manque encore dans les secrets Cloudflare.'
+      : serviceState === 'unavailable'
+        ? 'Le diagnostic /api/ai/status ne répond pas encore. Le Worker API n’est peut-être pas encore déployé sur cette adresse.'
+        : 'Vérification du Worker IA et des secrets serveur…';
+
   return <main className="shell ai-shell">
     <button className="back" type="button" onClick={onBack}>← Espace d’étude</button>
     <header className="ai-header">
       <p className="eyebrow">ASSISTANT D’ÉTUDE · IA</p>
       <h1>{supportName}</h1>
       <p>L’assistant travaille à partir du contenu extrait de ce support. Le document reste local tant que tu ne l’interroges pas ou ne demandes pas de cartes ; dans ces deux cas, le contexte préparé est envoyé au service IA.</p>
+      <div className={`ai-service-status ${serviceState}`} role="status"><strong>{serviceState === 'ready' ? 'Service IA prêt' : serviceState === 'unconfigured' ? 'Configuration IA incomplète' : serviceState === 'unavailable' ? 'Déploiement IA à vérifier' : 'Vérification IA'}</strong><span>{serviceMessage}</span></div>
     </header>
 
     {!context && !contextError && <section className="ai-panel ai-loading" role="status"><strong>Préparation locale du support…</strong><p>Sirāfiq extrait le texte utile avant tout envoi.</p></section>}
