@@ -1,6 +1,7 @@
 const MAX_CONTEXT_CHARS = 100_000;
 const MAX_QUESTION_CHARS = 3_000;
 const MAX_REQUEST_BYTES = 180_000;
+const SYNTHETIC_CONTEXT_MARKER = /\[(?:Page\s+\d+|Début du document|Milieu du document|Fin du document)\]/i;
 
 function json(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -161,7 +162,7 @@ export function parseMemoryPassagesOutput(response, context) {
     .filter(passage => {
       if (!passage.title || !passage.text) return false;
       const normalized = normalizedWhitespace(passage.text);
-      if (normalized.length < 40 || !source.includes(normalized) || seen.has(normalized)) return false;
+      if (normalized.length < 40 || SYNTHETIC_CONTEXT_MARKER.test(normalized) || !source.includes(normalized) || seen.has(normalized)) return false;
       seen.add(normalized);
       return true;
     })
@@ -416,7 +417,7 @@ async function handlePassages(request, env) {
         schema: passageSchema(count),
       },
     },
-    instructions: 'Tu sélectionnes des passages à mémoriser pour Sirāfiq. Chaque champ text doit être une copie fidèle et consécutive du contexte fourni, sans paraphrase, correction, résumé ni ajout. Choisis des extraits autonomes, pédagogiquement utiles et distincts. Le titre peut être bref et descriptif. N’utilise aucun texte absent du contexte.',
+    instructions: 'Tu sélectionnes des passages à mémoriser pour Sirāfiq. Chaque champ text doit être une copie fidèle et consécutive du contexte fourni, sans paraphrase, correction, résumé ni ajout. Choisis des extraits autonomes, pédagogiquement utiles et distincts. Le titre peut être bref et descriptif. N’utilise aucun texte absent du contexte et n’inclus jamais les marqueurs techniques entre crochets ajoutés par Sirāfiq, comme les numéros de page ou les libellés début/milieu/fin.',
     input: `SUPPORT : ${supportName}\n\nCONTEXTE FOURNI PAR L’UTILISATEUR :\n${context}\n\nSélectionne exactement ${count} passages distincts, chacun assez court pour être mémorisé mais assez complet pour avoir un sens autonome.`,
   });
 

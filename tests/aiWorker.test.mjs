@@ -125,3 +125,16 @@ test('parseMemoryPassagesOutput rejette une paraphrase absente du contexte', () 
   }, context);
   assert.deepEqual(passages, []);
 });
+
+test('parseMemoryPassagesOutput rejette les marqueurs techniques du contexte', () => {
+  const pdfContext = '[Page 42] Un passage suffisamment long suit ce marqueur technique mais le marqueur lui-même ne doit jamais être mémorisé.';
+  const sampledContext = '[Milieu du document] Un autre passage suffisamment long suit ce marqueur artificiel ajouté par Sirāfiq.';
+  const pdfPassage = parseMemoryPassagesOutput({
+    output_text: JSON.stringify({ passages: [{ title: 'Page', text: pdfContext }] }),
+  }, pdfContext);
+  const sampledPassage = parseMemoryPassagesOutput({
+    output_text: JSON.stringify({ passages: [{ title: 'Milieu', text: sampledContext }] }),
+  }, sampledContext);
+  assert.deepEqual(pdfPassage, []);
+  assert.deepEqual(sampledPassage, []);
+});
