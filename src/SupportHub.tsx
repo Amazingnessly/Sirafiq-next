@@ -3,7 +3,7 @@ import { MindMap, MindNode, type MindMapView } from './MindMap';
 import { MemoryPassage, TextMemorization } from './TextMemorization';
 import { QuranMemorization, QuranTarget } from './QuranMemorization';
 import { StudyAssistant } from './StudyAssistant';
-import { getSupportMetadata, patchSupportMetadata, SUPPORT_METADATA_CHANGED_EVENT, type SupportMetadataChange } from './storage';
+import { getSupportMetadata, loadSupportBlob, patchSupportMetadata, SUPPORT_METADATA_CHANGED_EVENT, type SupportMetadataChange } from './storage';
 
 type Props = {
   id: string;
@@ -43,7 +43,7 @@ function extensionOf(name: string) {
   return name.split('.').pop()?.toLowerCase() ?? '';
 }
 
-export function SupportHub({ id, name, category, canRead, flashcards, recallAttempts, pdfBookmarks = 0, pdfNotes = 0, onRead, onOpenReference, onFlashcards, onRecall, onBack }: Props) {
+export function SupportHub({ id, name, category, canRead, flashcards, recallAttempts, pdfBookmarks = 0, pdfNotes = 0, onRead, onFlashcards, onRecall, onBack }: Props) {
   const [mindMode, setMindMode] = useState(false);
   const [memoryMode, setMemoryMode] = useState(false);
   const [quranMode, setQuranMode] = useState(false);
@@ -123,18 +123,43 @@ export function SupportHub({ id, name, category, canRead, flashcards, recallAtte
   };
 
   const openQuranReference = (page?: number) => {
-    if (!page || !Number.isFinite(page) || page < 1) {
-      onOpenReference();
+    const extension = extensionOf(name);
+    const safePage = page && Number.isFinite(page) && page >= 1 ? Math.floor(page) : null;
+
+    if (extension === 'pdf') {
+      const url = new URL(window.location.href);
+      url.search = '';
+      url.hash = '';
+      url.searchParams.set('source', id);
+      if (safePage) url.searchParams.set('page', String(safePage));
+      const opened = window.open(url.toString(), '_blank');
+      if (opened) opened.opener = null;
+      else setSaveStatus('Impossible d’ouvrir le support de référence dans un nouvel onglet. Autorise les fenêtres contextuelles puis réessaie.');
       return;
     }
-    const url = new URL(window.location.href);
-    url.search = '';
-    url.hash = '';
-    url.searchParams.set('source', id);
-    url.searchParams.set('page', String(Math.floor(page)));
-    const opened = window.open(url.toString(), '_blank');
-    if (opened) opened.opener = null;
-    else setSaveStatus('Impossible d’ouvrir la page de référence dans un nouvel onglet. Autorise les fenêtres contextuelles puis réessaie.');
+
+    const opened = window.open('', '_blank');
+    if (!opened) {
+      setSaveStatus('Impossible d’ouvrir le support de référence dans un nouvel onglet. Autorise les fenêtres contextuelles puis réessaie.');
+      return;
+    }
+    opened.opener = null;
+    setSaveStatus('Ouverture du support de référence…');
+    void loadSupportBlob(id).then(blob => {
+      const objectUrl = URL.createObjectURL(blob);
+      if (opened.closed) {
+        URL.revokeObjectURL(objectUrl);
+        setSaveStatus('L’onglet de référence a été fermé avant l’ouverture du support.');
+        return;
+      }
+      opened.location.href = objectUrl;
+      setSaveStatus('');
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    }).catch(error => {
+      opened.close();
+      console.error(error);
+      setSaveStatus(error instanceof Error ? `Impossible d’ouvrir le support de référence : ${error.message}` : 'Impossible d’ouvrir le support de référence.');
+    });
   };
 
   if (aiMode) return <StudyAssistant supportId={id} supportName={name} onBack={() => setAiMode(false)} />;
