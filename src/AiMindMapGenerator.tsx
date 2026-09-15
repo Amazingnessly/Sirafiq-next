@@ -19,7 +19,6 @@ type Props = {
   supportName: string;
   context: string;
   accessToken: string;
-  onOpenMindMap: () => void;
 };
 
 function toMindNodes(nodes: GeneratedMindNode[]): MindNode[] {
@@ -33,7 +32,7 @@ function toMindNodes(nodes: GeneratedMindNode[]): MindNode[] {
   }));
 }
 
-export function AiMindMapGenerator({ supportId, supportName, context, accessToken, onOpenMindMap }: Props) {
+export function AiMindMapGenerator({ supportId, supportName, context, accessToken }: Props) {
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [generated, setGenerated] = useState<GeneratedMindNode[]>([]);
@@ -100,7 +99,7 @@ export function AiMindMapGenerator({ supportId, supportName, context, accessToke
       const mindMap = toMindNodes(generated);
       await patchSupportMetadata<StoredSupport>(supportId, { mindMap });
       setSaved(true);
-      setStatus(`Carte mentale enregistrée avec ${mindMap.length} nœuds.`);
+      setStatus(`Carte mentale enregistrée avec ${mindMap.length} nœuds. Reviens à l’espace d’étude pour l’ouvrir.`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Impossible d’enregistrer la carte mentale.');
     } finally {
@@ -137,7 +136,6 @@ export function AiMindMapGenerator({ supportId, supportName, context, accessToke
     {generated.length > 0 && <div className="ai-card-actions">
       <button type="button" disabled={saving} onClick={() => { setGenerated([]); setSaved(false); setStatus('Proposition écartée.'); }}>Écarter</button>
       {!saved && <button className="primary" type="button" disabled={saving} onClick={() => void save()}>{saving ? 'Enregistrement…' : 'Enregistrer comme carte mentale'}</button>}
-      {saved && <button className="primary" type="button" onClick={onOpenMindMap}>Ouvrir la carte mentale</button>}
     </div>}
   </section>;
 }
