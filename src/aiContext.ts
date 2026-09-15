@@ -80,10 +80,10 @@ async function extractPdfContext(support: StoredAiSupport): Promise<AiContext> {
   try {
     const pdf = await Promise.race([loadingTask.promise, rangeFailure]);
     const pageNumbers = selectPdfSamplePages(pdf.numPages, MAX_PDF_SAMPLE_PAGES);
+    const perPageBudget = Math.max(600, Math.floor(MAX_CONTEXT_CHARS / Math.max(1, pageNumbers.length)) - 32);
     const chunks: string[] = [];
-    let length = 0;
     let pagesRead = 0;
-    let truncated = false;
+    let pageTextWasTruncated = false;
 
     for (const pageNumber of pageNumbers) {
       const page = await Promise.race([pdf.getPage(pageNumber), rangeFailure]);
@@ -96,26 +96,17 @@ async function extractPdfContext(support: StoredAiSupport): Promise<AiContext> {
         .trim();
       pagesRead += 1;
       if (!pageText) continue;
-      const chunk = `\n\n[Page ${pageNumber}]\n${pageText}`;
-      const remaining = MAX_CONTEXT_CHARS - length;
-      if (remaining <= 0) {
-        truncated = true;
-        break;
-      }
-      if (chunk.length > remaining) {
-        chunks.push(chunk.slice(0, remaining));
-        truncated = true;
-        break;
-      }
-      chunks.push(chunk);
-      length += chunk.length;
+      const selectedText = pageText.length > perPageBudget ? pageText.slice(0, perPageBudget) : pageText;
+      if (selectedText.length < pageText.length) pageTextWasTruncated = true;
+      chunks.push(`\n\n[Page ${pageNumber}]\n${selectedText}`);
     }
 
-    const text = chunks.join('').trim();
-    if (!text) throw new Error('Aucun texte exploitable n’a été détecté dans ce PDF.');
+    const combined = chunks.join('').trim();
+    if (!combined) throw new Error('Aucun texte exploitable n’a été détecté dans ce PDF.');
+    const bounded = combined.length > MAX_CONTEXT_CHARS ? combined.slice(0, MAX_CONTEXT_CHARS) : combined;
     return {
-      text,
-      truncated: truncated || pageNumbers.length < pdf.numPages || pagesRead < pageNumbers.length,
+      text: bounded,
+      truncated: pageNumbers.length < pdf.numPages || pageTextWasTruncated || combined.length > MAX_CONTEXT_CHARS,
       pagesRead,
     };
   } finally {
