@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Flashcard } from './Flashcards';
 import type { MemoryPassage } from './TextMemorization';
+import type { QuranTarget } from './QuranMemorization';
 import { isReviewDue, scheduleReview } from './spacedRepetition.mjs';
+import { scheduleQuranReview } from './quranScheduling.mjs';
 import { listSupportMetadata, patchSupportMetadata } from './storage';
 
 type StoredSupport = {
@@ -9,18 +11,37 @@ type StoredSupport = {
   name: string;
   flashcards?: Flashcard[];
   memoryPassages?: MemoryPassage[];
+  quranTargets?: QuranTarget[];
   [key: string]: unknown;
 };
 
 type ReviewCard = { kind: 'flashcard'; supportId: string; supportName: string; card: Flashcard };
 type ReviewPassage = { kind: 'passage'; supportId: string; supportName: string; passage: MemoryPassage };
-type ReviewItem = ReviewCard | ReviewPassage;
+type ReviewQuran = { kind: 'quran'; supportId: string; supportName: string; target: QuranTarget };
+type ReviewItem = ReviewCard | ReviewPassage | ReviewQuran;
 type PassagePhase = 'read' | 'recall' | 'check';
 
 type Props = { onClose: () => void; onCountChange?: (count: number) => void };
 
 async function loadSupports(): Promise<StoredSupport[]> {
   return listSupportMetadata<StoredSupport>();
+}
+
+function reviewItemId(item: ReviewItem) {
+  if (item.kind === 'flashcard') return item.card.id;
+  if (item.kind === 'passage') return item.passage.id;
+  return item.target.id;
+}
+
+function openQuranSource(item: ReviewQuran) {
+  const url = new URL(window.location.href);
+  url.search = '';
+  url.hash = '';
+  url.searchParams.set('source', item.supportId);
+  if (item.target.page) url.searchParams.set('page', String(item.target.page));
+  const opened = window.open(url.toString(), '_blank');
+  if (opened) opened.opener = null;
+  return Boolean(opened);
 }
 
 export function DailyReview({ onClose, onCountChange }: Props) {
@@ -39,9 +60,10 @@ export function DailyReview({ onClose, onCountChange }: Props) {
   const queue = useMemo<ReviewItem[]>(() => supports.flatMap(support => [
     ...(support.flashcards ?? []).filter(card => isReviewDue(card)).map(card => ({ kind: 'flashcard' as const, supportId: support.id, supportName: support.name, card })),
     ...(support.memoryPassages ?? []).filter(passage => isReviewDue(passage)).map(passage => ({ kind: 'passage' as const, supportId: support.id, supportName: support.name, passage })),
+    ...(support.quranTargets ?? []).filter(target => isReviewDue(target)).map(target => ({ kind: 'quran' as const, supportId: support.id, supportName: support.name, target })),
   ]), [supports]);
   const current = queue[index] ?? null;
-  const currentKey = current ? `${current.kind}:${current.kind === 'flashcard' ? current.card.id : current.passage.id}` : '';
+  const currentKey = current ? `${current.kind}:${reviewItemId(current)}` : '';
 
   useEffect(() => { onCountChange?.(queue.length); }, [queue.length, onCountChange]);
   useEffect(() => { if (index >= queue.length && queue.length) setIndex(queue.length - 1); }, [index, queue.length]);
@@ -52,7 +74,7 @@ export function DailyReview({ onClose, onCountChange }: Props) {
   }, [currentKey]);
 
   const rate = async (success: boolean) => {
-    if (!current || saving) return;
+    if (!current || current.kind === 'quran' || saving) return;
     const queueLengthBeforeSave = queue.length;
     const support = supports.find(item => item.id === current.supportId);
     if (!support) return;
@@ -90,16 +112,43 @@ export function DailyReview({ onClose, onCountChange }: Props) {
     }
   };
 
+  const rateQuran = async (assessment: QuranTarget['status']) => {
+    if (!current || current.kind !== 'quran' || saving) return;
+    const queueLengthBeforeSave = queue.length;
+    const support = supports.find(item => item.id === current.supportId);
+    if (!support) return;
+
+    setSaving(true);
+    setStatus('Enregistrement…');
+    try {
+      const schedule = scheduleQuranReview(current.target.stage, assessment);
+      const quranTargets = (support.quranTargets ?? []).map(target => target.id === current.target.id ? {
+        ...target,
+        ...schedule,
+        status: assessment,
+        reviews: target.reviews + 1,
+      } : target);
+      const updated = await patchSupportMetadata<StoredSupport>(support.id, { quranTargets });
+      setSupports(items => items.map(item => item.id === updated.id ? updated : item));
+      if (assessment === 'nouveau' && queueLengthBeforeSave > 1) setIndex(currentIndex => (currentIndex + 1) % queueLengthBeforeSave);
+      setStatus('');
+    } catch {
+      setStatus('Impossible d’enregistrer cette révision.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return <section className="daily-overlay" role="dialog" aria-modal="true" aria-label="Révisions du jour">
     <div className="daily-shell">
-      <header className="daily-header"><div><p className="eyebrow">SIRĀFIQ · RÉVISIONS</p><h1>Révisions du jour</h1><p>Les cartes et passages de mémorisation arrivés à échéance, réunis au même endroit.</p></div><button type="button" onClick={onClose}>Fermer</button></header>
+      <header className="daily-header"><div><p className="eyebrow">SIRĀFIQ · RÉVISIONS</p><h1>Révisions du jour</h1><p>Les cartes, passages de mémorisation et repères Qour’ān arrivés à échéance, réunis au même endroit.</p></div><button type="button" onClick={onClose}>Fermer</button></header>
       {status && <p className="daily-status" role="status">{status}</p>}
       {!current ? <div className="daily-empty"><strong>Tout est à jour</strong><p>Aucune révision n’est due maintenant.</p></div> : <div className="daily-review">
-        <div className="daily-meta"><span>{current.supportName} · {current.kind === 'flashcard' ? 'Carte mémoire' : 'Passage texte'}</span><strong>{index + 1} / {queue.length}</strong></div>
+        <div className="daily-meta"><span>{current.supportName} · {current.kind === 'flashcard' ? 'Carte mémoire' : current.kind === 'passage' ? 'Passage texte' : 'Passage Qour’ān'}</span><strong>{index + 1} / {queue.length}</strong></div>
         {current.kind === 'flashcard' ? <>
           <article className="daily-card" onClick={() => !saving && setRevealed(true)}><small>Question</small><h2>{current.card.front}</h2>{revealed ? <div><small>Réponse</small><p>{current.card.back}</p></div> : <button type="button" disabled={saving} onClick={() => setRevealed(true)}>Afficher la réponse</button>}</article>
           {revealed && <div className="daily-rating"><button type="button" disabled={saving} onClick={() => void rate(false)}>À revoir</button><button type="button" disabled={saving} onClick={() => void rate(true)}>Acquis</button></div>}
-        </> : <>
+        </> : current.kind === 'passage' ? <>
           <article className="daily-card daily-passage-card">
             <small>{passagePhase === 'read' ? '1 · Lire attentivement' : passagePhase === 'recall' ? '2 · Restituer sans regarder' : '3 · Comparer après l’effort'}</small>
             <h2>{current.passage.title}</h2>
@@ -108,6 +157,15 @@ export function DailyReview({ onClose, onCountChange }: Props) {
             {passagePhase === 'check' && <div className="daily-passage-compare"><section><small>Ta restitution</small><p>{recall.trim() || 'Aucune restitution écrite.'}</p></section><section><small>Texte original</small><p>{current.passage.text}</p></section></div>}
           </article>
           {passagePhase === 'check' && <div className="daily-rating"><button type="button" disabled={saving} onClick={() => void rate(false)}>À retravailler</button><button type="button" disabled={saving} onClick={() => void rate(true)}>Restitution satisfaisante</button></div>}
+        </> : <>
+          <article className="daily-card daily-quran-card">
+            <small>Réviser depuis la source originale</small>
+            <h2>{current.target.label}</h2>
+            <p>{current.target.page ? `Repère : page ${current.target.page}.` : 'Aucun numéro de page indiqué.'} Ouvre le support, observe le passage, ferme ou détourne la source, récite de mémoire puis compare avant de t’évaluer.</p>
+            {current.target.note && <div><small>Repère personnel</small><p>{current.target.note}</p></div>}
+            <button type="button" disabled={saving} onClick={() => { if (!openQuranSource(current)) setStatus('Impossible d’ouvrir le support de référence. Autorise les fenêtres contextuelles puis réessaie.'); }}>Ouvrir le support de référence{current.target.page ? ` · p. ${current.target.page}` : ''}</button>
+          </article>
+          <div className="daily-rating daily-quran-rating"><button type="button" disabled={saving} onClick={() => void rateQuran('nouveau')}>À reprendre</button><button type="button" disabled={saving} onClick={() => void rateQuran('consolidation')}>En consolidation</button><button type="button" disabled={saving} onClick={() => void rateQuran('solide')}>Solide</button></div>
         </>}
       </div>}
     </div>

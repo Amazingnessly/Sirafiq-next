@@ -4,17 +4,19 @@ import { DailyReview } from './DailyReview';
 import { ErrorBoundary } from './ErrorBoundary';
 import type { Flashcard } from './Flashcards';
 import type { MemoryPassage } from './TextMemorization';
+import type { QuranTarget } from './QuranMemorization';
 import { isReviewDue } from './spacedRepetition.mjs';
 import { listSupportMetadata, SUPPORT_METADATA_CHANGED_EVENT } from './storage';
 import './daily-review.css';
 
-type StoredSupport = { id: string; flashcards?: Flashcard[]; memoryPassages?: MemoryPassage[] };
+type StoredSupport = { id: string; flashcards?: Flashcard[]; memoryPassages?: MemoryPassage[]; quranTargets?: QuranTarget[] };
 
 async function countDue(): Promise<number> {
   const supports = await listSupportMetadata<StoredSupport>();
   return supports.reduce((total, support) => total
     + (support.flashcards ?? []).filter(card => isReviewDue(card)).length
-    + (support.memoryPassages ?? []).filter(passage => isReviewDue(passage)).length, 0);
+    + (support.memoryPassages ?? []).filter(passage => isReviewDue(passage)).length
+    + (support.quranTargets ?? []).filter(target => isReviewDue(target)).length, 0);
 }
 
 function DailyReviewEntry() {
