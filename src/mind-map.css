@@ -1,8 +1,8 @@
-.mind-shell { width:min(1180px, calc(100% - 24px)); }
-.mind-header { padding:clamp(24px,5vw,46px); border:1px solid rgba(91,32,35,.14); border-radius:24px; background:rgba(255,252,246,.88); box-shadow:0 20px 60px rgba(76,44,28,.08); }
+.mind-shell { width:min(1600px, calc(100% - 24px)); }
+.mind-header { padding:clamp(22px,4vw,38px); border:1px solid rgba(91,32,35,.14); border-radius:24px; background:rgba(255,252,246,.88); box-shadow:0 20px 60px rgba(76,44,28,.08); }
 .mind-header h1 { margin:8px 0 12px; font-size:clamp(34px,6vw,58px); overflow-wrap:anywhere; }
 .mind-header p:last-child { max-width:720px; margin:0; color:#74635c; line-height:1.65; }
-.mind-layout { display:grid; grid-template-columns:minmax(0,1fr) 310px; gap:18px; margin-top:18px; }
+.mind-layout { display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:18px; margin-top:18px; }
 .mind-canvas { min-height:0; padding:24px; border:1px solid rgba(91,32,35,.13); border-radius:20px; background:rgba(255,252,246,.78); overflow:hidden; }
 .mind-canvas-title { display:flex; justify-content:space-between; gap:16px; align-items:end; margin-bottom:18px; padding-bottom:14px; border-bottom:1px solid rgba(91,32,35,.1); }
 .mind-canvas-title .eyebrow { margin:0 0 3px; }
@@ -14,7 +14,7 @@
 .mind-zoom button { width:38px; min-height:36px; border:0; border-radius:0; padding:0; background:transparent; font-size:22px; line-height:1; }
 .mind-zoom output { min-width:54px; padding:0 7px; color:#6d5b55; text-align:center; font-size:12px; font-weight:800; font-variant-numeric:tabular-nums; }
 .mind-pan-hint { margin:0 0 8px; color:#8a756d; font-size:12px; text-align:right; }
-.mind-viewport { position:relative; width:100%; height:clamp(340px,48vh,520px); overflow:hidden; border-radius:16px; border:1px solid rgba(91,32,35,.06); background:radial-gradient(circle at center, rgba(116,29,37,.045), transparent 38%), rgba(255,255,255,.36); overscroll-behavior:contain; touch-action:none; cursor:grab; user-select:none; }
+.mind-viewport { position:relative; width:100%; height:clamp(500px,68vh,760px); overflow:hidden; border-radius:16px; border:1px solid rgba(91,32,35,.06); background:radial-gradient(circle at center, rgba(116,29,37,.045), transparent 38%), rgba(255,255,255,.36); overscroll-behavior:contain; touch-action:none; cursor:grab; user-select:none; }
 .mind-viewport.panning { cursor:grabbing; }
 .mind-scaled-stage { position:absolute; left:0; top:0; margin:0; will-change:transform; }
 .mind-map-stage { position:absolute; left:0; top:0; min-width:0; min-height:0; transform-origin:top left; }
@@ -32,7 +32,7 @@
 .mind-map-node.depth-3, .mind-map-node.depth-4 { background:#f7ede1; }
 .mind-map-node.selected { border-color:#741d25; box-shadow:0 0 0 4px rgba(116,29,37,.12),0 14px 32px rgba(76,44,28,.12); }
 .mind-map-node.root.selected { box-shadow:0 0 0 5px rgba(116,29,37,.15),0 16px 34px rgba(116,29,37,.22); }
-.mind-empty { min-height:320px; display:grid; place-items:center; align-content:center; gap:12px; }
+.mind-empty { min-height:480px; display:grid; place-items:center; align-content:center; gap:12px; }
 .mind-root-preview { border:0; border-radius:28px; padding:22px 30px; background:#741d25; color:#fffaf4; font-family:'Playfair Display',serif; font-size:22px; box-shadow:0 16px 34px rgba(116,29,37,.22); }
 .mind-empty p { color:#8a756d; }
 .mind-editor { align-self:start; position:sticky; top:18px; padding:20px; border:1px solid rgba(91,32,35,.13); border-radius:18px; background:rgba(255,252,246,.9); }
@@ -44,17 +44,22 @@
 .mind-reset-position { background:#fffaf4; }
 .mind-delete:disabled { opacity:.4; cursor:default; }
 .mind-editor small { display:block; margin-top:16px; color:#8a756d; }
+@media (max-width:1100px) {
+  .mind-layout { grid-template-columns:minmax(0,1fr) 280px; }
+}
 @media (max-width:900px) {
   .mind-layout { grid-template-columns:1fr; }
   .mind-editor { position:static; }
+  .mind-viewport { height:clamp(480px,64vh,680px); }
 }
 @media (max-width:640px) {
-  .mind-shell { width:min(100% - 16px, 1180px); }
-  .mind-canvas { padding:14px 10px; }
+  .mind-shell { width:min(100% - 8px, 1600px); }
+  .mind-header { padding:18px 16px; }
+  .mind-canvas { padding:12px 8px; }
   .mind-canvas-title { align-items:start; flex-direction:column; gap:10px; }
   .mind-actions { width:100%; justify-content:flex-start; gap:8px; }
   .mind-actions > small { width:100%; }
-  .mind-viewport { height:360px; }
+  .mind-viewport { height:clamp(440px,64svh,620px); }
   .mind-map-node { width:166px; min-height:68px; }
   .mind-map-node.root { width:196px; }
   .mind-zoom { order:2; }
