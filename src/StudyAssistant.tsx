@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import type { Flashcard } from './Flashcards';
+import { AiMemoryPassageGenerator } from './AiMemoryPassageGenerator';
 import { AiMindMapGenerator } from './AiMindMapGenerator';
 import { loadAiContext, type AiContext } from './aiContext';
 import { getSupportMetadata, patchSupportMetadata } from './storage';
@@ -229,7 +230,7 @@ export function StudyAssistant({ supportId, supportName, onBack }: Props) {
             <strong>Contexte prêt</strong>
             <span>{Math.round(context.text.length / 1000)} k caractères{context.pagesRead ? ` · ${context.pagesRead} page${context.pagesRead > 1 ? 's' : ''} parcourue${context.pagesRead > 1 ? 's' : ''}` : ''}</span>
           </div>
-          {context.truncated && <p className="ai-warning">Le support est volumineux : cette version envoie une portion limitée du texte. Une question, une carte mémoire ou une carte mentale portant sur une partie non incluse peut donc manquer de contexte.</p>}
+          {context.truncated && <p className="ai-warning">Le support est volumineux : cette version envoie une portion limitée du texte. Une question, une carte mémoire, une carte mentale ou un passage portant sur une partie non incluse peut donc manquer de contexte.</p>}
 
           <label className="ai-token">Code d’accès IA
             <input type="password" autoComplete="off" value={accessToken} onChange={event => saveAccessToken(event.target.value)} placeholder="Code configuré côté Cloudflare" />
@@ -265,6 +266,7 @@ export function StudyAssistant({ supportId, supportName, onBack }: Props) {
       </section>
 
       <AiMindMapGenerator supportId={supportId} supportName={supportName} context={context.text} accessToken={accessToken} />
+      <AiMemoryPassageGenerator supportId={supportId} supportName={supportName} context={context.text} accessToken={accessToken} />
     </>}
   </main>;
 }
