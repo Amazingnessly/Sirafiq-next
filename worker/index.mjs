@@ -16,7 +16,7 @@ export function aiConfigurationStatus(env = {}) {
   return {
     configured: Boolean(env.OPENAI_API_KEY && env.SIRAFIQ_AI_ACCESS_TOKEN),
     model: env.OPENAI_MODEL || 'gpt-5.6-terra',
-    version: 3,
+    version: 4,
   };
 }
 
@@ -45,6 +45,16 @@ export function validateFlashcardPayload(payload) {
   const count = Number(payload.count);
   if (!Number.isInteger(count) || count < 3 || count > 10) {
     return { ok: false, error: 'Le nombre de cartes doit être compris entre 3 et 10.' };
+  }
+  return { ok: true, value: { ...base.value, count } };
+}
+
+export function validatePassagePayload(payload) {
+  const base = basePayload(payload);
+  if (!base.ok) return base;
+  const count = Number(payload.count);
+  if (!Number.isInteger(count) || ![3, 5].includes(count)) {
+    return { ok: false, error: 'Le nombre de passages doit être 3 ou 5.' };
   }
   return { ok: true, value: { ...base.value, count } };
 }
@@ -125,6 +135,37 @@ export function parseMindMapOutput(response) {
   }
 
   return nodes;
+}
+
+function normalizedWhitespace(value) {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+export function parseMemoryPassagesOutput(response, context) {
+  const text = extractOutputText(response);
+  if (!text || typeof context !== 'string') return [];
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed?.passages)) return [];
+  const source = normalizedWhitespace(context);
+  const seen = new Set();
+  return parsed.passages
+    .map(passage => ({
+      title: typeof passage?.title === 'string' ? passage.title.trim() : '',
+      text: typeof passage?.text === 'string' ? passage.text.trim() : '',
+    }))
+    .filter(passage => {
+      if (!passage.title || !passage.text) return false;
+      const normalized = normalizedWhitespace(passage.text);
+      if (normalized.length < 40 || !source.includes(normalized) || seen.has(normalized)) return false;
+      seen.add(normalized);
+      return true;
+    })
+    .slice(0, 5);
 }
 
 async function matchesSecret(candidate, expected) {
@@ -329,6 +370,63 @@ async function handleMindMap(request, env) {
   return json({ nodes, model: data.model || env.OPENAI_MODEL || 'gpt-5.6-terra' });
 }
 
+function passageSchema(count) {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['passages'],
+    properties: {
+      passages: {
+        type: 'array',
+        minItems: count,
+        maxItems: count,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['title', 'text'],
+          properties: {
+            title: { type: 'string', minLength: 1, maxLength: 120 },
+            text: { type: 'string', minLength: 40, maxLength: 1800 },
+          },
+        },
+      },
+    },
+  };
+}
+
+async function handlePassages(request, env) {
+  const denied = await authorize(request, env);
+  if (denied) return denied;
+  const payload = await readPayload(request);
+  if (!payload.ok) return payload.response;
+  const validated = validatePassagePayload(payload.value);
+  if (!validated.ok) return json({ error: validated.error }, 400);
+  const { supportName, context, count } = validated.value;
+
+  const upstream = await callOpenAI(env, {
+    model: env.OPENAI_MODEL || 'gpt-5.6-terra',
+    store: false,
+    reasoning: { effort: 'low' },
+    max_output_tokens: 3600,
+    text: {
+      format: {
+        type: 'json_schema',
+        name: 'sirafiq_memory_passages',
+        strict: true,
+        schema: passageSchema(count),
+      },
+    },
+    instructions: 'Tu sélectionnes des passages à mémoriser pour Sirāfiq. Chaque champ text doit être une copie fidèle et consécutive du contexte fourni, sans paraphrase, correction, résumé ni ajout. Choisis des extraits autonomes, pédagogiquement utiles et distincts. Le titre peut être bref et descriptif. N’utilise aucun texte absent du contexte.',
+    input: `SUPPORT : ${supportName}\n\nCONTEXTE FOURNI PAR L’UTILISATEUR :\n${context}\n\nSélectionne exactement ${count} passages distincts, chacun assez court pour être mémorisé mais assez complet pour avoir un sens autonome.`,
+  });
+
+  if (!upstream.ok) return upstreamError(upstream);
+  const data = await upstream.json();
+  const passages = parseMemoryPassagesOutput(data, context);
+  if (passages.length !== count) return json({ error: 'Les passages proposés ne correspondent pas fidèlement au texte du support.' }, 502);
+  return json({ passages, model: data.model || env.OPENAI_MODEL || 'gpt-5.6-terra' });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -339,6 +437,7 @@ export default {
     if (url.pathname === '/api/ai/ask') return handleAsk(request, env);
     if (url.pathname === '/api/ai/flashcards') return handleFlashcards(request, env);
     if (url.pathname === '/api/ai/mindmap') return handleMindMap(request, env);
+    if (url.pathname === '/api/ai/passages') return handlePassages(request, env);
     if (url.pathname.startsWith('/api/')) return json({ error: 'Route API inconnue.' }, 404);
     return env.ASSETS.fetch(request);
   },
