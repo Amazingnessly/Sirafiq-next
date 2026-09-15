@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type Criterion = 'articulation' | 'rythme' | 'souffle' | 'intonation' | 'presence';
 type Scores = Record<Criterion, number>;
@@ -21,9 +21,12 @@ type Prompt = {
 };
 
 type Props = { onBack: () => void };
+type LoadAttemptsResult = { attempts: PracticeAttempt[]; warning: string; writable: boolean };
 
 const STORAGE_KEY = 'sirafiq-pronunciation-practice-v1';
-const STORAGE_WARNING = 'Impossible d’enregistrer cette séance sur cet appareil. Elle reste visible pour cette session mais pourrait être perdue en fermant la page.';
+const STORAGE_WARNING = 'Impossible d’enregistrer cette séance sur cet appareil. Elle reste visible pour cette session et Sirāfiq réessaiera au retour sur la page.';
+const STORAGE_CORRUPT_WARNING = 'L’historique local des entraînements est illisible. Il n’a pas été écrasé automatiquement ; les nouvelles séances restent visibles uniquement pour cette session tant que les données locales ne redeviennent pas lisibles.';
+const STORAGE_READ_WARNING = 'Impossible de lire l’historique local des entraînements. Les données existantes n’ont pas été écrasées et les nouvelles séances restent visibles pour cette session.';
 
 const criteria: Array<{ id: Criterion; label: string; hint: string }> = [
   { id: 'articulation', label: 'Articulation', hint: 'Voyelles stables, consonnes nettes, finales maîtrisées.' },
@@ -94,27 +97,57 @@ function formatDuration(seconds: number) {
   return `${minutes}:${String(rest).padStart(2, '0')}`;
 }
 
-function loadAttempts(): PracticeAttempt[] {
+function isScores(value: unknown): value is Scores {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Partial<Record<Criterion, unknown>>;
+  return criteria.every(item => Number.isInteger(record[item.id]) && Number(record[item.id]) >= 1 && Number(record[item.id]) <= 5);
+}
+
+function isPracticeAttempt(value: unknown): value is PracticeAttempt {
+  if (!value || typeof value !== 'object') return false;
+  const attempt = value as Partial<PracticeAttempt>;
+  return typeof attempt.id === 'string' && Boolean(attempt.id)
+    && typeof attempt.promptId === 'string' && Boolean(attempt.promptId)
+    && typeof attempt.createdAt === 'string' && Number.isFinite(Date.parse(attempt.createdAt))
+    && typeof attempt.durationSeconds === 'number' && Number.isFinite(attempt.durationSeconds) && attempt.durationSeconds > 0
+    && isScores(attempt.scores)
+    && (attempt.note === undefined || typeof attempt.note === 'string');
+}
+
+function loadAttempts(): LoadAttemptsResult {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter(item => item && typeof item.id === 'string' && typeof item.promptId === 'string') : [];
+    if (!raw) return { attempts: [], warning: '', writable: true };
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return { attempts: [], warning: STORAGE_CORRUPT_WARNING, writable: false };
+    }
+    if (!Array.isArray(parsed) || !parsed.every(isPracticeAttempt)) {
+      return { attempts: [], warning: STORAGE_CORRUPT_WARNING, writable: false };
+    }
+    const ids = new Set(parsed.map(item => item.id));
+    if (ids.size !== parsed.length) return { attempts: [], warning: STORAGE_CORRUPT_WARNING, writable: false };
+    return { attempts: parsed.slice(0, 50), warning: '', writable: true };
   } catch {
-    return [];
+    return { attempts: [], warning: STORAGE_READ_WARNING, writable: false };
   }
 }
 
 export function PronunciationPractice({ onBack }: Props) {
+  const initialRef = useRef<LoadAttemptsResult | null>(null);
+  if (!initialRef.current) initialRef.current = loadAttempts();
   const [promptId, setPromptId] = useState(prompts[0].id);
   const [running, setRunning] = useState(false);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [scores, setScores] = useState<Scores>(emptyScores);
   const [note, setNote] = useState('');
-  const [attempts, setAttempts] = useState<PracticeAttempt[]>(loadAttempts);
-  const [warning, setWarning] = useState('');
+  const [attempts, setAttempts] = useState<PracticeAttempt[]>(initialRef.current.attempts);
+  const [warning, setWarning] = useState(initialRef.current.warning);
   const dirtyRef = useRef(false);
+  const storageWritableRef = useRef(initialRef.current.writable);
   const prompt = prompts.find(item => item.id === promptId) ?? prompts[0];
   const canSave = !running && elapsed > 0 && criteria.every(item => scores[item.id] > 0);
 
@@ -126,25 +159,54 @@ export function PronunciationPractice({ onBack }: Props) {
     return () => window.clearInterval(timer);
   }, [running, startedAt]);
 
-  const persistAttempts = (next: PracticeAttempt[]) => {
+  const persistAttempts = useCallback((next: PracticeAttempt[]) => {
+    if (!storageWritableRef.current) {
+      dirtyRef.current = true;
+      setWarning(current => current || STORAGE_READ_WARNING);
+      return false;
+    }
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
       dirtyRef.current = false;
       setWarning('');
+      return true;
     } catch {
       dirtyRef.current = true;
       setWarning(STORAGE_WARNING);
+      return false;
     }
-  };
+  }, []);
+
+  const refreshStorage = useCallback(() => {
+    const loaded = loadAttempts();
+    if (!loaded.writable) {
+      storageWritableRef.current = false;
+      setWarning(loaded.warning);
+      return;
+    }
+    storageWritableRef.current = true;
+    if (dirtyRef.current) {
+      persistAttempts(attempts);
+      return;
+    }
+    setAttempts(loaded.attempts);
+    setWarning('');
+  }, [attempts, persistAttempts]);
 
   useEffect(() => {
-    const onStorage = (event: StorageEvent) => {
-      if (event.key !== STORAGE_KEY || dirtyRef.current) return;
-      setAttempts(loadAttempts());
-    };
+    const onStorage = (event: StorageEvent) => { if (event.key === STORAGE_KEY) refreshStorage(); };
+    const onVisible = () => { if (document.visibilityState === 'visible') refreshStorage(); };
     window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
-  }, []);
+    window.addEventListener('focus', refreshStorage);
+    window.addEventListener('pageshow', refreshStorage);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('focus', refreshStorage);
+      window.removeEventListener('pageshow', refreshStorage);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [refreshStorage]);
 
   const resetSession = (nextPromptId = promptId) => {
     setPromptId(nextPromptId);
@@ -179,13 +241,14 @@ export function PronunciationPractice({ onBack }: Props) {
       note: note.trim() || undefined,
     };
     const next = [nextAttempt, ...attempts].slice(0, 50);
+    dirtyRef.current = true;
     setAttempts(next);
     persistAttempts(next);
     resetSession(prompt.id);
   };
 
   const averageFor = (attempt: PracticeAttempt) => {
-    const values = criteria.map(item => attempt.scores[item.id] || 0);
+    const values = criteria.map(item => attempt.scores[item.id]);
     return values.reduce((sum, value) => sum + value, 0) / values.length;
   };
 
