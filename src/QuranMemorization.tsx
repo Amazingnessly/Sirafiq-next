@@ -1,4 +1,6 @@
 import { FormEvent, useMemo, useRef, useState } from 'react';
+import { isReviewDue } from './spacedRepetition.mjs';
+import { scheduleQuranReview } from './quranScheduling.mjs';
 
 export type QuranTarget = {
   id: string;
@@ -8,7 +10,9 @@ export type QuranTarget = {
   status: 'nouveau' | 'consolidation' | 'solide';
   reviews: number;
   createdAt: string;
+  stage?: number;
   lastReviewedAt?: string;
+  nextReviewAt?: string;
 };
 
 type Props = {
@@ -25,6 +29,13 @@ const statusLabel: Record<QuranTarget['status'], string> = {
   solide: 'Solide',
 };
 
+function reviewLabel(target: QuranTarget) {
+  if (isReviewDue(target)) return 'à revoir maintenant';
+  const nextReviewMs = Date.parse(target.nextReviewAt ?? '');
+  if (!Number.isFinite(nextReviewMs)) return 'à revoir maintenant';
+  return `prochaine révision ${new Date(nextReviewMs).toLocaleDateString('fr-FR')}`;
+}
+
 export function QuranMemorization({ supportName, targets, onChange, onOpenSource, onBack }: Props) {
   const [label, setLabel] = useState('');
   const [page, setPage] = useState('');
@@ -35,8 +46,18 @@ export function QuranMemorization({ supportName, targets, onChange, onOpenSource
 
   const totals = useMemo(() => ({
     all: targets.length,
+    due: targets.filter(target => isReviewDue(target)).length,
     consolidation: targets.filter(target => target.status === 'consolidation').length,
     solide: targets.filter(target => target.status === 'solide').length,
+  }), [targets]);
+
+  const orderedTargets = useMemo(() => [...targets].sort((a, b) => {
+    const dueDifference = Number(isReviewDue(b)) - Number(isReviewDue(a));
+    if (dueDifference) return dueDifference;
+    const aNext = Date.parse(a.nextReviewAt ?? '') || Number.POSITIVE_INFINITY;
+    const bNext = Date.parse(b.nextReviewAt ?? '') || Number.POSITIVE_INFINITY;
+    if (aNext !== bNext) return aNext - bNext;
+    return b.createdAt.localeCompare(a.createdAt);
   }), [targets]);
 
   const startTarget = (id: string) => {
@@ -61,6 +82,7 @@ export function QuranMemorization({ supportName, targets, onChange, onOpenSource
       note: note.trim(),
       status: 'nouveau',
       reviews: 0,
+      stage: 0,
       createdAt: new Date().toISOString(),
     };
     onChange([target, ...targets]);
@@ -73,12 +95,12 @@ export function QuranMemorization({ supportName, targets, onChange, onOpenSource
   const assess = (status: QuranTarget['status']) => {
     if (!active || assessmentLockedRef.current) return;
     assessmentLockedRef.current = true;
-    const now = new Date().toISOString();
+    const schedule = scheduleQuranReview(active.stage, status);
     const nextTargets = targets.map(target => target.id === active.id ? {
       ...target,
+      ...schedule,
       status,
       reviews: target.reviews + 1,
-      lastReviewedAt: now,
     } : target);
     onChange(nextTargets);
     setActiveId(null);
@@ -105,7 +127,7 @@ export function QuranMemorization({ supportName, targets, onChange, onOpenSource
       {active.note && <div className="quran-note"><strong>Repère personnel</strong><p>{active.note}</p></div>}
       <div className="quran-assessment">
         <p className="eyebrow">APRÈS COMPARAISON · FIN DE SÉANCE</p>
-        <p>Choisis une seule évaluation. La séance sera enregistrée puis refermée.</p>
+        <p>Choisis une seule évaluation. « À reprendre » revient immédiatement ; « En consolidation » espace progressivement les révisions ; « Solide » commence avec un intervalle plus long.</p>
         <div><button type="button" onClick={() => assess('nouveau')}>À reprendre</button><button type="button" onClick={() => assess('consolidation')}>En consolidation</button><button type="button" onClick={() => assess('solide')}>Solide</button></div>
         <small>{active.reviews} révision{active.reviews > 1 ? 's' : ''} enregistrée{active.reviews > 1 ? 's' : ''} avant cette séance</small>
       </div>
@@ -118,7 +140,7 @@ export function QuranMemorization({ supportName, targets, onChange, onOpenSource
       <p className="eyebrow">ESPACE QOUR’ĀN</p>
       <h1>{supportName}</h1>
       <p>Prépare des passages à mémoriser en gardant le document importé comme source visuelle de référence. Sirāfiq suit l’effort et les révisions sans reconstruire le texte arabe.</p>
-      <div className="quran-stats"><span><strong>{totals.all}</strong> passages</span><span><strong>{totals.consolidation}</strong> en consolidation</span><span><strong>{totals.solide}</strong> solides</span></div>
+      <div className="quran-stats"><span><strong>{totals.all}</strong> passages</span><span><strong>{totals.due}</strong> à revoir</span><span><strong>{totals.consolidation}</strong> en consolidation</span><span><strong>{totals.solide}</strong> solides</span></div>
     </header>
     <section className="quran-create">
       <h2>Nouveau passage</h2>
@@ -131,8 +153,8 @@ export function QuranMemorization({ supportName, targets, onChange, onOpenSource
     </section>
     <section className="quran-list">
       <div className="quran-list-head"><div><p className="eyebrow">PARCOURS</p><h2>Mes passages</h2></div><strong>{targets.length}</strong></div>
-      {targets.length === 0 ? <div className="quran-empty"><strong>Aucun passage préparé</strong><p>Ajoute un premier repère puis travaille toujours à partir du support original.</p></div> : <div className="quran-grid">{targets.map(target => <article key={target.id} className="quran-card">
-        <div><span>{statusLabel[target.status]}</span><h3>{target.label}</h3><p>{target.page ? `Page ${target.page}` : 'Page non précisée'} · {target.reviews} révision{target.reviews > 1 ? 's' : ''}</p></div>
+      {targets.length === 0 ? <div className="quran-empty"><strong>Aucun passage préparé</strong><p>Ajoute un premier repère puis travaille toujours à partir du support original.</p></div> : <div className="quran-grid">{orderedTargets.map(target => <article key={target.id} className="quran-card">
+        <div><span>{statusLabel[target.status]}</span><h3>{target.label}</h3><p>{target.page ? `Page ${target.page}` : 'Page non précisée'} · {target.reviews} révision{target.reviews > 1 ? 's' : ''} · {reviewLabel(target)}</p></div>
         <div className="quran-actions"><button type="button" onClick={() => startTarget(target.id)}>Travailler</button><button type="button" onClick={() => remove(target.id)}>Supprimer</button></div>
       </article>)}</div>}
     </section>
