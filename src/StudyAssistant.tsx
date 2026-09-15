@@ -230,7 +230,7 @@ export function StudyAssistant({ supportId, supportName, onBack }: Props) {
             <strong>Contexte prêt</strong>
             <span>{Math.round(context.text.length / 1000)} k caractères{context.pagesRead ? ` · ${context.pagesRead} page${context.pagesRead > 1 ? 's' : ''} parcourue${context.pagesRead > 1 ? 's' : ''}` : ''}</span>
           </div>
-          {context.truncated && <p className="ai-warning">Le support est volumineux : cette version envoie une portion limitée du texte. Une question, une carte mémoire, une carte mentale ou un passage portant sur une partie non incluse peut donc manquer de contexte.</p>}
+          {context.truncated && <p className="ai-warning">Le support est volumineux : Sirāfiq échantillonne plusieurs zones réparties dans le document tout en respectant une limite de contexte. Une partie non échantillonnée peut donc manquer pour une question ou une génération très ciblée.</p>}
 
           <label className="ai-token">Code d’accès IA
             <input type="password" autoComplete="off" value={accessToken} onChange={event => saveAccessToken(event.target.value)} placeholder="Code configuré côté Cloudflare" />
