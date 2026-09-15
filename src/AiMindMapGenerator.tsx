@@ -1,5 +1,5 @@
 import { type ReactNode, useMemo, useState } from 'react';
-import type { MindNode } from './MindMap';
+import type { MindMapView, MindNode } from './MindMap';
 import { getSupportMetadata, patchSupportMetadata } from './storage';
 
 type GeneratedMindNode = {
@@ -11,6 +11,7 @@ type GeneratedMindNode = {
 type StoredSupport = {
   id: string;
   mindMap?: MindNode[];
+  mindMapView?: MindMapView;
   [key: string]: unknown;
 };
 
@@ -97,9 +98,9 @@ export function AiMindMapGenerator({ supportId, supportName, context, accessToke
       }
 
       const mindMap = toMindNodes(generated);
-      await patchSupportMetadata<StoredSupport>(supportId, { mindMap });
+      await patchSupportMetadata<StoredSupport>(supportId, { mindMap, mindMapView: undefined });
       setSaved(true);
-      setStatus(`Carte mentale enregistrée avec ${mindMap.length} nœuds. Reviens à l’espace d’étude pour l’ouvrir.`);
+      setStatus(`Carte mentale enregistrée avec ${mindMap.length} nœuds. Son cadrage sera recalculé à la prochaine ouverture.`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Impossible d’enregistrer la carte mentale.');
     } finally {
