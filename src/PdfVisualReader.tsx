@@ -72,6 +72,7 @@ export function PdfVisualReader({ name, source, initialPage = 1, initialZoom = 1
   const [document, setDocument] = useState<pdfjs.PDFDocumentProxy | null>(null);
   const [pageNumber, setPageNumber] = useState(Math.max(1, startingPage));
   const [zoom, setZoom] = useState(Math.min(1.8, Math.max(.75, initialZoom)));
+  const [hostWidth, setHostWidth] = useState(0);
   const [jumpValue, setJumpValue] = useState(String(Math.max(1, startingPage)));
   const [noteDraft, setNoteDraft] = useState('');
   const [error, setError] = useState('');
@@ -80,6 +81,46 @@ export function PdfVisualReader({ name, source, initialPage = 1, initialZoom = 1
   const cleanNotes = useMemo(() => notes.filter(note => Number.isInteger(note.page) && note.page > 0 && note.text.trim()).sort((a, b) => a.page - b.page), [notes]);
   const isBookmarked = cleanBookmarks.includes(pageNumber);
   const currentNote = cleanNotes.find(note => note.page === pageNumber);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    let frame = 0;
+
+    const commitWidth = (width: number) => {
+      const nextWidth = Math.max(1, Math.round(width));
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        setHostWidth(current => Math.abs(current - nextWidth) >= 1 ? nextWidth : current);
+      });
+    };
+
+    const measureFallback = () => {
+      const rect = host.getBoundingClientRect();
+      const style = window.getComputedStyle(host);
+      const horizontalPadding = (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
+      commitWidth(Math.max(1, rect.width - horizontalPadding));
+    };
+
+    measureFallback();
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(entries => {
+        const width = entries[0]?.contentRect.width;
+        if (width) commitWidth(width);
+      });
+      observer.observe(host);
+      return () => {
+        observer.disconnect();
+        window.cancelAnimationFrame(frame);
+      };
+    }
+
+    window.addEventListener('resize', measureFallback);
+    return () => {
+      window.removeEventListener('resize', measureFallback);
+      window.cancelAnimationFrame(frame);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -139,7 +180,8 @@ export function PdfVisualReader({ name, source, initialPage = 1, initialZoom = 1
         const page = await document.getPage(pageNumber);
         if (cancelled) return;
         const base = page.getViewport({ scale: 1 });
-        const availableWidth = Math.max(280, Math.min(hostRef.current?.clientWidth ?? window.innerWidth - 24, 980));
+        const measuredWidth = hostWidth || hostRef.current?.clientWidth || window.innerWidth - 24;
+        const availableWidth = Math.max(280, Math.min(measuredWidth, 980));
         const fitScale = availableWidth / base.width;
         const viewport = page.getViewport({ scale: fitScale * zoom });
         const outputScale = Math.min(window.devicePixelRatio || 1, 2);
@@ -162,7 +204,7 @@ export function PdfVisualReader({ name, source, initialPage = 1, initialZoom = 1
     };
     void render();
     return () => { cancelled = true; task?.cancel(); };
-  }, [document, pageNumber, zoom, onProgress, referenceRequest.active]);
+  }, [document, pageNumber, zoom, hostWidth, onProgress, referenceRequest.active]);
 
   const pages = document?.numPages ?? 0;
   const goTo = (page: number) => setPageNumber(Math.min(Math.max(1, page), Math.max(1, pages)));
