@@ -54,9 +54,20 @@ function shouldGuard(request) {
   return pathname.startsWith('/api/ai/');
 }
 
+async function delegate(request, env, ctx) {
+  try {
+    return await app.fetch(request, env, ctx);
+  } catch (error) {
+    const pathname = new URL(request.url).pathname;
+    if (!pathname.startsWith('/api/')) throw error;
+    console.error('Sirafiq API request failed', error instanceof Error ? error.name : 'UnknownError');
+    return json({ error: 'Le service IA a rencontré une erreur réseau inattendue. Réessaie dans un instant.' }, 502);
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
-    if (!shouldGuard(request)) return app.fetch(request, env, ctx);
+    if (!shouldGuard(request)) return delegate(request, env, ctx);
 
     const bounded = await readBoundedBody(request);
     if (!bounded.ok) {
@@ -73,6 +84,6 @@ export default {
       body: bounded.bytes,
       redirect: request.redirect,
     });
-    return app.fetch(forwarded, env, ctx);
+    return delegate(forwarded, env, ctx);
   },
 };
