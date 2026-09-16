@@ -6,6 +6,16 @@
   "secrets": {
     "required": ["OPENAI_API_KEY", "SIRAFIQ_AI_ACCESS_TOKEN"]
   },
+  "ratelimits": [
+    {
+      "name": "AI_RATE_LIMITER",
+      "namespace_id": "746173946",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    }
+  ],
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
