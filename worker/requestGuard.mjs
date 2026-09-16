@@ -54,6 +54,20 @@ function shouldGuard(request) {
   return pathname.startsWith('/api/ai/');
 }
 
+export async function enforceAiRateLimit(request, env) {
+  if (!env?.AI_RATE_LIMITER || typeof env.AI_RATE_LIMITER.limit !== 'function') return null;
+  const client = request.headers.get('cf-connecting-ip')?.trim() || 'unknown-client';
+  try {
+    const result = await env.AI_RATE_LIMITER.limit({ key: `ai:${client}` });
+    if (!result?.success) {
+      return json({ error: 'Trop de requêtes IA en peu de temps. Attends un instant puis réessaie.' }, 429);
+    }
+  } catch (error) {
+    console.error('Sirafiq AI rate limiter failed', error instanceof Error ? error.name : 'UnknownError');
+  }
+  return null;
+}
+
 async function delegate(request, env, ctx) {
   try {
     return await app.fetch(request, env, ctx);
@@ -68,6 +82,9 @@ async function delegate(request, env, ctx) {
 export default {
   async fetch(request, env, ctx) {
     if (!shouldGuard(request)) return delegate(request, env, ctx);
+
+    const rateLimited = await enforceAiRateLimit(request, env);
+    if (rateLimited) return rateLimited;
 
     const bounded = await readBoundedBody(request);
     if (!bounded.ok) {
