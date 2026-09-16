@@ -2,7 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "sirafiq-next",
   "compatibility_date": "2026-08-27",
-  "main": "worker/index.mjs",
+  "main": "worker/requestGuard.mjs",
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
