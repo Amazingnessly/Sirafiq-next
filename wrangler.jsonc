@@ -3,6 +3,9 @@
   "name": "sirafiq-next",
   "compatibility_date": "2026-08-27",
   "main": "worker/requestGuard.mjs",
+  "secrets": {
+    "required": ["OPENAI_API_KEY", "SIRAFIQ_AI_ACCESS_TOKEN"]
+  },
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
