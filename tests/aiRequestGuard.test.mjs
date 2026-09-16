@@ -48,6 +48,24 @@ test('le Worker déployé renvoie 413 avant la logique IA pour un corps trop gra
   assert.deepEqual(await response.json(), { error: 'Requête trop volumineuse.' });
 });
 
+test('un petit corps est retransmis au Worker IA après reconstruction', async () => {
+  const request = new Request('https://sirafiq.test/api/ai/ask', {
+    method: 'POST',
+    headers: {
+      origin: 'https://sirafiq.test',
+      'x-sirafiq-ai-token': 'access',
+      'content-type': 'application/json',
+    },
+    body: '{json invalide',
+  });
+  const response = await guardedWorker.fetch(request, {
+    OPENAI_API_KEY: 'secret',
+    SIRAFIQ_AI_ACCESS_TOKEN: 'access',
+  }, {});
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), { error: 'JSON invalide.' });
+});
+
 test('les routes GET restent déléguées au Worker IA existant', async () => {
   const request = new Request('https://sirafiq.test/api/ai/status');
   const response = await guardedWorker.fetch(request, {}, {});
