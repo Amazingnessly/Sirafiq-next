@@ -78,6 +78,11 @@ export function TextMemorization({ supportName, passages, onChange, onBack }: Pr
     setRecall('');
   };
 
+  const leaveSession = () => {
+    if (recall.trim() && !window.confirm('Quitter cette séance ? Ta restitution en cours n’est pas enregistrée et sera perdue.')) return;
+    finishSession();
+  };
+
   const rate = (success: boolean) => {
     if (!active || ratingLockedRef.current) return;
     ratingLockedRef.current = true;
@@ -101,7 +106,7 @@ export function TextMemorization({ supportName, passages, onChange, onBack }: Pr
   };
 
   if (phase !== 'manage' && active) return <main className="shell memory-shell">
-    <button className="back" type="button" onClick={finishSession}>← Mémorisation</button>
+    <button className="back" type="button" onClick={leaveSession}>← Mémorisation</button>
     <header className="memory-header"><p className="eyebrow">MÉMORISATION ACTIVE · {supportName}</p><h1>{active.title}</h1></header>
     {phase === 'read' && <section className="memory-stage"><span>1 · Lire attentivement</span><div className="memory-source">{active.text}</div><button className="primary" type="button" onClick={() => setPhase('recall')}>Masquer et restituer</button></section>}
     {phase === 'recall' && <section className="memory-stage"><span>2 · Restituer sans regarder</span><textarea value={recall} onChange={event => setRecall(event.target.value)} placeholder="Écris ici ce que tu restitues de mémoire…" autoFocus /><button className="primary" type="button" onClick={() => setPhase('check')}>Comparer avec l’original</button></section>}
