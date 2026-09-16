@@ -37,6 +37,7 @@ function WatchLaterEntry() {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<WatchItem[]>(initialRef.current.items);
   const [storageWarning, setStorageWarning] = useState(initialRef.current.error);
+  const [storageLocked, setStorageLocked] = useState(!initialRef.current.writable);
   const dirtyRef = useRef(false);
   const storageWritableRef = useRef(initialRef.current.writable);
 
@@ -71,11 +72,13 @@ function WatchLaterEntry() {
     const loaded = loadItems();
     if (!loaded.writable) {
       storageWritableRef.current = false;
+      setStorageLocked(true);
       setStorageWarning(loaded.error);
       return;
     }
 
     storageWritableRef.current = true;
+    setStorageLocked(false);
     if (dirtyRef.current) {
       persist(items);
       return;
@@ -104,7 +107,7 @@ function WatchLaterEntry() {
     <button className="watch-launcher" type="button" onClick={() => { sync(); setOpen(true); }} aria-label={`Ouvrir la file de visionnage, ${pending} élément${pending > 1 ? 's' : ''} en attente`}>
       <span>À voir</span><strong>{pending}</strong>
     </button>
-    {open && <WatchLater items={items} onChange={changeItems} storageWarning={storageWarning} onClose={() => { setOpen(false); sync(); }} />}
+    {open && <WatchLater items={items} onChange={changeItems} storageWarning={storageWarning} storageLocked={storageLocked} onClose={() => { setOpen(false); sync(); }} />}
   </>;
 }
 
