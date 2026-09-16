@@ -2,23 +2,32 @@ import React, { useCallback, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ErrorBoundary } from './ErrorBoundary';
 import { WatchItem, WatchLater } from './WatchLater';
+import { validateWatchItems } from './watchLaterData.mjs';
 import './watch-later.css';
 
 const STORAGE_KEY = 'sirafiq-watch-later-v1';
 const STORAGE_WARNING = 'Impossible d’enregistrer la file « À voir » dans le stockage local. Les modifications restent visibles pour cette session, mais pourraient être perdues si tu fermes la page.';
+const STORAGE_INVALID_WARNING = 'La file « À voir » enregistrée localement est illisible ou contient des données invalides. Elle n’a pas été écrasée et les modifications sont temporairement bloquées pour protéger les données existantes.';
+const STORAGE_READ_WARNING = 'Impossible de lire la file « À voir » depuis le stockage local. Les données existantes n’ont pas été écrasées et les modifications sont temporairement bloquées.';
 
-type LoadResult = { items: WatchItem[]; error: string };
+type LoadResult = { items: WatchItem[]; error: string; writable: boolean };
 
 function loadItems(): LoadResult {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { items: [], error: '' };
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed)
-      ? { items: parsed, error: '' }
-      : { items: [], error: 'La file « À voir » enregistrée localement est illisible. Elle n’a pas été écrasée.' };
+    if (!raw) return { items: [], error: '', writable: true };
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return { items: [], error: STORAGE_INVALID_WARNING, writable: false };
+    }
+    const validated = validateWatchItems(parsed);
+    return validated.ok
+      ? { items: validated.items as WatchItem[], error: '', writable: true }
+      : { items: [], error: STORAGE_INVALID_WARNING, writable: false };
   } catch {
-    return { items: [], error: 'Impossible de lire la file « À voir » depuis le stockage local. Les données existantes n’ont pas été écrasées.' };
+    return { items: [], error: STORAGE_READ_WARNING, writable: false };
   }
 }
 
@@ -28,9 +37,15 @@ function WatchLaterEntry() {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<WatchItem[]>(initialRef.current.items);
   const [storageWarning, setStorageWarning] = useState(initialRef.current.error);
+  const [storageLocked, setStorageLocked] = useState(!initialRef.current.writable);
   const dirtyRef = useRef(false);
+  const storageWritableRef = useRef(initialRef.current.writable);
 
   const persist = useCallback((nextItems: WatchItem[]) => {
+    if (!storageWritableRef.current) {
+      setStorageWarning(current => current || STORAGE_READ_WARNING);
+      return false;
+    }
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(nextItems));
       dirtyRef.current = false;
@@ -44,19 +59,28 @@ function WatchLaterEntry() {
   }, []);
 
   const changeItems = useCallback((nextItems: WatchItem[]) => {
+    if (!storageWritableRef.current) {
+      setStorageWarning(current => current || STORAGE_READ_WARNING);
+      return;
+    }
     dirtyRef.current = true;
     setItems(nextItems);
     persist(nextItems);
   }, [persist]);
 
   const sync = useCallback(() => {
-    if (dirtyRef.current) {
-      persist(items);
+    const loaded = loadItems();
+    if (!loaded.writable) {
+      storageWritableRef.current = false;
+      setStorageLocked(true);
+      setStorageWarning(loaded.error);
       return;
     }
-    const loaded = loadItems();
-    if (loaded.error) {
-      setStorageWarning(loaded.error);
+
+    storageWritableRef.current = true;
+    setStorageLocked(false);
+    if (dirtyRef.current) {
+      persist(items);
       return;
     }
     setItems(loaded.items);
@@ -83,7 +107,7 @@ function WatchLaterEntry() {
     <button className="watch-launcher" type="button" onClick={() => { sync(); setOpen(true); }} aria-label={`Ouvrir la file de visionnage, ${pending} élément${pending > 1 ? 's' : ''} en attente`}>
       <span>À voir</span><strong>{pending}</strong>
     </button>
-    {open && <WatchLater items={items} onChange={changeItems} storageWarning={storageWarning} onClose={() => { setOpen(false); sync(); }} />}
+    {open && <WatchLater items={items} onChange={changeItems} storageWarning={storageWarning} storageLocked={storageLocked} onClose={() => { setOpen(false); sync(); }} />}
   </>;
 }
 

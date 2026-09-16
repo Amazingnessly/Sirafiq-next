@@ -1,4 +1,5 @@
 import { FormEvent, useMemo, useState } from 'react';
+import { normalizeWatchUrl } from './watchLaterData.mjs';
 
 export type WatchItem = {
   id: string;
@@ -17,6 +18,7 @@ type Props = {
   onChange: (items: WatchItem[]) => void;
   onClose: () => void;
   storageWarning?: string;
+  storageLocked?: boolean;
 };
 
 const statuses: WatchItem['status'][] = ['À voir', 'En cours', 'Terminé'];
@@ -28,7 +30,7 @@ function priorityOf(item: WatchItem): NonNullable<WatchItem['priority']> {
   return item.priority ?? 'Bientôt';
 }
 
-export function WatchLater({ items, onChange, onClose, storageWarning = '' }: Props) {
+export function WatchLater({ items, onChange, onClose, storageWarning = '', storageLocked = false }: Props) {
   const [title, setTitle] = useState('');
   const [url, setUrl] = useState('');
   const [collection, setCollection] = useState('Général');
@@ -63,41 +65,45 @@ export function WatchLater({ items, onChange, onClose, storageWarning = '' }: Pr
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    if (storageLocked) return;
     const cleanTitle = title.trim();
-    const cleanUrl = url.trim();
+    const normalizedUrl = normalizeWatchUrl(url);
     const cleanCollection = collection.trim() || 'Général';
-    if (!cleanTitle || !cleanUrl) return;
-    try {
-      const parsed = new URL(cleanUrl);
-      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('invalid');
-    } catch {
+    if (!cleanTitle || !url.trim()) return;
+    if (!normalizedUrl) {
       setError('Ajoute une adresse web complète commençant par http:// ou https://.');
       return;
     }
-    if (items.some(item => item.url === cleanUrl)) {
+    if (items.some(item => normalizeWatchUrl(item.url) === normalizedUrl)) {
       setError('Ce lien est déjà enregistré.');
       return;
     }
-    onChange([{ id: crypto.randomUUID(), title: cleanTitle, url: cleanUrl, collection: cleanCollection, status: 'À voir', priority, addedAt: new Date().toISOString() }, ...items]);
+    onChange([{ id: crypto.randomUUID(), title: cleanTitle, url: normalizedUrl, collection: cleanCollection, status: 'À voir', priority, addedAt: new Date().toISOString() }, ...items]);
     setTitle('');
     setUrl('');
     setCollection(cleanCollection);
     setError('');
   };
 
-  const patch = (id: string, next: Partial<WatchItem>) => onChange(items.map(item => item.id === id ? { ...item, ...next } : item));
+  const patch = (id: string, next: Partial<WatchItem>) => {
+    if (storageLocked) return;
+    onChange(items.map(item => item.id === id ? { ...item, ...next } : item));
+  };
   const saveResumeNote = (item: WatchItem, value: string) => {
+    if (storageLocked) return;
     const resumeNote = value.trim();
     if ((item.resumeNote ?? '') === resumeNote) return;
     patch(item.id, { resumeNote: resumeNote || undefined });
   };
   const openItem = (item: WatchItem) => {
+    if (storageLocked) return;
     patch(item.id, {
       lastOpenedAt: new Date().toISOString(),
       ...(item.status === 'À voir' ? { status: 'En cours' as const } : {}),
     });
   };
   const remove = (id: string) => {
+    if (storageLocked) return;
     const item = items.find(entry => entry.id === id);
     if (!item || !window.confirm(`Supprimer définitivement « ${item.title} » de la file À voir ?`)) return;
     onChange(items.filter(entry => entry.id !== id));
@@ -111,12 +117,12 @@ export function WatchLater({ items, onChange, onClose, storageWarning = '' }: Pr
       </header>
       {storageWarning && <p className="watch-error" role="alert">{storageWarning}</p>}
 
-      <form className="watch-form" onSubmit={submit}>
-        <label>Titre<input value={title} onChange={event => setTitle(event.target.value)} placeholder="Nom de la vidéo ou playlist" /></label>
-        <label>Lien<input type="url" value={url} onChange={event => setUrl(event.target.value)} placeholder="https://…" /></label>
-        <label>Collection<input value={collection} onChange={event => setCollection(event.target.value)} list="watch-collections" placeholder="Cours, conférence…" /><datalist id="watch-collections">{collections.map(item => <option key={item} value={item} />)}</datalist></label>
-        <label>Priorité<select value={priority} onChange={event => setPriority(event.target.value as NonNullable<WatchItem['priority']>)}>{priorities.map(item => <option key={item}>{item}</option>)}</select></label>
-        <button className="primary" type="submit" disabled={!title.trim() || !url.trim()}>Ajouter</button>
+      <form className="watch-form" onSubmit={submit} aria-disabled={storageLocked}>
+        <label>Titre<input value={title} onChange={event => setTitle(event.target.value)} maxLength={300} disabled={storageLocked} placeholder="Nom de la vidéo ou playlist" /></label>
+        <label>Lien<input type="url" value={url} onChange={event => setUrl(event.target.value)} maxLength={4000} disabled={storageLocked} placeholder="https://…" /></label>
+        <label>Collection<input value={collection} onChange={event => setCollection(event.target.value)} maxLength={120} disabled={storageLocked} list="watch-collections" placeholder="Cours, conférence…" /><datalist id="watch-collections">{collections.map(item => <option key={item} value={item} />)}</datalist></label>
+        <label>Priorité<select value={priority} disabled={storageLocked} onChange={event => setPriority(event.target.value as NonNullable<WatchItem['priority']>)}>{priorities.map(item => <option key={item}>{item}</option>)}</select></label>
+        <button className="primary" type="submit" disabled={storageLocked || !title.trim() || !url.trim()}>Ajouter</button>
       </form>
       {error && <p className="watch-error" role="alert">{error}</p>}
 
@@ -134,13 +140,13 @@ export function WatchLater({ items, onChange, onClose, storageWarning = '' }: Pr
           <span>{item.collection} · {priorityOf(item)}</span>
           <h2>{item.title}</h2>
           <small>{item.status === 'En cours' ? 'Reprendre' : item.status} · ajouté le {new Date(item.addedAt).toLocaleDateString('fr-FR')}{item.lastOpenedAt ? ` · ouvert le ${new Date(item.lastOpenedAt).toLocaleDateString('fr-FR')}` : ''}</small>
-          <label className="watch-resume">Repère de reprise<input key={`${item.id}:${item.resumeNote ?? ''}`} defaultValue={item.resumeNote ?? ''} onBlur={event => saveResumeNote(item, event.currentTarget.value)} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }} placeholder="18:40, épisode 6, chapitre…" /></label>
+          <label className="watch-resume">Repère de reprise<input key={`${item.id}:${item.resumeNote ?? ''}`} defaultValue={item.resumeNote ?? ''} maxLength={300} disabled={storageLocked} onBlur={event => saveResumeNote(item, event.currentTarget.value)} onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }} placeholder="18:40, épisode 6, chapitre…" /></label>
         </div>
         <div className="watch-actions">
-          <select value={priorityOf(item)} onChange={event => patch(item.id, { priority: event.target.value as NonNullable<WatchItem['priority']> })} aria-label={`Priorité de ${item.title}`}>{priorities.map(itemPriority => <option key={itemPriority}>{itemPriority}</option>)}</select>
-          <select value={item.status} onChange={event => patch(item.id, { status: event.target.value as WatchItem['status'] })} aria-label={`État de ${item.title}`}>{statuses.map(status => <option key={status}>{status}</option>)}</select>
+          <select value={priorityOf(item)} disabled={storageLocked} onChange={event => patch(item.id, { priority: event.target.value as NonNullable<WatchItem['priority']> })} aria-label={`Priorité de ${item.title}`}>{priorities.map(itemPriority => <option key={itemPriority}>{itemPriority}</option>)}</select>
+          <select value={item.status} disabled={storageLocked} onChange={event => patch(item.id, { status: event.target.value as WatchItem['status'] })} aria-label={`État de ${item.title}`}>{statuses.map(status => <option key={status}>{status}</option>)}</select>
           <a href={item.url} target="_blank" rel="noreferrer" onClick={() => openItem(item)}>{item.status === 'En cours' ? 'Reprendre' : 'Regarder'}</a>
-          <button type="button" onClick={() => remove(item.id)}>Supprimer</button>
+          <button type="button" disabled={storageLocked} onClick={() => remove(item.id)}>Supprimer</button>
         </div>
       </article>)}</div>}
     </div>
