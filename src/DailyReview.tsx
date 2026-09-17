@@ -20,6 +20,14 @@ type ReviewPassage = { kind: 'passage'; supportId: string; supportName: string; 
 type ReviewQuran = { kind: 'quran'; supportId: string; supportName: string; target: QuranTarget };
 type ReviewItem = ReviewCard | ReviewPassage | ReviewQuran;
 type PassagePhase = 'read' | 'recall' | 'check';
+type SessionStats = {
+  evaluations: number;
+  consolidated: number;
+  retries: number;
+  flashcard: number;
+  passage: number;
+  quran: number;
+};
 
 type Props = { onClose: () => void; onCountChange?: (count: number) => void };
 
@@ -52,6 +60,7 @@ export function DailyReview({ onClose, onCountChange }: Props) {
   const [index, setIndex] = useState(0);
   const [status, setStatus] = useState('Chargement des révisions…');
   const [saving, setSaving] = useState(false);
+  const [sessionStats, setSessionStats] = useState<SessionStats>({ evaluations: 0, consolidated: 0, retries: 0, flashcard: 0, passage: 0, quran: 0 });
 
   useEffect(() => {
     void loadSupports().then(items => { setSupports(items); setStatus(''); }).catch(() => setStatus('Impossible de charger les révisions locales.'));
@@ -64,6 +73,7 @@ export function DailyReview({ onClose, onCountChange }: Props) {
   ]), [supports]);
   const current = queue[index] ?? null;
   const currentKey = current ? `${current.kind}:${reviewItemId(current)}` : '';
+  const hasSessionSummary = !current && sessionStats.evaluations > 0;
 
   useEffect(() => { onCountChange?.(queue.length); }, [queue.length, onCountChange]);
   useEffect(() => { if (index >= queue.length && queue.length) setIndex(queue.length - 1); }, [index, queue.length]);
@@ -114,6 +124,14 @@ export function DailyReview({ onClose, onCountChange }: Props) {
         setStatus('Cet élément de révision n’existe plus dans ce support.');
         return;
       }
+      setSessionStats(stats => ({
+        ...stats,
+        evaluations: stats.evaluations + 1,
+        consolidated: stats.consolidated + (success ? 1 : 0),
+        retries: stats.retries + (success ? 0 : 1),
+        flashcard: stats.flashcard + (current.kind === 'flashcard' ? 1 : 0),
+        passage: stats.passage + (current.kind === 'passage' ? 1 : 0),
+      }));
       if (!success && queueLengthBeforeSave > 1) setIndex(currentIndex => (currentIndex + 1) % queueLengthBeforeSave);
       setRevealed(false);
       setPassagePhase('read');
@@ -155,6 +173,14 @@ export function DailyReview({ onClose, onCountChange }: Props) {
         setStatus('Ce passage Qour’ān n’existe plus dans ce support.');
         return;
       }
+      const consolidated = assessment !== 'nouveau';
+      setSessionStats(stats => ({
+        ...stats,
+        evaluations: stats.evaluations + 1,
+        consolidated: stats.consolidated + (consolidated ? 1 : 0),
+        retries: stats.retries + (consolidated ? 0 : 1),
+        quran: stats.quran + 1,
+      }));
       if (assessment === 'nouveau' && queueLengthBeforeSave > 1) setIndex(currentIndex => (currentIndex + 1) % queueLengthBeforeSave);
       setStatus('');
     } catch {
@@ -168,7 +194,18 @@ export function DailyReview({ onClose, onCountChange }: Props) {
     <div className="daily-shell">
       <header className="daily-header"><div><p className="eyebrow">SIRĀFIQ · RÉVISIONS</p><h1>Révisions du jour</h1><p>Les cartes, passages de mémorisation et repères Qour’ān arrivés à échéance, réunis au même endroit.</p></div><button type="button" onClick={onClose}>Fermer</button></header>
       {status && <p className="daily-status" role="status">{status}</p>}
-      {!current ? <div className="daily-empty"><strong>Tout est à jour</strong><p>Aucune révision n’est due maintenant.</p></div> : <div className="daily-review">
+      {!current ? hasSessionSummary ? <section className="daily-summary" aria-label="Bilan de la séance">
+        <p className="eyebrow">SÉANCE TERMINÉE</p>
+        <h2>Les révisions dues sont terminées</h2>
+        <p>Aucune révision n’est encore due immédiatement. Voici le bilan de cette séance.</p>
+        <div className="daily-summary-stats">
+          <article><strong>{sessionStats.consolidated}</strong><span>élément{sessionStats.consolidated > 1 ? 's' : ''} consolidé{sessionStats.consolidated > 1 ? 's' : ''}</span></article>
+          <article><strong>{sessionStats.evaluations}</strong><span>évaluation{sessionStats.evaluations > 1 ? 's' : ''} effectuée{sessionStats.evaluations > 1 ? 's' : ''}</span></article>
+          <article><strong>{sessionStats.retries}</strong><span>reprise{sessionStats.retries > 1 ? 's' : ''} nécessaire{sessionStats.retries > 1 ? 's' : ''} pendant la séance</span></article>
+        </div>
+        <div className="daily-summary-types" aria-label="Répartition des évaluations"><span>Cartes · {sessionStats.flashcard}</span><span>Textes · {sessionStats.passage}</span><span>Qour’ān · {sessionStats.quran}</span></div>
+        <button className="primary" type="button" onClick={onClose}>Terminer la séance</button>
+      </section> : <div className="daily-empty"><strong>Tout est à jour</strong><p>Aucune révision n’est due maintenant.</p></div> : <div className="daily-review">
         <div className="daily-meta"><span>{current.supportName} · {current.kind === 'flashcard' ? 'Carte mémoire' : current.kind === 'passage' ? 'Passage texte' : 'Passage Qour’ān'}</span><strong>{index + 1} / {queue.length}</strong></div>
         {current.kind === 'flashcard' ? <>
           <article className="daily-card" onClick={() => !saving && setRevealed(true)}><small>Question</small><h2>{current.card.front}</h2>{revealed ? <div><small>Réponse</small><p>{current.card.back}</p></div> : <button type="button" disabled={saving} onClick={() => setRevealed(true)}>Afficher la réponse</button>}</article>
