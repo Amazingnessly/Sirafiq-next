@@ -2,6 +2,14 @@ import type { MultipartUploadRecord, ResourceVersionRecord } from '../data/db';
 import { sha256Hex } from './hash';
 import type { TransferProgress } from './sync';
 
+export function hasMatchingMultipartMetadata(
+  file: Pick<File, 'size'>,
+  version: Pick<ResourceVersionRecord, 'size'>,
+  session: Pick<MultipartUploadRecord, 'size'>,
+): boolean {
+  return file.size === version.size && file.size === session.size;
+}
+
 /**
  * A resumed multipart upload must never trust file metadata alone. Names and
  * modification dates can legitimately change when iPadOS re-saves or copies a
@@ -14,7 +22,7 @@ export async function verifyMultipartFileIdentity(
   session: MultipartUploadRecord,
   onProgress?: (progress: TransferProgress) => void,
 ): Promise<void> {
-  if (file.size !== version.size || file.size !== session.size) {
+  if (!hasMatchingMultipartMetadata(file, version, session)) {
     throw new Error('Le fichier sélectionné ne correspond pas au support à reprendre.');
   }
 
