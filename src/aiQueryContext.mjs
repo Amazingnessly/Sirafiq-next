@@ -2,7 +2,7 @@ const DEFAULT_MAX_CHARS = 32_000;
 const DEFAULT_CHUNK_CHARS = 2_600;
 
 const STOP_WORDS = new Set([
-  'afin','alors','apres','avec','avoir','aux','cela','ces','cet','cette','comme','dans','des','donc','elle','elles','entre','etre','faire','faut','ils','leur','leurs','mais','meme','nous','par','pas','plus','pour','sans','ses','son','sont','sous','sur','tous','tout','toute','toutes','une','vous',
+  'afin','alors','apres','avec','avoir','aux','cela','ces','cet','cette','comme','dans','des','donc','elle','elles','entre','est','etre','faire','faut','ils','les','leur','leurs','mais','meme','nous','par','pas','plus','pour','que','qui','sans','ses','son','sont','sous','sur','tous','tout','toute','toutes','une','vous',
   'comment','pourquoi','quel','quelle','quelles','quels','quoi','support','document','explique','expliquer','retenir','notion','notions','principal','principale','principales','principaux','point','points','essentiel','essentiels',
 ]);
 
