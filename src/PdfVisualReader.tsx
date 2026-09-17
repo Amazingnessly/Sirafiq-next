@@ -139,6 +139,7 @@ export function PdfVisualReader({ name, source, initialPage = 1, initialZoom = 1
       rangeChunkSize: 256 * 1024,
       disableStream: true,
       disableAutoFetch: true,
+      isEvalSupported: false,
     });
 
     setDocument(null);
