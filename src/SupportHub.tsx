@@ -45,6 +45,7 @@ function extensionOf(name: string) {
 
 export function SupportHub({ id, name, category, canRead, flashcards, recallAttempts, pdfBookmarks = 0, pdfNotes = 0, onRead, onFlashcards, onRecall, onBack }: Props) {
   const [mindMode, setMindMode] = useState(false);
+  const [mindFocusMode, setMindFocusMode] = useState(false);
   const [memoryMode, setMemoryMode] = useState(false);
   const [quranMode, setQuranMode] = useState(false);
   const [aiMode, setAiMode] = useState(false);
@@ -88,6 +89,20 @@ export function SupportHub({ id, name, category, canRead, flashcards, recallAtte
     window.addEventListener(SUPPORT_METADATA_CHANGED_EVENT, onMetadataChanged);
     return () => window.removeEventListener(SUPPORT_METADATA_CHANGED_EVENT, onMetadataChanged);
   }, [id]);
+
+  useEffect(() => {
+    if (!mindFocusMode) return;
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMindFocusMode(false);
+    };
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [mindFocusMode]);
 
   const persist = (patch: StoredSupportPatch, successMessage: string) => {
     if (!storedSupport) {
@@ -165,7 +180,13 @@ export function SupportHub({ id, name, category, canRead, flashcards, recallAtte
   if (aiMode) return <StudyAssistant supportId={id} supportName={name} onBack={() => setAiMode(false)} />;
   if (quranMode) return <><QuranMemorization supportName={name} targets={quranTargets} onChange={changeQuranTargets} onOpenSource={openQuranReference} onBack={() => setQuranMode(false)} />{saveStatus && <div className="mind-save-status" role="status">{saveStatus}</div>}</>;
   if (memoryMode) return <><TextMemorization supportName={name} passages={memoryPassages} onChange={changeMemoryPassages} onBack={() => setMemoryMode(false)} />{saveStatus && <div className="mind-save-status" role="status">{saveStatus}</div>}</>;
-  if (mindMode) return <><MindMap supportName={name} nodes={mindNodes} initialView={mindMapView} onChange={changeMindMap} onViewChange={changeMindMapView} onBack={() => setMindMode(false)} />{saveStatus && <div className="mind-save-status" role="status">{saveStatus}</div>}</>;
+  if (mindMode) return <div className={`mind-focus-frame${mindFocusMode ? ' active' : ''}`}>
+    <button className="mind-focus-toggle" type="button" onClick={() => setMindFocusMode(current => !current)} aria-pressed={mindFocusMode}>
+      {mindFocusMode ? 'Quitter le mode concentration' : 'Agrandir la carte'}
+    </button>
+    <MindMap supportName={name} nodes={mindNodes} initialView={mindMapView} onChange={changeMindMap} onViewChange={changeMindMapView} onBack={() => { setMindFocusMode(false); setMindMode(false); }} />
+    {saveStatus && <div className="mind-save-status" role="status">{saveStatus}</div>}
+  </div>;
 
   const isQuranSupport = category === 'Qour’ān';
   const canUseAi = ['pdf', 'docx', 'txt', 'md'].includes(extensionOf(name));
