@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import type { Flashcard } from './Flashcards';
 import { AiMemoryPassageGenerator } from './AiMemoryPassageGenerator';
 import { AiMindMapGenerator } from './AiMindMapGenerator';
+import { AiPracticeQuiz } from './AiPracticeQuiz';
 import { loadAiContext, type AiContext } from './aiContext';
 import { selectQueryContext } from './aiQueryContext.mjs';
 import { mutateSupportMetadata } from './storage';
@@ -255,6 +256,8 @@ export function StudyAssistant({ supportId, supportName, onBack }: Props) {
           {asking ? <p>Réflexion en cours…</p> : answer ? <div className="ai-answer">{answer}</div> : <div className="ai-empty-answer"><strong>Aucune question envoyée</strong><p>Choisis une suggestion ou écris une question précise sur le support.</p></div>}
         </section>
       </div>
+
+      <AiPracticeQuiz supportId={supportId} supportName={supportName} context={context.text} accessToken={accessToken} />
 
       <section className="ai-panel ai-flashcard-panel">
         <div className="ai-flashcard-head">
