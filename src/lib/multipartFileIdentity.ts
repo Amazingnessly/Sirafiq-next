@@ -2,21 +2,11 @@ import type { MultipartUploadRecord, ResourceVersionRecord } from '../data/db';
 import { sha256Hex } from './hash';
 import type { TransferProgress } from './sync';
 
-export function hasMatchingMultipartMetadata(
-  file: File,
-  version: ResourceVersionRecord,
-  session: MultipartUploadRecord,
-): boolean {
-  return file.size === version.size
-    && file.size === session.size
-    && file.name === session.fileName
-    && file.lastModified === session.lastModified;
-}
-
 /**
- * A resumed multipart upload must never trust file metadata alone. Two files can
- * have the same name, size and modification date while containing different
- * bytes. Re-hash the selected file before sending any remaining R2 parts.
+ * A resumed multipart upload must never trust file metadata alone. Names and
+ * modification dates can legitimately change when iPadOS re-saves or copies a
+ * file, while two different files can also share the same metadata. Size is a
+ * cheap early rejection; SHA-256 is the authoritative identity check.
  */
 export async function verifyMultipartFileIdentity(
   file: File,
@@ -24,7 +14,7 @@ export async function verifyMultipartFileIdentity(
   session: MultipartUploadRecord,
   onProgress?: (progress: TransferProgress) => void,
 ): Promise<void> {
-  if (!hasMatchingMultipartMetadata(file, version, session)) {
+  if (file.size !== version.size || file.size !== session.size) {
     throw new Error('Le fichier sélectionné ne correspond pas au support à reprendre.');
   }
 
