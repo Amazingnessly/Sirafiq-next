@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { App } from './app/App';
-import { installSyncTriggers } from './lib/sync';
+import { installResilientSyncTriggers } from './lib/resilientSyncTriggers';
 import './styles/index.css';
 import './styles/pdf-reader.css';
 import './styles/extraction-recovery.css';
@@ -19,7 +19,7 @@ const queryClient = new QueryClient({
 });
 
 function Runtime() {
-  useEffect(() => installSyncTriggers(), []);
+  useEffect(() => installResilientSyncTriggers(), []);
   return <App />;
 }
 
