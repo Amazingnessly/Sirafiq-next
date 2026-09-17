@@ -1,4 +1,5 @@
 import { installSyncTriggers, requestSync } from './sync';
+import { retryTransientSyncFailuresNow } from './retryableSync';
 
 /**
  * Extends the regular sync triggers for iPad/Safari lifecycle behaviour.
@@ -18,12 +19,18 @@ export function installResilientSyncTriggers(): () => void {
     if (navigator.onLine) void requestSync();
   };
 
+  const retryAfterReconnect = () => {
+    void retryTransientSyncFailuresNow();
+  };
+
   document.addEventListener('visibilitychange', syncWhenVisible);
   window.addEventListener('pageshow', syncAfterPageRestore);
+  window.addEventListener('online', retryAfterReconnect);
 
   return () => {
     uninstallBaseTriggers();
     document.removeEventListener('visibilitychange', syncWhenVisible);
     window.removeEventListener('pageshow', syncAfterPageRestore);
+    window.removeEventListener('online', retryAfterReconnect);
   };
 }
