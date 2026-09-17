@@ -21,6 +21,10 @@ export class IncrementalSha256 {
     0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
   ]);
   private readonly buffer = new Uint8Array(64);
+  // Reuse the message schedule for every 64-byte block. A ~100 MiB file has
+  // more than 1.6 million SHA blocks, so allocating a Uint32Array per block
+  // creates avoidable GC pressure on older iPads.
+  private readonly schedule = new Uint32Array(64);
   private bufferLength = 0;
   private bytesHashed = 0;
   private finished = false;
@@ -37,13 +41,15 @@ export class IncrementalSha256 {
       this.bufferLength += take;
       offset += take;
       if (this.bufferLength === 64) {
-        this.compress(this.buffer);
+        this.compress(this.buffer, 0);
         this.bufferLength = 0;
       }
     }
 
+    // Pass the original input plus an offset instead of creating a subarray
+    // view for every SHA block. This keeps the hot loop allocation-free.
     while (offset + 64 <= input.length) {
-      this.compress(input.subarray(offset, offset + 64));
+      this.compress(input, offset);
       offset += 64;
     }
 
@@ -65,7 +71,7 @@ export class IncrementalSha256 {
 
     if (this.bufferLength > 56) {
       this.buffer.fill(0, this.bufferLength, 64);
-      this.compress(this.buffer);
+      this.compress(this.buffer, 0);
       this.bufferLength = 0;
     }
 
@@ -73,15 +79,25 @@ export class IncrementalSha256 {
     const view = new DataView(this.buffer.buffer, this.buffer.byteOffset, this.buffer.byteLength);
     view.setUint32(56, Math.floor(bitLength / 0x100000000), false);
     view.setUint32(60, bitLength >>> 0, false);
-    this.compress(this.buffer);
+    this.compress(this.buffer, 0);
     this.bufferLength = 0;
     this.finished = true;
   }
 
-  private compress(block: Uint8Array): void {
-    const w = new Uint32Array(64);
-    const view = new DataView(block.buffer, block.byteOffset, block.byteLength);
-    for (let i = 0; i < 16; i += 1) w[i] = view.getUint32(i * 4, false);
+  private compress(block: Uint8Array, blockOffset: number): void {
+    const w = this.schedule;
+
+    // Read the sixteen input words directly. Avoiding a DataView allocation
+    // here matters because this function runs once per 64 bytes of input.
+    for (let i = 0; i < 16; i += 1) {
+      const j = blockOffset + i * 4;
+      w[i] = (
+        ((block[j] ?? 0) << 24)
+        | ((block[j + 1] ?? 0) << 16)
+        | ((block[j + 2] ?? 0) << 8)
+        | (block[j + 3] ?? 0)
+      ) >>> 0;
+    }
     for (let i = 16; i < 64; i += 1) {
       const a = w[i - 15] ?? 0;
       const b = w[i - 2] ?? 0;
