@@ -3,6 +3,7 @@ import type { Flashcard } from './Flashcards';
 import { AiMemoryPassageGenerator } from './AiMemoryPassageGenerator';
 import { AiMindMapGenerator } from './AiMindMapGenerator';
 import { loadAiContext, type AiContext } from './aiContext';
+import { selectQueryContext } from './aiQueryContext.mjs';
 import { mutateSupportMetadata } from './storage';
 import './study-assistant.css';
 
@@ -112,13 +113,14 @@ export function StudyAssistant({ supportId, supportName, onBack }: Props) {
     setError('');
     setAnswer('');
     try {
+      const selectedContext = selectQueryContext(context.text, cleanQuestion);
       const response = await fetch('/api/ai/ask', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
           'x-sirafiq-ai-token': accessToken.trim(),
         },
-        body: JSON.stringify({ supportName, context: context.text, question: cleanQuestion }),
+        body: JSON.stringify({ supportName, context: selectedContext.text, question: cleanQuestion }),
       });
       const data = await response.json().catch(() => null) as { answer?: string; error?: string } | null;
       if (!response.ok) throw new Error(data?.error || 'L’assistant IA n’a pas pu répondre.');
