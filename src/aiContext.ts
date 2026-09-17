@@ -75,6 +75,7 @@ async function extractPdfContext(support: StoredAiSupport): Promise<AiContext> {
     rangeChunkSize: 256 * 1024,
     disableStream: true,
     disableAutoFetch: true,
+    isEvalSupported: false,
   });
 
   try {
