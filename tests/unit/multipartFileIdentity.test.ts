@@ -34,19 +34,20 @@ function session(size: number): MultipartUploadRecord {
   };
 }
 
+function fileLike(size: number, name = 'original.pdf', lastModified = 1): File {
+  return { size, name, lastModified } as File;
+}
+
 describe('multipart file identity metadata gate', () => {
   it('accepts an identical copy even when its name and timestamp changed', () => {
-    const file = new File(['abcd'], 'copy.pdf', { lastModified: 999 });
-    expect(hasMatchingMultipartMetadata(file, version(4), session(4))).toBe(true);
+    expect(hasMatchingMultipartMetadata(fileLike(4, 'copy.pdf', 999), version(4), session(4))).toBe(true);
   });
 
   it('rejects a file whose size differs from the persisted version', () => {
-    const file = new File(['abc'], 'original.pdf', { lastModified: 1 });
-    expect(hasMatchingMultipartMetadata(file, version(4), session(4))).toBe(false);
+    expect(hasMatchingMultipartMetadata(fileLike(3), version(4), session(4))).toBe(false);
   });
 
   it('rejects inconsistent persisted multipart metadata', () => {
-    const file = new File(['abcd'], 'original.pdf', { lastModified: 1 });
-    expect(hasMatchingMultipartMetadata(file, version(4), session(5))).toBe(false);
+    expect(hasMatchingMultipartMetadata(fileLike(4), version(4), session(5))).toBe(false);
   });
 });
