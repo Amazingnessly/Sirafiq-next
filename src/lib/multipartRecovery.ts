@@ -7,6 +7,7 @@ import type {
 } from '../shared/contracts';
 import { MULTIPART_PART_BYTES } from '../shared/importPolicy';
 import { ApiRequestError, apiJson } from './api';
+import { verifyMultipartFileIdentity } from './multipartFileIdentity';
 import { uploadMultipartResource, type TransferProgress } from './sync';
 
 const FINALIZATION_RECOVERY_CODES = new Set([
@@ -24,6 +25,13 @@ export async function uploadMultipartResourceWithRecovery(
   // If the final R2 assembly succeeded but its HTTP response was lost, do not
   // resend a large file: reconcile the durable remote state first.
   if (await reconcileAlreadyStoredRemote(resourceId)) return;
+
+  const resource = await db.resources.get(resourceId);
+  if (!resource) throw new Error('Le support local est introuvable.');
+  const version = await db.resourceVersions.get(resource.currentVersionId);
+  const session = await db.multipartUploads.get(resource.currentVersionId);
+  if (!version || !session) throw new Error('La session multipart locale est introuvable.');
+  await verifyMultipartFileIdentity(file, version, session, onProgress);
 
   let lastPhase: TransferProgress['phase'] | null = null;
   const forwardProgress = (progress: TransferProgress) => {
