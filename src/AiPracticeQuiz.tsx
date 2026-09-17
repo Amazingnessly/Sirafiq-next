@@ -23,6 +23,7 @@ export function AiPracticeQuiz({ supportId, supportName, context, accessToken }:
   const [draft, setDraft] = useState('');
   const [revealed, setRevealed] = useState(false);
   const [missed, setMissed] = useState<QuizCard[]>([]);
+  const [missedSaved, setMissedSaved] = useState(false);
   const [correctCount, setCorrectCount] = useState(0);
   const [completed, setCompleted] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -36,6 +37,7 @@ export function AiPracticeQuiz({ supportId, supportName, context, accessToken }:
     setDraft('');
     setRevealed(false);
     setMissed([]);
+    setMissedSaved(false);
     setCorrectCount(0);
     setCompleted(false);
   };
@@ -89,7 +91,7 @@ export function AiPracticeQuiz({ supportId, supportName, context, accessToken }:
   };
 
   const saveMissed = async () => {
-    if (!missed.length || saving) return;
+    if (!missed.length || saving || missedSaved) return;
     setSaving(true);
     setError('');
     setStatus('Ajout des questions à reprendre…');
@@ -116,7 +118,7 @@ export function AiPracticeQuiz({ supportId, supportName, context, accessToken }:
         addedCount = additions.length;
         return additions.length ? { ...current, flashcards: [...existing, ...additions] } : current;
       });
-      setMissed([]);
+      setMissedSaved(true);
       setStatus(addedCount
         ? `${addedCount} question${addedCount > 1 ? 's' : ''} à reprendre ajoutée${addedCount > 1 ? 's' : ''} aux cartes mémoire.`
         : 'Ces questions existent déjà dans les cartes mémoire. Aucun doublon n’a été ajouté.');
@@ -162,8 +164,8 @@ export function AiPracticeQuiz({ supportId, supportName, context, accessToken }:
       <strong>{correctCount} / {cards.length} maîtrisée{correctCount > 1 ? 's' : ''}</strong>
       <p>{missed.length ? `${missed.length} question${missed.length > 1 ? 's' : ''} mérite${missed.length > 1 ? 'nt' : ''} une nouvelle révision.` : 'Toutes les questions ont été maîtrisées pendant cette séance.'}</p>
       <div className="ai-card-actions">
-        <button type="button" disabled={saving} onClick={() => void generate()}>Nouveau quiz</button>
-        {missed.length > 0 && <button className="primary" type="button" disabled={saving} onClick={() => void saveMissed()}>{saving ? 'Enregistrement…' : 'Ajouter les erreurs aux cartes mémoire'}</button>}
+        <button type="button" disabled={saving || generating} onClick={() => void generate()}>Nouveau quiz</button>
+        {missed.length > 0 && !missedSaved && <button className="primary" type="button" disabled={saving} onClick={() => void saveMissed()}>{saving ? 'Enregistrement…' : 'Ajouter les erreurs aux cartes mémoire'}</button>}
       </div>
     </div>}
   </section>;
