@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Flashcard } from './Flashcards';
 import { mutateSupportMetadata } from './storage';
+import './ai-practice-quiz.css';
 
 type QuizCard = { front: string; back: string };
 type StoredSupport = { id: string; flashcards?: Flashcard[]; [key: string]: unknown };
