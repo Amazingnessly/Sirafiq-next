@@ -17,6 +17,7 @@ import type {
 import { MULTIPART_PART_BYTES, shouldTryServerPdfExtraction } from '../shared/importPolicy';
 
 let activeSync: Promise<void> | null = null;
+let retryTimer: number | null = null;
 
 type RemoteRegistration = {
   versionId: string;
@@ -237,6 +238,10 @@ export function installSyncTriggers(): () => void {
   return () => {
     window.removeEventListener('online', onOnline);
     window.clearInterval(timer);
+    if (retryTimer !== null) {
+      window.clearTimeout(retryTimer);
+      retryTimer = null;
+    }
   };
 }
 
@@ -358,7 +363,9 @@ async function markOutboxFailure(item: OutboxRecord, error: unknown): Promise<vo
   const attempts = item.attempts + 1;
   const retryable = !(error instanceof ApiRequestError) || error.retryable;
   const nextDelay = Math.min(5 * 60_000, 2 ** Math.min(attempts, 6) * 1_000);
-  await db.outbox.update(item.id, { attempts, lastError: message, nextAttemptAt: retryable ? Date.now() + nextDelay : Number.MAX_SAFE_INTEGER });
+  const nextAttemptAt = retryable ? Date.now() + nextDelay : Number.MAX_SAFE_INTEGER;
+  await db.outbox.update(item.id, { attempts, lastError: message, nextAttemptAt });
+  if (retryable) scheduleRetry(nextDelay);
 
   if (item.type === 'subject.upsert') {
     await db.subjects.update(item.entityId, { syncState: 'error', syncError: message });
@@ -371,6 +378,14 @@ async function markOutboxFailure(item: OutboxRecord, error: unknown): Promise<vo
       });
     }
   }
+}
+
+function scheduleRetry(delay: number): void {
+  if (retryTimer !== null) window.clearTimeout(retryTimer);
+  retryTimer = window.setTimeout(() => {
+    retryTimer = null;
+    if (navigator.onLine) void requestSync();
+  }, delay);
 }
 
 function toSubjectPayload(subject: SubjectRecord) {
