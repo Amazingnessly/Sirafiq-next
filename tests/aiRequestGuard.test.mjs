@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import guardedWorker, { MAX_AI_REQUEST_BYTES, readBoundedBody } from '../worker/requestGuard.mjs';
+import guardedWorker, { AI_RATE_LIMIT_KEY, MAX_AI_REQUEST_BYTES, enforceAiRateLimit, readBoundedBody } from '../worker/requestGuard.mjs';
 
 test('readBoundedBody conserve un petit corps sans Content-Length', async () => {
   const body = JSON.stringify({ question: 'Que retenir ?' });
@@ -35,6 +35,42 @@ test('readBoundedBody coupe un corps streamé trop grand sans Content-Length', a
   });
   const result = await readBoundedBody(request);
   assert.deepEqual(result, { ok: false, reason: 'too_large' });
+});
+
+test('enforceAiRateLimit utilise une clé globale stable', async () => {
+  let receivedKey = '';
+  const response = await enforceAiRateLimit({
+    AI_RATE_LIMITER: {
+      limit: async ({ key }) => {
+        receivedKey = key;
+        return { success: true };
+      },
+    },
+  });
+  assert.equal(response, null);
+  assert.equal(receivedKey, AI_RATE_LIMIT_KEY);
+});
+
+test('le Worker renvoie 429 avant la logique IA quand le budget est dépassé', async () => {
+  let calls = 0;
+  const request = new Request('https://sirafiq.test/api/ai/ask', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ supportName: 'Cours.pdf', context: 'Contenu', question: 'Question' }),
+  });
+  const response = await guardedWorker.fetch(request, {
+    AI_RATE_LIMITER: {
+      limit: async ({ key }) => {
+        calls += 1;
+        assert.equal(key, AI_RATE_LIMIT_KEY);
+        return { success: false };
+      },
+    },
+  }, {});
+  assert.equal(calls, 1);
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get('retry-after'), '60');
+  assert.deepEqual(await response.json(), { error: 'Trop de requêtes IA en peu de temps. Attends un instant puis réessaie.' });
 });
 
 test('le Worker déployé renvoie 413 avant la logique IA pour un corps trop grand', async () => {
