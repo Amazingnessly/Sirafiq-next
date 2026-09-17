@@ -1,13 +1,15 @@
 import app from './index.mjs';
 
 export const MAX_AI_REQUEST_BYTES = 180_000;
+export const AI_RATE_LIMIT_KEY = 'sirafiq-ai-global';
 
-function json(body, status) {
+function json(body, status, extraHeaders = {}) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       'content-type': 'application/json; charset=utf-8',
       'cache-control': 'no-store',
+      ...extraHeaders,
     },
   });
 }
@@ -54,13 +56,16 @@ function shouldGuard(request) {
   return pathname.startsWith('/api/ai/');
 }
 
-export async function enforceAiRateLimit(request, env) {
+export async function enforceAiRateLimit(env) {
   if (!env?.AI_RATE_LIMITER || typeof env.AI_RATE_LIMITER.limit !== 'function') return null;
-  const client = request.headers.get('cf-connecting-ip')?.trim() || 'unknown-client';
   try {
-    const result = await env.AI_RATE_LIMITER.limit({ key: `ai:${client}` });
+    const result = await env.AI_RATE_LIMITER.limit({ key: AI_RATE_LIMIT_KEY });
     if (!result?.success) {
-      return json({ error: 'Trop de requêtes IA en peu de temps. Attends un instant puis réessaie.' }, 429);
+      return json(
+        { error: 'Trop de requêtes IA en peu de temps. Attends un instant puis réessaie.' },
+        429,
+        { 'retry-after': '60' },
+      );
     }
   } catch (error) {
     console.error('Sirafiq AI rate limiter failed', error instanceof Error ? error.name : 'UnknownError');
@@ -83,7 +88,7 @@ export default {
   async fetch(request, env, ctx) {
     if (!shouldGuard(request)) return delegate(request, env, ctx);
 
-    const rateLimited = await enforceAiRateLimit(request, env);
+    const rateLimited = await enforceAiRateLimit(env);
     if (rateLimited) return rateLimited;
 
     const bounded = await readBoundedBody(request);
