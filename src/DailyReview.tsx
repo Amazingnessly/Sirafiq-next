@@ -4,7 +4,7 @@ import type { MemoryPassage } from './TextMemorization';
 import type { QuranTarget } from './QuranMemorization';
 import { isReviewDue, scheduleReview } from './spacedRepetition.mjs';
 import { scheduleQuranReview } from './quranScheduling.mjs';
-import { listSupportMetadata, patchSupportMetadata } from './storage';
+import { listSupportMetadata, mutateSupportMetadata } from './storage';
 
 type StoredSupport = {
   id: string;
@@ -82,24 +82,38 @@ export function DailyReview({ onClose, onCountChange }: Props) {
     setSaving(true);
     setStatus('Enregistrement…');
     try {
-      let updated: StoredSupport;
-      if (current.kind === 'flashcard') {
-        const schedule = scheduleReview(current.card.stage, success);
-        const flashcards = (support.flashcards ?? []).map(card => card.id === current.card.id ? { ...card, ...schedule } : card);
-        updated = await patchSupportMetadata<StoredSupport>(support.id, { flashcards });
-      } else {
-        const stage = Number.isFinite(current.passage.stage) ? Math.max(0, Math.trunc(current.passage.stage!)) : 0;
-        const schedule = scheduleReview(stage, success);
-        const memoryPassages = (support.memoryPassages ?? []).map(passage => passage.id === current.passage.id ? {
-          ...passage,
-          ...schedule,
-          attempts: passage.attempts + 1,
-          successes: passage.successes + (success ? 1 : 0),
-        } : passage);
-        updated = await patchSupportMetadata<StoredSupport>(support.id, { memoryPassages });
-      }
+      let found = false;
+      const updated = await mutateSupportMetadata<StoredSupport>(support.id, latest => {
+        if (current.kind === 'flashcard') {
+          const flashcards = (latest.flashcards ?? []).map(card => {
+            if (card.id !== current.card.id) return card;
+            found = true;
+            const schedule = scheduleReview(card.stage, success);
+            return { ...card, ...schedule };
+          });
+          return found ? { ...latest, flashcards } : latest;
+        }
+
+        const memoryPassages = (latest.memoryPassages ?? []).map(passage => {
+          if (passage.id !== current.passage.id) return passage;
+          found = true;
+          const stage = Number.isFinite(passage.stage) ? Math.max(0, Math.trunc(passage.stage!)) : 0;
+          const schedule = scheduleReview(stage, success);
+          return {
+            ...passage,
+            ...schedule,
+            attempts: passage.attempts + 1,
+            successes: passage.successes + (success ? 1 : 0),
+          };
+        });
+        return found ? { ...latest, memoryPassages } : latest;
+      });
 
       setSupports(items => items.map(item => item.id === updated.id ? updated : item));
+      if (!found) {
+        setStatus('Cet élément de révision n’existe plus dans ce support.');
+        return;
+      }
       if (!success && queueLengthBeforeSave > 1) setIndex(currentIndex => (currentIndex + 1) % queueLengthBeforeSave);
       setRevealed(false);
       setPassagePhase('read');
@@ -121,15 +135,26 @@ export function DailyReview({ onClose, onCountChange }: Props) {
     setSaving(true);
     setStatus('Enregistrement…');
     try {
-      const schedule = scheduleQuranReview(current.target.stage, assessment);
-      const quranTargets = (support.quranTargets ?? []).map(target => target.id === current.target.id ? {
-        ...target,
-        ...schedule,
-        status: assessment,
-        reviews: target.reviews + 1,
-      } : target);
-      const updated = await patchSupportMetadata<StoredSupport>(support.id, { quranTargets });
+      let found = false;
+      const updated = await mutateSupportMetadata<StoredSupport>(support.id, latest => {
+        const quranTargets = (latest.quranTargets ?? []).map(target => {
+          if (target.id !== current.target.id) return target;
+          found = true;
+          const schedule = scheduleQuranReview(target.stage, assessment);
+          return {
+            ...target,
+            ...schedule,
+            status: assessment,
+            reviews: target.reviews + 1,
+          };
+        });
+        return found ? { ...latest, quranTargets } : latest;
+      });
       setSupports(items => items.map(item => item.id === updated.id ? updated : item));
+      if (!found) {
+        setStatus('Ce passage Qour’ān n’existe plus dans ce support.');
+        return;
+      }
       if (assessment === 'nouveau' && queueLengthBeforeSave > 1) setIndex(currentIndex => (currentIndex + 1) % queueLengthBeforeSave);
       setStatus('');
     } catch {
