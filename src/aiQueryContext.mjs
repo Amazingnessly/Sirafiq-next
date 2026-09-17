@@ -114,6 +114,10 @@ export function selectQueryContext(text, question, maxChars = DEFAULT_MAX_CHARS)
 
   for (const item of scored) {
     tryAdd(item.index);
+    if (usedChars >= limit * 0.64) break;
+  }
+
+  for (const item of scored) {
     tryAdd(item.index - 1);
     tryAdd(item.index + 1);
     if (usedChars >= limit * 0.82) break;
