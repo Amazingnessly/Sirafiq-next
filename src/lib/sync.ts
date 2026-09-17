@@ -18,6 +18,7 @@ import { MULTIPART_PART_BYTES, shouldTryServerPdfExtraction } from '../shared/im
 
 let activeSync: Promise<void> | null = null;
 let retryTimer: number | null = null;
+let retryTimerAt: number | null = null;
 
 type RemoteRegistration = {
   versionId: string;
@@ -241,6 +242,7 @@ export function installSyncTriggers(): () => void {
     if (retryTimer !== null) {
       window.clearTimeout(retryTimer);
       retryTimer = null;
+      retryTimerAt = null;
     }
   };
 }
@@ -381,9 +383,13 @@ async function markOutboxFailure(item: OutboxRecord, error: unknown): Promise<vo
 }
 
 function scheduleRetry(delay: number): void {
+  const targetAt = Date.now() + delay;
+  if (retryTimer !== null && retryTimerAt !== null && retryTimerAt <= targetAt) return;
   if (retryTimer !== null) window.clearTimeout(retryTimer);
+  retryTimerAt = targetAt;
   retryTimer = window.setTimeout(() => {
     retryTimer = null;
+    retryTimerAt = null;
     if (navigator.onLine) void requestSync();
   }, delay);
 }
