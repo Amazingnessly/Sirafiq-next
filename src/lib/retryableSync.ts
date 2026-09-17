@@ -36,5 +36,9 @@ export async function retryTransientSyncFailuresNow(): Promise<void> {
     }
   });
 
+  // installSyncTriggers also listens for `online` and may already have a sync
+  // in flight. Wait for it, then make one fresh pass so the newly-due records
+  // cannot be stranded behind the old backoff deadline.
+  await requestSync();
   await requestSync();
 }
