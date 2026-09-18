@@ -25,6 +25,7 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
   const [importedId, setImportedId] = useState<string | null>(null);
   const [progress, setProgress] = useState<TransferProgress | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const submitLockRef = useRef(false);
 
   const firstSubjectId = subjects[0]?.id ?? '';
   const effectiveSubjectId = subjects.some((subject) => subject.id === subjectId) ? subjectId : firstSubjectId;
@@ -58,6 +59,8 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (submitLockRef.current) return;
+    submitLockRef.current = true;
     clearFeedback();
     setBusy(true);
     try {
@@ -86,6 +89,7 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
         setError(err instanceof Error ? err.message : 'L’import a échoué.');
       }
     } finally {
+      submitLockRef.current = false;
       setBusy(false);
     }
   }
