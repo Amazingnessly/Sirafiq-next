@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { StatusPill } from '../../components/StatusPill';
 import { db } from '../../data/db';
@@ -8,11 +9,15 @@ import { SubjectForm } from '../import/SubjectForm';
 export function LibraryPage() {
   const subjects = useDexieQuery(() => db.subjects.orderBy('name').toArray(), [], []);
   const resources = useDexieQuery(() => db.resources.orderBy('updatedAt').reverse().toArray(), [], []);
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(null);
   const subjectNames = new Map(subjects.map((subject) => [subject.id, subject.name]));
   const resourceCountsBySubject = new Map<string, number>();
   for (const resource of resources) {
     resourceCountsBySubject.set(resource.subjectId, (resourceCountsBySubject.get(resource.subjectId) ?? 0) + 1);
   }
+  const activeSubjectId = selectedSubjectId && subjects.some((subject) => subject.id === selectedSubjectId) ? selectedSubjectId : null;
+  const visibleResources = activeSubjectId ? resources.filter((resource) => resource.subjectId === activeSubjectId) : resources;
+  const activeSubjectName = activeSubjectId ? subjectNames.get(activeSubjectId) : null;
 
   return (
     <div className="page">
@@ -37,11 +42,20 @@ export function LibraryPage() {
             </div>
             {subjects.length ? (
               <ul className="subject-list">
+                <li>
+                  <button type="button" className={!activeSubjectId ? 'subject-filter is-active' : 'subject-filter'} aria-pressed={!activeSubjectId} onClick={() => setSelectedSubjectId(null)}>
+                    <span className="subject-dot" aria-hidden="true" />
+                    <span>Toutes</span>
+                    <small>{resources.length}</small>
+                  </button>
+                </li>
                 {subjects.map((subject) => (
                   <li key={subject.id}>
-                    <span className="subject-dot" aria-hidden="true" />
-                    <span>{subject.name}</span>
-                    <small>{resourceCountsBySubject.get(subject.id) ?? 0}</small>
+                    <button type="button" className={activeSubjectId === subject.id ? 'subject-filter is-active' : 'subject-filter'} aria-pressed={activeSubjectId === subject.id} onClick={() => setSelectedSubjectId(subject.id)}>
+                      <span className="subject-dot" aria-hidden="true" />
+                      <span>{subject.name}</span>
+                      <small>{resourceCountsBySubject.get(subject.id) ?? 0}</small>
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -65,13 +79,13 @@ export function LibraryPage() {
             <div className="section-title">
               <div>
                 <p className="eyebrow">Enregistrés</p>
-                <h2>Supports</h2>
+                <h2>{activeSubjectName ? `Supports · ${activeSubjectName}` : 'Supports'}</h2>
               </div>
             </div>
 
-            {resources.length ? (
+            {visibleResources.length ? (
               <div className="resource-grid">
-                {resources.map((resource) => (
+                {visibleResources.map((resource) => (
                   <Link to={`/bibliotheque/${resource.id}`} className="resource-card" key={resource.id}>
                     <div className={`resource-icon resource-icon--${resource.kind}`} aria-hidden="true">
                       {resource.kind === 'pdf' ? 'PDF' : 'TXT'}
@@ -87,6 +101,12 @@ export function LibraryPage() {
                     </div>
                   </Link>
                 ))}
+              </div>
+            ) : activeSubjectId ? (
+              <div className="empty-library">
+                <div className="empty-library__symbol" aria-hidden="true">◇</div>
+                <h3>Aucun support dans cette matière</h3>
+                <p>Importez un support dans cette matière ou choisissez « Toutes » pour revenir à la bibliothèque complète.</p>
               </div>
             ) : (
               <div className="empty-library">

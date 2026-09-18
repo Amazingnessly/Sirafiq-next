@@ -9,6 +9,7 @@ import './styles/pdf-reader.css';
 import './styles/extraction-recovery.css';
 import './styles/build-identity.css';
 import './styles/import-feedback.css';
+import './styles/library-filter.css';
 
 const queryClient = new QueryClient({
   defaultOptions: {
