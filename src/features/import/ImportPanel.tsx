@@ -22,6 +22,7 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [duplicateId, setDuplicateId] = useState<string | null>(null);
+  const [importedId, setImportedId] = useState<string | null>(null);
   const [progress, setProgress] = useState<TransferProgress | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -46,6 +47,7 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
     event.preventDefault();
     setError(null);
     setDuplicateId(null);
+    setImportedId(null);
     setProgress(null);
     setBusy(true);
     try {
@@ -54,12 +56,14 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
       if (mode === 'file') {
         if (!file) throw new Error('Choisissez un fichier PDF, TXT ou Markdown.');
         if (file.size > MAX_RESOURCE_FILE_BYTES) throw new Error('Ce fichier dépasse la taille maximale acceptée par le stockage R2.');
-        await importFile(effectiveSubjectId, file, title, setProgress);
+        const imported = await importFile(effectiveSubjectId, file, title, setProgress);
+        setImportedId(imported.id);
         setFile(null);
         setTitle('');
         if (inputRef.current) inputRef.current.value = '';
       } else {
-        await importPastedText(effectiveSubjectId, title, text);
+        const imported = await importPastedText(effectiveSubjectId, title, text);
+        setImportedId(imported.id);
         setTitle('');
         setText('');
       }
@@ -105,6 +109,7 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
             accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
             onChange={(event) => {
               setError(null);
+              setImportedId(null);
               setProgress(null);
               setFile(event.target.files?.[0] ?? null);
             }}
@@ -124,7 +129,7 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
       ) : (
         <label className="text-import">
           <span>Contenu</span>
-          <textarea value={text} onChange={(event) => setText(event.target.value)} placeholder="Collez ou écrivez le texte à mémoriser plus tard…" rows={9} />
+          <textarea value={text} onChange={(event) => { setImportedId(null); setText(event.target.value); }} placeholder="Collez ou écrivez le texte à mémoriser plus tard…" rows={9} />
         </label>
       )}
 
@@ -136,6 +141,14 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
             <small>Les morceaux déjà reçus restent enregistrés. Gardez ou resélectionnez le même fichier puis relancez l’import pour reprendre.</small>
           )}
           {duplicateId && <Link to={`/bibliotheque/${duplicateId}`}>Ouvrir le support existant</Link>}
+        </div>
+      )}
+
+      {importedId && (
+        <div className="success-box" role="status" aria-live="polite">
+          <strong>Support importé</strong>
+          <span>Il est maintenant disponible dans votre bibliothèque.</span>
+          <Link to={`/bibliotheque/${importedId}`}>Ouvrir le support</Link>
         </div>
       )}
 
