@@ -141,15 +141,17 @@ test('affiche et navigue un PDF distant multipage avec des requêtes Range', asy
   await page.goto(`/bibliotheque/${RESOURCE_ID}`);
 
   await expect(page.getByText('Synchronisé', { exact: true })).toBeVisible();
-  await expect(page.getByText('Page 1 sur 2', { exact: true })).toBeVisible({ timeout: 20_000 });
+  const pageInput = page.getByRole('spinbutton', { name: 'Aller à la page' });
+  await expect(pageInput).toBeVisible({ timeout: 20_000 });
+  await expect(pageInput).toHaveValue('1');
   await expect(page.locator('.pdf-reader canvas')).toBeVisible();
   await expect(page.locator('iframe')).toHaveCount(0);
   await expect.poll(() => rangeRequests.length, { timeout: 10_000 }).toBeGreaterThan(0);
 
   await page.getByRole('button', { name: 'Page suivante' }).click();
-  await expect(page.getByText('Page 2 sur 2', { exact: true })).toBeVisible();
+  await expect(pageInput).toHaveValue('2');
   await expect(page.getByRole('button', { name: 'Page suivante' })).toBeDisabled();
 
   await page.getByRole('button', { name: 'Page précédente' }).click();
-  await expect(page.getByText('Page 1 sur 2', { exact: true })).toBeVisible();
+  await expect(pageInput).toHaveValue('1');
 });
