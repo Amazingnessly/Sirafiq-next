@@ -243,6 +243,8 @@ async function persistImportedResource(input: {
   };
 
   await db.transaction('rw', db.resources, db.resourceVersions, db.extractions, db.outbox, db.multipartUploads, async () => {
+    const duplicate = await db.resourceVersions.where('sha256').equals(input.sha256).first();
+    if (duplicate) throw new DuplicateSupportError(duplicate.resourceId);
     await db.resources.add(resource);
     await db.resourceVersions.add(version);
     await db.extractions.add(input.extraction);
