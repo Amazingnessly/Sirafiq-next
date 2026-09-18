@@ -28,14 +28,13 @@ export class DuplicateSupportError extends Error {
 export async function createSubject(name: string, parentId: string | null = null): Promise<SubjectRecord> {
   const cleanName = name.trim();
   if (!cleanName) throw new Error('Le nom de la matière est obligatoire.');
-  const duplicate = await db.subjects.where('name').equalsIgnoreCase(cleanName).first();
-  if (duplicate && duplicate.parentId === parentId) throw new Error('Une matière portant ce nom existe déjà.');
-
   const now = isoNow();
   const subject: SubjectRecord = {
     id: newId(), name: cleanName, parentId, createdAt: now, updatedAt: now, syncState: 'pending', syncError: null,
   };
   await db.transaction('rw', db.subjects, db.outbox, async () => {
+    const duplicate = await db.subjects.where('name').equalsIgnoreCase(cleanName).first();
+    if (duplicate && duplicate.parentId === parentId) throw new Error('Une matière portant ce nom existe déjà.');
     await db.subjects.add(subject);
     await db.outbox.add({ id: newId(), type: 'subject.upsert', entityId: subject.id, attempts: 0, nextAttemptAt: Date.now(), lastError: null, createdAt: now });
   });
