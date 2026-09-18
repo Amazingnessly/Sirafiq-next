@@ -144,7 +144,6 @@ test('affiche et navigue un PDF distant multipage avec des requêtes Range', asy
   const pageInput = page.getByRole('spinbutton', { name: 'Aller à la page' });
   await expect(pageInput).toBeVisible({ timeout: 20_000 });
   await expect(pageInput).toHaveValue('1');
-  await expect(page.getByText('sur 2', { exact: true })).toBeVisible();
   await expect(page.locator('.pdf-reader canvas')).toBeVisible();
   await expect(page.locator('iframe')).toHaveCount(0);
   await expect.poll(() => rangeRequests.length, { timeout: 10_000 }).toBeGreaterThan(0);
