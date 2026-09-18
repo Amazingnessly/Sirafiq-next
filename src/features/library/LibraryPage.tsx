@@ -6,6 +6,10 @@ import { useDexieQuery } from '../../data/useDexieQuery';
 import { ImportPanel } from '../import/ImportPanel';
 import { SubjectForm } from '../import/SubjectForm';
 
+function normalizeSearchText(value: string) {
+  return value.normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase('fr').trim();
+}
+
 export function LibraryPage() {
   const subjects = useDexieQuery(() => db.subjects.orderBy('name').toArray(), [], []);
   const resources = useDexieQuery(() => db.resources.orderBy('updatedAt').reverse().toArray(), [], []);
@@ -21,12 +25,12 @@ export function LibraryPage() {
   const importSubjects = activeSubjectId
     ? [...subjects.filter((subject) => subject.id === activeSubjectId), ...subjects.filter((subject) => subject.id !== activeSubjectId)]
     : subjects;
-  const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase('fr');
+  const normalizedSearchQuery = normalizeSearchText(searchQuery);
   const subjectResources = activeSubjectId ? resources.filter((resource) => resource.subjectId === activeSubjectId) : resources;
   const visibleResources = normalizedSearchQuery
     ? subjectResources.filter((resource) => {
         const subjectName = subjectNames.get(resource.subjectId) ?? '';
-        return `${resource.title} ${subjectName}`.toLocaleLowerCase('fr').includes(normalizedSearchQuery);
+        return normalizeSearchText(`${resource.title} ${subjectName}`).includes(normalizedSearchQuery);
       })
     : subjectResources;
   const isFiltered = Boolean(activeSubjectId || normalizedSearchQuery);
