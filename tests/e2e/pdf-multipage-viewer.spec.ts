@@ -152,6 +152,11 @@ test('affiche et navigue un PDF distant multipage avec des requêtes Range', asy
   await expect(pageInput).toHaveValue('2');
   await expect(page.getByRole('button', { name: 'Page suivante' })).toBeDisabled();
 
+  await page.reload();
+  const restoredPageInput = page.getByRole('spinbutton', { name: 'Aller à la page' });
+  await expect(restoredPageInput).toBeVisible({ timeout: 20_000 });
+  await expect(restoredPageInput).toHaveValue('2');
+
   await page.getByRole('button', { name: 'Page précédente' }).click();
-  await expect(pageInput).toHaveValue('1');
+  await expect(restoredPageInput).toHaveValue('1');
 });
