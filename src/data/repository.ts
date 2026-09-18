@@ -50,6 +50,7 @@ export async function importFile(
   await requireSubject(subjectId);
   if (file.size > MAX_RESOURCE_FILE_BYTES) throw new Error('Ce fichier dépasse la taille maximale acceptée par le stockage R2.');
 
+  const kind = classifyImportFile(file);
   const sha256 = await sha256Hex(file, (processedBytes, totalBytes) => {
     onProgress?.({ phase: 'hashing', processedBytes, totalBytes });
   });
@@ -68,8 +69,6 @@ export async function importFile(
   const now = isoNow();
   const resourceId = newId();
   const versionId = newId();
-  const extension = file.name.split('.').pop()?.toLowerCase();
-  const kind: ResourceKind = file.type === 'application/pdf' || extension === 'pdf' ? 'pdf' : 'text';
   const title = (preferredTitle?.trim() || file.name.replace(/\.[^/.]+$/, '') || 'Sans titre').slice(0, 240);
   const mimeType = file.type || (kind === 'pdf' ? 'application/pdf' : 'text/plain');
 
@@ -199,6 +198,13 @@ async function requireSubject(subjectId: string): Promise<void> {
 async function requireUniqueSha(sha256: string): Promise<void> {
   const existingVersion = await db.resourceVersions.where('sha256').equals(sha256).first();
   if (existingVersion) throw new DuplicateSupportError(existingVersion.resourceId);
+}
+
+function classifyImportFile(file: Pick<File, 'name' | 'type'>): ResourceKind {
+  const extension = file.name.split('.').pop()?.toLowerCase();
+  if (file.type === 'application/pdf' || extension === 'pdf') return 'pdf';
+  if (extension === 'txt' || extension === 'md' || file.type === 'text/plain' || file.type === 'text/markdown') return 'text';
+  throw new Error('Ce format n’est pas pris en charge. Choisissez un fichier PDF, TXT ou Markdown.');
 }
 
 function normalizeExtractionError(error: unknown): { code: string; message: string } {
