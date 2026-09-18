@@ -165,7 +165,8 @@ export function PdfViewer({ src, title }: PdfViewerProps) {
   }, [pageCount, pageNumber, stageWidth]);
 
   function goToPage(nextPage: number) {
-    const bounded = Math.min(Math.max(nextPage, 1), pageCount || 1);
+    if (!Number.isFinite(nextPage)) return;
+    const bounded = Math.min(Math.max(Math.trunc(nextPage), 1), pageCount || 1);
     setPageNumber(bounded);
   }
 
@@ -182,7 +183,22 @@ export function PdfViewer({ src, title }: PdfViewerProps) {
           ← Précédente
         </button>
         <div className="pdf-reader__position" aria-live="polite">
-          {pageCount ? `Page ${pageNumber} sur ${pageCount}` : 'Ouverture du PDF…'}
+          {pageCount ? (
+            <label>
+              Page{' '}
+              <input
+                type="number"
+                min={1}
+                max={pageCount}
+                value={pageNumber}
+                disabled={loadingDocument}
+                onChange={(event) => goToPage(event.currentTarget.valueAsNumber)}
+                aria-label="Aller à la page"
+                inputMode="numeric"
+              />{' '}
+              sur {pageCount}
+            </label>
+          ) : 'Ouverture du PDF…'}
         </div>
         <button
           className="button button--secondary"
