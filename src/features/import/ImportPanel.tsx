@@ -97,20 +97,20 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
   return (
     <form className="import-panel" onSubmit={submit}>
       <div className="segmented" aria-label="Type d’import">
-        <button type="button" className={mode === 'file' ? 'is-active' : ''} onClick={() => changeMode('file')}>Fichier</button>
-        <button type="button" className={mode === 'text' ? 'is-active' : ''} onClick={() => changeMode('text')}>Texte</button>
+        <button type="button" className={mode === 'file' ? 'is-active' : ''} disabled={busy} onClick={() => changeMode('file')}>Fichier</button>
+        <button type="button" className={mode === 'text' ? 'is-active' : ''} disabled={busy} onClick={() => changeMode('text')}>Texte</button>
       </div>
 
       <div className="form-grid">
         <label>
           <span>Matière</span>
-          <select aria-label="Matière du support" value={effectiveSubjectId} onChange={(event) => { clearFeedback(); setSubjectId(event.target.value); }}>
+          <select aria-label="Matière du support" value={effectiveSubjectId} disabled={busy} onChange={(event) => { clearFeedback(); setSubjectId(event.target.value); }}>
             {subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}
           </select>
         </label>
         <label>
           <span>Titre {mode === 'file' ? '(facultatif)' : ''}</span>
-          <input value={title} onChange={(event) => { clearFeedback(); setTitle(event.target.value); }} placeholder={mode === 'file' ? 'Nom du fichier par défaut' : 'Titre du texte'} maxLength={240} required={mode === 'text'} />
+          <input value={title} onChange={(event) => { clearFeedback(); setTitle(event.target.value); }} placeholder={mode === 'file' ? 'Nom du fichier par défaut' : 'Titre du texte'} maxLength={240} required={mode === 'text'} disabled={busy} />
         </label>
       </div>
 
@@ -121,6 +121,7 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
             aria-label="Fichier du support"
             type="file"
             accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
+            disabled={busy}
             onChange={(event) => {
               clearFeedback();
               setFile(event.target.files?.[0] ?? null);
@@ -141,7 +142,7 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
       ) : (
         <label className="text-import">
           <span>Contenu</span>
-          <textarea value={text} onChange={(event) => { clearFeedback(); setText(event.target.value); }} placeholder="Collez ou écrivez le texte à mémoriser plus tard…" rows={9} />
+          <textarea value={text} onChange={(event) => { clearFeedback(); setText(event.target.value); }} placeholder="Collez ou écrivez le texte à mémoriser plus tard…" rows={9} disabled={busy} />
         </label>
       )}
 
