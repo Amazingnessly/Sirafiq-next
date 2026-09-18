@@ -72,7 +72,7 @@ export function LibraryPage() {
               </div>
               <span className="tiny-badge">PDF · TXT · MD</span>
             </div>
-            <ImportPanel subjects={subjects} />
+            <ImportPanel subjects={subjects} preferredSubjectId={activeSubjectId} />
           </section>
 
           <section className="resources-section">
