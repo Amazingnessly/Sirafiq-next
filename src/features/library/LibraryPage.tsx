@@ -7,7 +7,7 @@ import { ImportPanel } from '../import/ImportPanel';
 import { SubjectForm } from '../import/SubjectForm';
 
 function normalizeSearchText(value: string) {
-  return value.normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase('fr').trim();
+  return value.normalize('NFD').replace(/[\p{M}\u0640]/gu, '').toLocaleLowerCase('fr').trim();
 }
 
 export function LibraryPage() {
