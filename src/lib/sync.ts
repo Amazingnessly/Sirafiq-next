@@ -235,6 +235,7 @@ export function installSyncTriggers(): () => void {
   const timer = window.setInterval(() => {
     if (navigator.onLine) void requestSync();
   }, 30_000);
+  void restorePersistedRetryDeadline();
   void requestSync();
   return () => {
     window.removeEventListener('online', onOnline);
@@ -245,6 +246,15 @@ export function installSyncTriggers(): () => void {
       retryTimerAt = null;
     }
   };
+}
+
+async function restorePersistedRetryDeadline(): Promise<void> {
+  const now = Date.now();
+  const future = await db.outbox.where('nextAttemptAt').above(now).sortBy('nextAttemptAt');
+  const next = future[0];
+  if (next && next.nextAttemptAt < Number.MAX_SAFE_INTEGER) {
+    scheduleRetry(Math.max(0, next.nextAttemptAt - Date.now()));
+  }
 }
 
 async function runSync(): Promise<void> {
