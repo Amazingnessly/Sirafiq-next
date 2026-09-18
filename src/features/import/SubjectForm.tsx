@@ -39,7 +39,7 @@ export function SubjectForm({
   }
 
   return (
-    <form className="subject-form" onSubmit={submit}>
+    <form className="subject-form" onSubmit={submit} aria-busy={saving}>
       <label htmlFor={inputId}>Nouvelle matière</label>
       <div className="field-row">
         <input
@@ -49,6 +49,7 @@ export function SubjectForm({
           placeholder="Ex. Arabe, Français, Religion…"
           maxLength={120}
           autoComplete="off"
+          disabled={saving}
         />
         <button className="button button--secondary" type="submit" disabled={saving || !name.trim()}>
           {saving ? 'Ajout…' : submitLabel}
