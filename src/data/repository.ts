@@ -6,7 +6,7 @@ import {
   type ResourceVersionRecord,
   type SubjectRecord,
 } from './db';
-import { readBlobAsArrayBuffer } from '../lib/blob';
+import { readBlobAsArrayBuffer, readBlobAsText } from '../lib/blob';
 import { sha256ArrayBuffer, sha256Hex } from '../lib/hash';
 import { isoNow, newId } from '../lib/ids';
 import { uploadMultipartResourceWithRecovery } from '../lib/multipartRecovery';
@@ -109,15 +109,28 @@ export async function importFile(
   }
 
   let extraction: ExtractionRecord;
-  try {
-    // PDF.js is intentionally lazy-loaded so older Safari can boot without it.
-    const { extractDocument } = await import('../lib/pdf');
-    const pages = await extractDocument(file);
-    const charCount = pages.reduce((total, page) => total + page.text.length, 0);
-    extraction = { versionId, status: 'ready', pages, charCount, errorCode: null, errorMessage: null, createdAt: now };
-  } catch (error) {
-    const extractionError = normalizeExtractionError(error);
-    extraction = { versionId, status: 'failed', pages: [], charCount: 0, errorCode: extractionError.code, errorMessage: extractionError.message, createdAt: now };
+  if (kind === 'text') {
+    const content = await readBlobAsText(file);
+    extraction = {
+      versionId,
+      status: 'ready',
+      pages: [{ pageNumber: 1, text: content }],
+      charCount: content.length,
+      errorCode: null,
+      errorMessage: null,
+      createdAt: now,
+    };
+  } else {
+    try {
+      // PDF.js is intentionally lazy-loaded so older Safari can boot without it.
+      const { extractDocument } = await import('../lib/pdf');
+      const pages = await extractDocument(file);
+      const charCount = pages.reduce((total, page) => total + page.text.length, 0);
+      extraction = { versionId, status: 'ready', pages, charCount, errorCode: null, errorMessage: null, createdAt: now };
+    } catch (error) {
+      const extractionError = normalizeExtractionError(error);
+      extraction = { versionId, status: 'failed', pages: [], charCount: 0, errorCode: extractionError.code, errorMessage: extractionError.message, createdAt: now };
+    }
   }
 
   const bytes = await readBlobAsArrayBuffer(file);
