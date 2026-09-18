@@ -1,0 +1,44 @@
+.subject-list li {
+  min-height: 0;
+  padding: 0;
+}
+
+.subject-filter {
+  width: 100%;
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.subject-filter:hover {
+  background: rgba(111, 44, 63, .045);
+}
+
+.subject-filter.is-active {
+  background: var(--wine-soft);
+  color: var(--wine-deep);
+  font-weight: 750;
+}
+
+.subject-filter:focus-visible {
+  outline: 2px solid rgba(111, 44, 63, .45);
+  outline-offset: 2px;
+}
+
+.subject-filter small {
+  color: #9b918b;
+  font-weight: 650;
+}
+
+.subject-filter.is-active small {
+  color: var(--wine);
+}
