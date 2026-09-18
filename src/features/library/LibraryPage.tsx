@@ -18,6 +18,9 @@ export function LibraryPage() {
   const activeSubjectId = selectedSubjectId && subjects.some((subject) => subject.id === selectedSubjectId) ? selectedSubjectId : null;
   const visibleResources = activeSubjectId ? resources.filter((resource) => resource.subjectId === activeSubjectId) : resources;
   const activeSubjectName = activeSubjectId ? subjectNames.get(activeSubjectId) : null;
+  const importSubjects = activeSubjectId
+    ? [...subjects.filter((subject) => subject.id === activeSubjectId), ...subjects.filter((subject) => subject.id !== activeSubjectId)]
+    : subjects;
 
   return (
     <div className="page">
@@ -72,7 +75,7 @@ export function LibraryPage() {
               </div>
               <span className="tiny-badge">PDF · TXT · MD</span>
             </div>
-            <ImportPanel subjects={subjects} preferredSubjectId={activeSubjectId} />
+            <ImportPanel key={activeSubjectId ?? 'all'} subjects={importSubjects} />
           </section>
 
           <section className="resources-section">
