@@ -33,6 +33,19 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
     if (subjectId !== effectiveSubjectId) setSubjectId(effectiveSubjectId);
   }, [effectiveSubjectId, subjectId]);
 
+  function clearFeedback() {
+    setError(null);
+    setDuplicateId(null);
+    setImportedId(null);
+    setProgress(null);
+  }
+
+  function changeMode(nextMode: Mode) {
+    if (nextMode === mode) return;
+    clearFeedback();
+    setMode(nextMode);
+  }
+
   if (!subjects.length) {
     return (
       <div className="empty-panel empty-panel--onboarding">
@@ -45,10 +58,7 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    setError(null);
-    setDuplicateId(null);
-    setImportedId(null);
-    setProgress(null);
+    clearFeedback();
     setBusy(true);
     try {
       if (!effectiveSubjectId) throw new Error('Choisissez une matière avant l’import.');
@@ -83,20 +93,20 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
   return (
     <form className="import-panel" onSubmit={submit}>
       <div className="segmented" aria-label="Type d’import">
-        <button type="button" className={mode === 'file' ? 'is-active' : ''} onClick={() => setMode('file')}>Fichier</button>
-        <button type="button" className={mode === 'text' ? 'is-active' : ''} onClick={() => setMode('text')}>Texte</button>
+        <button type="button" className={mode === 'file' ? 'is-active' : ''} onClick={() => changeMode('file')}>Fichier</button>
+        <button type="button" className={mode === 'text' ? 'is-active' : ''} onClick={() => changeMode('text')}>Texte</button>
       </div>
 
       <div className="form-grid">
         <label>
           <span>Matière</span>
-          <select aria-label="Matière du support" value={effectiveSubjectId} onChange={(event) => setSubjectId(event.target.value)}>
+          <select aria-label="Matière du support" value={effectiveSubjectId} onChange={(event) => { clearFeedback(); setSubjectId(event.target.value); }}>
             {subjects.map((subject) => <option key={subject.id} value={subject.id}>{subject.name}</option>)}
           </select>
         </label>
         <label>
           <span>Titre {mode === 'file' ? '(facultatif)' : ''}</span>
-          <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder={mode === 'file' ? 'Nom du fichier par défaut' : 'Titre du texte'} maxLength={240} />
+          <input value={title} onChange={(event) => { setImportedId(null); setTitle(event.target.value); }} placeholder={mode === 'file' ? 'Nom du fichier par défaut' : 'Titre du texte'} maxLength={240} />
         </label>
       </div>
 
@@ -108,9 +118,7 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
             type="file"
             accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
             onChange={(event) => {
-              setError(null);
-              setImportedId(null);
-              setProgress(null);
+              clearFeedback();
               setFile(event.target.files?.[0] ?? null);
             }}
           />
