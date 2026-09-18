@@ -34,6 +34,10 @@ export function LibraryPage() {
       })
     : subjectResources;
   const isFiltered = Boolean(activeSubjectId || normalizedSearchQuery);
+  const resetFilters = () => {
+    setSelectedSubjectId(null);
+    setSearchQuery('');
+  };
 
   return (
     <div className="page">
@@ -135,6 +139,7 @@ export function LibraryPage() {
                 <div className="empty-library__symbol" aria-hidden="true">◇</div>
                 <h3>Aucun support correspondant</h3>
                 <p>{normalizedSearchQuery ? 'Modifiez votre recherche ou choisissez une autre matière.' : 'Importez un support dans cette matière ou choisissez « Toutes » pour revenir à la bibliothèque complète.'}</p>
+                <button type="button" className="button button--secondary" onClick={resetFilters}>Afficher tous les supports</button>
               </div>
             ) : (
               <div className="empty-library">
