@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('matière → texte réel → persistance après rechargement', async ({ page }) => {
+test('matière → texte réel → confirmation → ouverture → persistance après rechargement', async ({ page }) => {
   await page.goto('/bibliotheque');
 
   await page.getByLabel('Nouvelle matière', { exact: true }).first().fill('Français E2E');
@@ -13,8 +13,11 @@ test('matière → texte réel → persistance après rechargement', async ({ pa
   await expect(page.getByRole('button', { name: 'Importer le support' })).toBeEnabled();
   await page.getByRole('button', { name: 'Importer le support' }).click();
 
+  const success = page.getByRole('status').filter({ hasText: 'Support importé' });
+  await expect(success).toBeVisible();
+  await expect(success.getByRole('link', { name: 'Ouvrir le support' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Lecture test' })).toBeVisible();
-  await page.getByRole('heading', { name: 'Lecture test' }).click();
+  await success.getByRole('link', { name: 'Ouvrir le support' }).click();
   await expect(page.getByText('Sirāfiq conserve ce texte réel puis le restitue après rechargement.')).toBeVisible();
 
   await page.reload();
