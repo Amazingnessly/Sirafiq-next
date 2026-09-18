@@ -106,7 +106,7 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
         </label>
         <label>
           <span>Titre {mode === 'file' ? '(facultatif)' : ''}</span>
-          <input value={title} onChange={(event) => { setImportedId(null); setTitle(event.target.value); }} placeholder={mode === 'file' ? 'Nom du fichier par défaut' : 'Titre du texte'} maxLength={240} />
+          <input value={title} onChange={(event) => { clearFeedback(); setTitle(event.target.value); }} placeholder={mode === 'file' ? 'Nom du fichier par défaut' : 'Titre du texte'} maxLength={240} />
         </label>
       </div>
 
@@ -137,7 +137,7 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
       ) : (
         <label className="text-import">
           <span>Contenu</span>
-          <textarea value={text} onChange={(event) => { setImportedId(null); setText(event.target.value); }} placeholder="Collez ou écrivez le texte à mémoriser plus tard…" rows={9} />
+          <textarea value={text} onChange={(event) => { clearFeedback(); setText(event.target.value); }} placeholder="Collez ou écrivez le texte à mémoriser plus tard…" rows={9} />
         </label>
       )}
 
