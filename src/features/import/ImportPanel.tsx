@@ -34,6 +34,16 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
     if (subjectId !== effectiveSubjectId) setSubjectId(effectiveSubjectId);
   }, [effectiveSubjectId, subjectId]);
 
+  useEffect(() => {
+    if (!busy) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload);
+  }, [busy]);
+
   function clearFeedback() {
     setError(null);
     setDuplicateId(null);
@@ -95,7 +105,7 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
   }
 
   return (
-    <form className="import-panel" onSubmit={submit}>
+    <form className="import-panel" onSubmit={submit} aria-busy={busy}>
       <div className="segmented" aria-label="Type d’import">
         <button type="button" className={mode === 'file' ? 'is-active' : ''} disabled={busy} onClick={() => changeMode('file')}>Fichier</button>
         <button type="button" className={mode === 'text' ? 'is-active' : ''} disabled={busy} onClick={() => changeMode('text')}>Texte</button>
