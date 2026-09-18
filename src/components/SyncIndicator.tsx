@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { db } from '../data/db';
 import { useDexieQuery } from '../data/useDexieQuery';
 import { requestSync, retryAllSyncErrorsNow } from '../lib/sync';
@@ -12,6 +13,12 @@ export function SyncIndicator() {
     ]);
     return resourceErrors + subjectErrors;
   }, [], 0);
+  const multipartErrors = useDexieQuery(
+    () => db.multipartUploads.where('status').equals('error').count(),
+    [],
+    0,
+  );
+  const retryableErrors = Math.max(0, errors - multipartErrors);
   const [running, setRunning] = useState(false);
   const [online, setOnline] = useState(() => navigator.onLine);
 
@@ -28,7 +35,7 @@ export function SyncIndicator() {
   async function syncNow() {
     setRunning(true);
     try {
-      if (errors > 0) await retryAllSyncErrorsNow();
+      if (retryableErrors > 0) await retryAllSyncErrorsNow();
       else await requestSync();
     } finally {
       setRunning(false);
@@ -39,10 +46,18 @@ export function SyncIndicator() {
     return <div className="sync-pill sync-pill--offline" aria-label="Hors ligne">Hors ligne · travail local</div>;
   }
 
-  if (errors > 0) {
+  if (multipartErrors > 0 && retryableErrors === 0) {
+    return (
+      <Link className="sync-pill sync-pill--error" to="/bibliotheque">
+        {multipartErrors} envoi{multipartErrors > 1 ? 's' : ''} à reprendre · Resélectionner
+      </Link>
+    );
+  }
+
+  if (retryableErrors > 0) {
     return (
       <button className="sync-pill sync-pill--error" onClick={syncNow} disabled={running}>
-        {running ? 'Nouvel essai…' : `${errors} erreur${errors > 1 ? 's' : ''} · Réessayer`}
+        {running ? 'Nouvel essai…' : `${retryableErrors} erreur${retryableErrors > 1 ? 's' : ''} · Réessayer`}
       </button>
     );
   }
