@@ -10,14 +10,23 @@ export function LibraryPage() {
   const subjects = useDexieQuery(() => db.subjects.orderBy('name').toArray(), [], []);
   const resources = useDexieQuery(() => db.resources.orderBy('updatedAt').reverse().toArray(), [], []);
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
   const subjectNames = new Map(subjects.map((subject) => [subject.id, subject.name]));
   const resourceCountsBySubject = new Map<string, number>();
   for (const resource of resources) {
     resourceCountsBySubject.set(resource.subjectId, (resourceCountsBySubject.get(resource.subjectId) ?? 0) + 1);
   }
   const activeSubjectId = selectedSubjectId && subjects.some((subject) => subject.id === selectedSubjectId) ? selectedSubjectId : null;
-  const visibleResources = activeSubjectId ? resources.filter((resource) => resource.subjectId === activeSubjectId) : resources;
   const activeSubjectName = activeSubjectId ? subjectNames.get(activeSubjectId) : null;
+  const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase('fr');
+  const subjectResources = activeSubjectId ? resources.filter((resource) => resource.subjectId === activeSubjectId) : resources;
+  const visibleResources = normalizedSearchQuery
+    ? subjectResources.filter((resource) => {
+        const subjectName = subjectNames.get(resource.subjectId) ?? '';
+        return `${resource.title} ${subjectName}`.toLocaleLowerCase('fr').includes(normalizedSearchQuery);
+      })
+    : subjectResources;
+  const isFiltered = Boolean(activeSubjectId || normalizedSearchQuery);
 
   return (
     <div className="page">
@@ -81,6 +90,18 @@ export function LibraryPage() {
                 <p className="eyebrow">Enregistrés</p>
                 <h2>{activeSubjectName ? `Supports · ${activeSubjectName}` : 'Supports'}</h2>
               </div>
+              {resources.length ? (
+                <label className="library-search">
+                  <span className="sr-only">Rechercher un support</span>
+                  <input
+                    type="search"
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder="Rechercher un support…"
+                    autoComplete="off"
+                  />
+                </label>
+              ) : null}
             </div>
 
             {visibleResources.length ? (
@@ -102,11 +123,11 @@ export function LibraryPage() {
                   </Link>
                 ))}
               </div>
-            ) : activeSubjectId ? (
+            ) : isFiltered ? (
               <div className="empty-library">
                 <div className="empty-library__symbol" aria-hidden="true">◇</div>
-                <h3>Aucun support dans cette matière</h3>
-                <p>Importez un support dans cette matière ou choisissez « Toutes » pour revenir à la bibliothèque complète.</p>
+                <h3>Aucun support correspondant</h3>
+                <p>{normalizedSearchQuery ? 'Modifiez votre recherche ou choisissez une autre matière.' : 'Importez un support dans cette matière ou choisissez « Toutes » pour revenir à la bibliothèque complète.'}</p>
               </div>
             ) : (
               <div className="empty-library">
