@@ -1,4 +1,4 @@
-import { installSyncTriggers, requestSync } from './sync';
+import { installSyncTriggers } from './sync';
 import { retryTransientSyncFailuresNow } from './retryableSync';
 
 /**
@@ -11,12 +11,12 @@ export function installResilientSyncTriggers(): () => void {
 
   const syncWhenVisible = () => {
     if (document.visibilityState === 'visible' && navigator.onLine) {
-      void requestSync();
+      void retryTransientSyncFailuresNow();
     }
   };
 
   const syncAfterPageRestore = () => {
-    if (navigator.onLine) void requestSync();
+    if (navigator.onLine) void retryTransientSyncFailuresNow();
   };
 
   const retryAfterReconnect = () => {
