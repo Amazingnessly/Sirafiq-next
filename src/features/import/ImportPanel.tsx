@@ -110,7 +110,7 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
         </label>
         <label>
           <span>Titre {mode === 'file' ? '(facultatif)' : ''}</span>
-          <input value={title} onChange={(event) => { clearFeedback(); setTitle(event.target.value); }} placeholder={mode === 'file' ? 'Nom du fichier par défaut' : 'Titre du texte'} maxLength={240} />
+          <input value={title} onChange={(event) => { clearFeedback(); setTitle(event.target.value); }} placeholder={mode === 'file' ? 'Nom du fichier par défaut' : 'Titre du texte'} maxLength={240} required={mode === 'text'} />
         </label>
       </div>
 
@@ -166,7 +166,7 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
 
       <div className="import-actions">
         <p>Le support n’est déclaré synchronisé qu’après confirmation du stockage R2.</p>
-        <button className="button button--primary" type="submit" disabled={busy || !effectiveSubjectId || (mode === 'file' ? !file : !text.trim())}>
+        <button className="button button--primary" type="submit" disabled={busy || !effectiveSubjectId || (mode === 'file' ? !file : !title.trim() || !text.trim())}>
           {busy ? busyLabel(progress) : 'Importer le support'}
         </button>
       </div>
