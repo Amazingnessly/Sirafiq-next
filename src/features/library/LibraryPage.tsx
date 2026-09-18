@@ -9,6 +9,10 @@ export function LibraryPage() {
   const subjects = useDexieQuery(() => db.subjects.orderBy('name').toArray(), [], []);
   const resources = useDexieQuery(() => db.resources.orderBy('updatedAt').reverse().toArray(), [], []);
   const subjectNames = new Map(subjects.map((subject) => [subject.id, subject.name]));
+  const resourceCountsBySubject = new Map<string, number>();
+  for (const resource of resources) {
+    resourceCountsBySubject.set(resource.subjectId, (resourceCountsBySubject.get(resource.subjectId) ?? 0) + 1);
+  }
 
   return (
     <div className="page">
@@ -37,7 +41,7 @@ export function LibraryPage() {
                   <li key={subject.id}>
                     <span className="subject-dot" aria-hidden="true" />
                     <span>{subject.name}</span>
-                    <small>{resources.filter((resource) => resource.subjectId === subject.id).length}</small>
+                    <small>{resourceCountsBySubject.get(subject.id) ?? 0}</small>
                   </li>
                 ))}
               </ul>
