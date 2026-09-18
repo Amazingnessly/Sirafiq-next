@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useRef, useState } from 'react';
 import type { SubjectRecord } from '../../data/db';
 import { createSubject } from '../../data/repository';
 import { requestSync } from '../../lib/sync';
@@ -17,9 +17,12 @@ export function SubjectForm({
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const submitLockRef = useRef(false);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (submitLockRef.current) return;
+    submitLockRef.current = true;
     setError(null);
     setSaving(true);
     try {
@@ -30,6 +33,7 @@ export function SubjectForm({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Impossible de créer la matière.');
     } finally {
+      submitLockRef.current = false;
       setSaving(false);
     }
   }
