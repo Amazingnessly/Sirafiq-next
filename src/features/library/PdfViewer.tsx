@@ -37,6 +37,30 @@ type PdfLoadingTask = {
   destroy: () => Promise<void>;
 };
 
+const PDF_PAGE_STORAGE_PREFIX = 'sirafiq:pdf-page:';
+
+function pageStorageKey(src: string) {
+  return `${PDF_PAGE_STORAGE_PREFIX}${src}`;
+}
+
+function readSavedPage(src: string, pageCount: number) {
+  try {
+    const value = Number.parseInt(window.localStorage.getItem(pageStorageKey(src)) ?? '', 10);
+    if (!Number.isFinite(value)) return 1;
+    return Math.min(Math.max(value, 1), pageCount);
+  } catch {
+    return 1;
+  }
+}
+
+function savePage(src: string, pageNumber: number) {
+  try {
+    window.localStorage.setItem(pageStorageKey(src), String(pageNumber));
+  } catch {
+    // Reading must remain usable when Safari blocks or exhausts local storage.
+  }
+}
+
 export function PdfViewer({ src, title }: PdfViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -93,6 +117,7 @@ export function PdfViewer({ src, title }: PdfViewerProps) {
         }
         documentRef.current = pdfDocument;
         setPageCount(pdfDocument.numPages);
+        setPageNumber(readSavedPage(src, pdfDocument.numPages));
       } catch (cause) {
         if (!cancelled) {
           setError(cause instanceof Error ? cause.message : 'Le PDF n’a pas pu être ouvert.');
@@ -114,6 +139,10 @@ export function PdfViewer({ src, title }: PdfViewerProps) {
       else if (loadingTask) void loadingTask.destroy();
     };
   }, [src]);
+
+  useEffect(() => {
+    if (pageCount > 0) savePage(src, pageNumber);
+  }, [pageCount, pageNumber, src]);
 
   useEffect(() => {
     const currentDocument = documentRef.current;
