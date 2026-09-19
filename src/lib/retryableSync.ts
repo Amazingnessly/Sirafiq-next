@@ -7,6 +7,10 @@ export function isRetryableOutboxAttempt(nextAttemptAt: number): boolean {
   return Number.isFinite(nextAttemptAt) && nextAttemptAt < NEVER_RETRY_AT;
 }
 
+export function isTerminalOutboxAttempt(nextAttemptAt: number): boolean {
+  return !isRetryableOutboxAttempt(nextAttemptAt);
+}
+
 /**
  * Network transitions are stronger evidence than the exponential-backoff timer:
  * if connectivity has just returned, retry transient failures immediately.
