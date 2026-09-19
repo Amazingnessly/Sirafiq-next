@@ -110,7 +110,7 @@ export function LibraryPage() {
                 {visibleResources.map((resource) => (
                   <Link to={`/bibliotheque/${resource.id}`} className="resource-card" key={resource.id}>
                     <div className={`resource-icon resource-icon--${resource.kind}`} aria-hidden="true">{resource.kind === 'pdf' ? 'PDF' : 'TXT'}</div>
-                    <div className="resource-card__body"><span className="resource-subject">{subjectNames.get(resource.subjectId) ?? 'Matière'}</span><h3>{resource.title}</h3><p>{resource.status === 'ready' ? 'Contenu extrait et disponible.' : resource.extractionError ?? 'Extraction impossible.'}</p></div>
+                    <div className="resource-card__body"><span className="resource-subject">{subjectNames.get(resource.subjectId) ?? 'Matière'}</span><h3>{resource.title}</h3><p>{resource.syncState === 'error' ? `Synchronisation à reprendre · ${resource.syncError ?? 'Erreur de synchronisation.'} Ouvrez le support pour réessayer.` : resource.status === 'ready' ? 'Contenu extrait et disponible.' : resource.extractionError ?? 'Extraction impossible.'}</p></div>
                     <div className="resource-card__footer"><StatusPill status={resource.status} syncState={resource.syncState} /><span aria-hidden="true">→</span></div>
                   </Link>
                 ))}
