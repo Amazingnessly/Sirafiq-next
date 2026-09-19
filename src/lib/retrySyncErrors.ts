@@ -1,8 +1,7 @@
 import { db } from '../data/db';
 import { isoNow, newId } from './ids';
+import { isRetryableOutboxAttempt } from './retryableSync';
 import { requestSync } from './sync';
-
-const TERMINAL_RETRY_AT = Number.MAX_SAFE_INTEGER;
 
 /** Retry only work that is currently in a recoverable sync error state.
  * Pending work keeps its existing retry schedule, multipart failures remain on
@@ -24,12 +23,14 @@ export async function retrySyncErrorsNow(): Promise<void> {
   const resourceOutbox = new Map(
     outbox.filter((item) => item.type === 'resource.sync').map((item) => [item.entityId, item]),
   );
-  const recoverableSubjects = subjectErrors.filter(
-    (subject) => subjectOutbox.get(subject.id)?.nextAttemptAt !== TERMINAL_RETRY_AT,
-  );
+  const recoverableSubjects = subjectErrors.filter((subject) => {
+    const existing = subjectOutbox.get(subject.id);
+    return !existing || isRetryableOutboxAttempt(existing.nextAttemptAt);
+  });
   const recoverableResources = resourceErrors.filter((resource) => {
     if (multipartVersionIds.has(resource.currentVersionId)) return false;
-    return resourceOutbox.get(resource.id)?.nextAttemptAt !== TERMINAL_RETRY_AT;
+    const existing = resourceOutbox.get(resource.id);
+    return !existing || isRetryableOutboxAttempt(existing.nextAttemptAt);
   });
   const retryAt = Date.now();
   const createdAt = isoNow();
