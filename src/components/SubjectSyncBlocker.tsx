@@ -16,9 +16,9 @@ export function SubjectSyncBlocker() {
     });
   }, [], []);
 
-  if (blocked.length === 0) return null;
-
   const first = blocked[0];
+  if (!first) return null;
+
   const label = blocked.length === 1
     ? `Matière bloquée · ${first.name}`
     : `${blocked.length} matières bloquées`;
