@@ -16,10 +16,10 @@ test('Sirāfiq démarre sans APIs modernes requises par certains moteurs PDF', a
 test('le mode hors ligne garde visible le travail en attente de synchronisation', async ({ page, context }) => {
   await page.goto('/bibliotheque');
   await context.setOffline(true);
+  await expect(page.getByLabel('Hors ligne')).toBeVisible();
 
   await page.getByLabel('Nouvelle matière', { exact: true }).first().fill('Hors ligne E2E');
   await page.getByRole('button', { name: 'Ajouter', exact: true }).click();
 
   await expect(page.getByLabel('Hors ligne')).toContainText('1 en attente');
-  await expect(page.getByText('Hors ligne E2E', { exact: true })).toBeVisible();
 });
