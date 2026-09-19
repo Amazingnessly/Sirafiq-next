@@ -18,7 +18,7 @@ export function SyncIndicator() {
     [],
     0,
   );
-  const retryableErrors = Math.max(0, errors - multipartErrors);
+  const retryableErrors = errors;
   const [running, setRunning] = useState(false);
   const [online, setOnline] = useState(() => navigator.onLine);
 
