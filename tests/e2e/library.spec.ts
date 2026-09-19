@@ -160,7 +160,7 @@ test('la bibliothèque restaure matière, recherche et état après ouverture pu
   await page.reload();
   await expect(page.getByText('Contenu servant à vérifier la restauration des filtres de bibliothèque.')).toBeVisible();
 
-  await page.getByRole('link', { name: /Bibliothèque/ }).click();
+  await page.getByRole('link', { name: '← Bibliothèque', exact: true }).click();
   const returnedUrl = new URL(page.url());
   expect(returnedUrl.searchParams.get('subject')).toBe(subjectId);
   expect(returnedUrl.searchParams.get('q')).toBe('filtré');
