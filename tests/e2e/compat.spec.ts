@@ -16,6 +16,9 @@ test('Sirāfiq démarre sans APIs modernes requises par certains moteurs PDF', a
 test('le mode hors ligne garde visible le travail en attente de synchronisation', async ({ page, context }) => {
   await page.goto('/bibliotheque');
   await context.setOffline(true);
+  // Playwright WebKit blocks the network but does not consistently emit the browser
+  // connectivity event that Safari dispatches when navigator.onLine changes.
+  await page.evaluate(() => window.dispatchEvent(new Event('offline')));
   await expect(page.getByLabel('Hors ligne')).toBeVisible();
 
   await page.getByLabel('Nouvelle matière', { exact: true }).first().fill('Hors ligne E2E');
