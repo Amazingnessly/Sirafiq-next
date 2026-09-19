@@ -35,7 +35,13 @@ test('le filtre de synchronisation isole un support à reprendre', async ({ page
   await page.goto('/bibliotheque?status=sync-error');
   await expect(page.getByRole('button', { name: 'À synchroniser' })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByRole('heading', { name: 'Support à reprendre' })).toBeVisible();
+  await expect(page.getByText(/Synchronisation à reprendre · Échec E2E/)).toBeVisible();
+  await expect(page.getByText(/Ouvrez le support pour réessayer/)).toBeVisible();
 
+  await page.getByRole('link', { name: /Support à reprendre/ }).click();
+  await expect(page.getByRole('button', { name: 'Retenter la synchronisation' })).toBeVisible();
+
+  await page.goto('/bibliotheque?status=sync-error');
   await page.getByRole('button', { name: 'Extraits' }).click();
   await expect(page).toHaveURL(/status=ready/);
 });
