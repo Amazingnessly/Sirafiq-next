@@ -6,11 +6,14 @@ import { requestSync, retryAllSyncErrorsNow } from '../lib/sync';
 
 export function SyncIndicator() {
   const pending = useDexieQuery(() => db.outbox.count(), [], 0);
-  const errors = useDexieQuery(async () => {
-    const [resourceErrors, subjectErrors] = await Promise.all([
-      db.resources.where('syncState').equals('error').count(),
+  const retryableErrors = useDexieQuery(async () => {
+    const [resources, subjectErrors, multipartSessions] = await Promise.all([
+      db.resources.where('syncState').equals('error').toArray(),
       db.subjects.where('syncState').equals('error').count(),
+      db.multipartUploads.where('status').equals('error').toArray(),
     ]);
+    const multipartVersionIds = new Set(multipartSessions.map((session) => session.versionId));
+    const resourceErrors = resources.filter((resource) => !multipartVersionIds.has(resource.currentVersionId)).length;
     return resourceErrors + subjectErrors;
   }, [], 0);
   const multipartErrors = useDexieQuery(
@@ -18,7 +21,6 @@ export function SyncIndicator() {
     [],
     0,
   );
-  const retryableErrors = errors;
   const [running, setRunning] = useState(false);
   const [online, setOnline] = useState(() => navigator.onLine);
 
@@ -53,10 +55,11 @@ export function SyncIndicator() {
     );
   }
 
-  if (multipartErrors > 0 && retryableErrors === 0) {
+  if (multipartErrors > 0) {
     return (
       <Link className="sync-pill sync-pill--error" to="/bibliotheque?status=sync-error">
         {multipartErrors} envoi{multipartErrors > 1 ? 's' : ''} à reprendre · Resélectionner
+        {retryableErrors > 0 ? ` · ${retryableErrors} autre${retryableErrors > 1 ? 's' : ''} erreur${retryableErrors > 1 ? 's' : ''}` : ''}
       </Link>
     );
   }
