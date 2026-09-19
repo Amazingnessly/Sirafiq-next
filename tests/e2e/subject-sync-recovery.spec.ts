@@ -52,6 +52,7 @@ test('une matière en erreur reconstruit son travail de synchronisation manquant
   });
 
   await page.reload();
+  await page.getByRole('button', { name: /Matière à reprendre/ }).click();
   await expect(page.getByText('Échec réseau E2E', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Réessayer la synchronisation' }).click();
   await expect.poll(() => retryRequests).toBe(1);
