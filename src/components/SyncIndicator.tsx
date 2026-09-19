@@ -43,7 +43,14 @@ export function SyncIndicator() {
   }
 
   if (!online) {
-    return <div className="sync-pill sync-pill--offline" aria-label="Hors ligne">Hors ligne · travail local</div>;
+    const blocked = retryableErrors + multipartErrors;
+    const localWork = pending > 0 ? `${pending} en attente` : 'travail local';
+    const problemSummary = blocked > 0 ? ` · ${blocked} à reprendre` : '';
+    return (
+      <div className="sync-pill sync-pill--offline" aria-label="Hors ligne">
+        Hors ligne · {localWork}{problemSummary}
+      </div>
+    );
   }
 
   if (multipartErrors > 0 && retryableErrors === 0) {
