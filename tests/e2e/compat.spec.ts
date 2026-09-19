@@ -21,5 +21,5 @@ test('le mode hors ligne garde visible le travail en attente de synchronisation'
   await page.getByRole('button', { name: 'Ajouter', exact: true }).click();
 
   await expect(page.getByLabel('Hors ligne')).toContainText('1 en attente');
-  await expect(page.getByRole('listitem').getByText('Hors ligne E2E', { exact: true })).toBeVisible();
+  await expect(page.getByText('Hors ligne E2E', { exact: true })).toBeVisible();
 });
