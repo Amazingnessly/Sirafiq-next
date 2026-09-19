@@ -25,7 +25,8 @@ export function LibraryPage() {
     resourceCountsBySubject.set(resource.subjectId, (resourceCountsBySubject.get(resource.subjectId) ?? 0) + 1);
   }
   const activeSubjectId = requestedSubjectId && subjects.some((subject) => subject.id === requestedSubjectId) ? requestedSubjectId : null;
-  const activeSubjectName = activeSubjectId ? subjectNames.get(activeSubjectId) : null;
+  const activeSubject = activeSubjectId ? subjects.find((subject) => subject.id === activeSubjectId) ?? null : null;
+  const activeSubjectName = activeSubject?.name ?? null;
   const importSubjects = activeSubjectId
     ? [...subjects.filter((subject) => subject.id === activeSubjectId), ...subjects.filter((subject) => subject.id !== activeSubjectId)]
     : subjects;
@@ -81,7 +82,7 @@ export function LibraryPage() {
               <ul className="subject-list">
                 <li><button type="button" className={!activeSubjectId ? 'subject-filter is-active' : 'subject-filter'} aria-pressed={!activeSubjectId} onClick={() => updateFilter('subject', null)}><span className="subject-dot" aria-hidden="true" /><span>Toutes</span><small>{resources.length}</small></button></li>
                 {subjects.map((subject) => (
-                  <li key={subject.id}><button type="button" className={activeSubjectId === subject.id ? 'subject-filter is-active' : 'subject-filter'} aria-pressed={activeSubjectId === subject.id} onClick={() => updateFilter('subject', subject.id)}><span className="subject-dot" aria-hidden="true" /><span>{subject.name}</span><small>{resourceCountsBySubject.get(subject.id) ?? 0}</small></button></li>
+                  <li key={subject.id}><button type="button" className={activeSubjectId === subject.id ? 'subject-filter is-active' : 'subject-filter'} aria-pressed={activeSubjectId === subject.id} onClick={() => updateFilter('subject', subject.id)} title={subject.syncState === 'error' ? subject.syncError ?? 'Synchronisation de la matière à vérifier.' : undefined}><span className="subject-dot" aria-hidden="true" /><span>{subject.name}{subject.syncState === 'error' ? ' · à vérifier' : ''}</span><small>{resourceCountsBySubject.get(subject.id) ?? 0}</small></button></li>
                 ))}
               </ul>
             ) : <p className="muted">Aucune matière pour l’instant.</p>}
@@ -89,6 +90,14 @@ export function LibraryPage() {
         </aside>
 
         <div className="library-main">
+          {activeSubject?.syncState === 'error' ? (
+            <section className="panel" role="status" aria-live="polite">
+              <p className="eyebrow">Synchronisation de la matière à vérifier</p>
+              <h2>{activeSubject.name}</h2>
+              <p>{activeSubject.syncError ?? 'La synchronisation de cette matière n’a pas abouti. Son contenu local reste disponible.'}</p>
+            </section>
+          ) : null}
+
           <section className="panel panel--import">
             <div className="panel-heading panel-heading--stack"><div><p className="eyebrow">Ajouter</p><h2>Importer un support</h2></div><span className="tiny-badge">PDF · TXT · MD</span></div>
             <ImportPanel key={activeSubjectId ?? 'all'} subjects={importSubjects} returnQuery={libraryContext} />
