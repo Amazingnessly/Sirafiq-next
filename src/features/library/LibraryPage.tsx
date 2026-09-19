@@ -1,5 +1,6 @@
 import { Link, useSearchParams } from 'react-router-dom';
 import { StatusPill } from '../../components/StatusPill';
+import { SubjectSyncFailurePanel } from '../../components/SubjectSyncFailurePanel';
 import { db } from '../../data/db';
 import { useDexieQuery } from '../../data/useDexieQuery';
 import { ImportPanel } from '../import/ImportPanel';
@@ -90,13 +91,7 @@ export function LibraryPage() {
         </aside>
 
         <div className="library-main">
-          {activeSubject?.syncState === 'error' ? (
-            <section className="panel" role="status" aria-live="polite">
-              <p className="eyebrow">Synchronisation de la matière à vérifier</p>
-              <h2>{activeSubject.name}</h2>
-              <p>{activeSubject.syncError ?? 'La synchronisation de cette matière n’a pas abouti. Son contenu local reste disponible.'}</p>
-            </section>
-          ) : null}
+          {activeSubject?.syncState === 'error' ? <SubjectSyncFailurePanel subject={activeSubject} /> : null}
 
           <section className="panel panel--import">
             <div className="panel-heading panel-heading--stack"><div><p className="eyebrow">Ajouter</p><h2>Importer un support</h2></div><span className="tiny-badge">PDF · TXT · MD</span></div>
