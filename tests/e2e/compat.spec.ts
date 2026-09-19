@@ -12,3 +12,14 @@ test('Sirāfiq démarre sans APIs modernes requises par certains moteurs PDF', a
   await expect(page.getByRole('heading', { name: 'Vos supports, sans ambiguïté.' })).toBeVisible();
   await expect(page.getByText('Sirāfiq n’a pas pu démarrer')).toHaveCount(0);
 });
+
+test('le mode hors ligne garde visible le travail en attente de synchronisation', async ({ page, context }) => {
+  await page.goto('/bibliotheque');
+  await context.setOffline(true);
+
+  await page.getByLabel('Nouvelle matière', { exact: true }).first().fill('Hors ligne E2E');
+  await page.getByRole('button', { name: 'Ajouter', exact: true }).click();
+
+  await expect(page.getByLabel('Hors ligne')).toContainText('1 en attente');
+  await expect(page.getByRole('listitem').getByText('Hors ligne E2E', { exact: true })).toBeVisible();
+});
