@@ -13,7 +13,7 @@ import { SubjectForm } from './SubjectForm';
 
 type Mode = 'file' | 'text';
 
-export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
+export function ImportPanel({ subjects, returnQuery = '' }: { subjects: SubjectRecord[]; returnQuery?: string }) {
   const [mode, setMode] = useState<Mode>('file');
   const [subjectId, setSubjectId] = useState(subjects[0]?.id ?? '');
   const [title, setTitle] = useState('');
@@ -26,6 +26,9 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
   const [progress, setProgress] = useState<TransferProgress | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const submitLockRef = useRef(false);
+  const resourceHref = (resourceId: string) => returnQuery
+    ? `/bibliotheque/${resourceId}?library=${encodeURIComponent(returnQuery)}`
+    : `/bibliotheque/${resourceId}`;
 
   const firstSubjectId = subjects[0]?.id ?? '';
   const effectiveSubjectId = subjects.some((subject) => subject.id === subjectId) ? subjectId : firstSubjectId;
@@ -163,7 +166,7 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
           {file && file.size > MULTIPART_UPLOAD_THRESHOLD_BYTES && !duplicateId && (
             <small>Les morceaux déjà reçus restent enregistrés. Gardez ou resélectionnez le même fichier puis relancez l’import pour reprendre.</small>
           )}
-          {duplicateId && <Link to={`/bibliotheque/${duplicateId}`}>Ouvrir le support existant</Link>}
+          {duplicateId && <Link to={resourceHref(duplicateId)}>Ouvrir le support existant</Link>}
         </div>
       )}
 
@@ -171,7 +174,7 @@ export function ImportPanel({ subjects }: { subjects: SubjectRecord[] }) {
         <div className="success-box" role="status" aria-live="polite">
           <strong>Support importé</strong>
           <span>Il est maintenant disponible dans votre bibliothèque.</span>
-          <Link to={`/bibliotheque/${importedId}`}>Ouvrir le support</Link>
+          <Link to={resourceHref(importedId)}>Ouvrir le support</Link>
         </div>
       )}
 
