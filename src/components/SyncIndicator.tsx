@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { db } from '../data/db';
 import { useDexieQuery } from '../data/useDexieQuery';
-import { requestSync, retryAllSyncErrorsNow } from '../lib/sync';
+import { requestSync } from '../lib/sync';
+import { retrySyncErrorsNow } from '../lib/retrySyncErrors';
 
 export function SyncIndicator() {
   const pending = useDexieQuery(() => db.outbox.count(), [], 0);
@@ -37,7 +38,7 @@ export function SyncIndicator() {
   async function syncNow() {
     setRunning(true);
     try {
-      if (retryableErrors > 0) await retryAllSyncErrorsNow();
+      if (retryableErrors > 0) await retrySyncErrorsNow();
       else await requestSync();
     } finally {
       setRunning(false);
