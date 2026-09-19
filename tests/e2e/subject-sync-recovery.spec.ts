@@ -5,7 +5,7 @@ test('une matière en erreur reconstruit son travail de synchronisation manquant
 
   await page.getByLabel('Nouvelle matière', { exact: true }).first().fill('Matière à reprendre');
   await page.getByRole('button', { name: 'Ajouter', exact: true }).click();
-  await expect(page.getByText('Matière à reprendre', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Matière à reprendre/ })).toBeVisible();
 
   const subjectId = await page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
