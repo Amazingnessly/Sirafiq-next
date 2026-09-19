@@ -47,7 +47,7 @@ export function SyncIndicator() {
     const localWork = pending > 0 ? `${pending} en attente` : 'travail local';
     const problemSummary = blocked > 0 ? ` · ${blocked} à reprendre` : '';
     return (
-      <div className="sync-pill sync-pill--offline" aria-label="Hors ligne">
+      <div className="sync-pill sync-pill--offline" role="status" aria-live="polite">
         Hors ligne · {localWork}{problemSummary}
       </div>
     );
