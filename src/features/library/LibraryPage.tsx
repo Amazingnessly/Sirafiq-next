@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { StatusPill } from '../../components/StatusPill';
 import { db } from '../../data/db';
@@ -16,8 +15,8 @@ export function LibraryPage() {
   const subjects = useDexieQuery(() => db.subjects.orderBy('name').toArray(), [], []);
   const resources = useDexieQuery(() => db.resources.orderBy('updatedAt').reverse().toArray(), [], []);
   const [searchParams, setSearchParams] = useSearchParams();
-  const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
+  const requestedSubjectId = searchParams.get('subject');
+  const searchQuery = searchParams.get('q') ?? '';
   const requestedStatus = searchParams.get('status');
   const statusFilter: StatusFilter = requestedStatus === 'ready' || requestedStatus === 'failed' || requestedStatus === 'sync-error' ? requestedStatus : 'all';
   const subjectNames = new Map(subjects.map((subject) => [subject.id, subject.name]));
@@ -25,7 +24,7 @@ export function LibraryPage() {
   for (const resource of resources) {
     resourceCountsBySubject.set(resource.subjectId, (resourceCountsBySubject.get(resource.subjectId) ?? 0) + 1);
   }
-  const activeSubjectId = selectedSubjectId && subjects.some((subject) => subject.id === selectedSubjectId) ? selectedSubjectId : null;
+  const activeSubjectId = requestedSubjectId && subjects.some((subject) => subject.id === requestedSubjectId) ? requestedSubjectId : null;
   const activeSubjectName = activeSubjectId ? subjectNames.get(activeSubjectId) : null;
   const importSubjects = activeSubjectId
     ? [...subjects.filter((subject) => subject.id === activeSubjectId), ...subjects.filter((subject) => subject.id !== activeSubjectId)]
@@ -44,14 +43,18 @@ export function LibraryPage() {
       })
     : statusResources;
   const isFiltered = Boolean(activeSubjectId || normalizedSearchQuery || statusFilter !== 'all');
-  const setStatusFilter = (status: StatusFilter) => {
-    setSearchParams(status === 'all' ? {} : { status });
+  const libraryContext = searchParams.toString();
+  const updateFilter = (key: 'status' | 'subject' | 'q', value: string | null) => {
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set(key, value);
+    else next.delete(key);
+    setSearchParams(next, { replace: true });
   };
-  const resetFilters = () => {
-    setSelectedSubjectId(null);
-    setSearchQuery('');
-    setSearchParams({});
-  };
+  const setStatusFilter = (status: StatusFilter) => updateFilter('status', status === 'all' ? null : status);
+  const resourceHref = (resourceId: string) => libraryContext
+    ? `/bibliotheque/${resourceId}?library=${encodeURIComponent(libraryContext)}`
+    : `/bibliotheque/${resourceId}`;
+  const resetFilters = () => setSearchParams({}, { replace: true });
 
   return (
     <div className="page">
@@ -76,9 +79,9 @@ export function LibraryPage() {
             </div>
             {subjects.length ? (
               <ul className="subject-list">
-                <li><button type="button" className={!activeSubjectId ? 'subject-filter is-active' : 'subject-filter'} aria-pressed={!activeSubjectId} onClick={() => setSelectedSubjectId(null)}><span className="subject-dot" aria-hidden="true" /><span>Toutes</span><small>{resources.length}</small></button></li>
+                <li><button type="button" className={!activeSubjectId ? 'subject-filter is-active' : 'subject-filter'} aria-pressed={!activeSubjectId} onClick={() => updateFilter('subject', null)}><span className="subject-dot" aria-hidden="true" /><span>Toutes</span><small>{resources.length}</small></button></li>
                 {subjects.map((subject) => (
-                  <li key={subject.id}><button type="button" className={activeSubjectId === subject.id ? 'subject-filter is-active' : 'subject-filter'} aria-pressed={activeSubjectId === subject.id} onClick={() => setSelectedSubjectId(subject.id)}><span className="subject-dot" aria-hidden="true" /><span>{subject.name}</span><small>{resourceCountsBySubject.get(subject.id) ?? 0}</small></button></li>
+                  <li key={subject.id}><button type="button" className={activeSubjectId === subject.id ? 'subject-filter is-active' : 'subject-filter'} aria-pressed={activeSubjectId === subject.id} onClick={() => updateFilter('subject', subject.id)}><span className="subject-dot" aria-hidden="true" /><span>{subject.name}</span><small>{resourceCountsBySubject.get(subject.id) ?? 0}</small></button></li>
                 ))}
               </ul>
             ) : <p className="muted">Aucune matière pour l’instant.</p>}
@@ -88,13 +91,13 @@ export function LibraryPage() {
         <div className="library-main">
           <section className="panel panel--import">
             <div className="panel-heading panel-heading--stack"><div><p className="eyebrow">Ajouter</p><h2>Importer un support</h2></div><span className="tiny-badge">PDF · TXT · MD</span></div>
-            <ImportPanel key={activeSubjectId ?? 'all'} subjects={importSubjects} />
+            <ImportPanel key={activeSubjectId ?? 'all'} subjects={importSubjects} returnQuery={libraryContext} />
           </section>
 
           <section className="resources-section">
             <div className="section-title">
               <div><p className="eyebrow">Enregistrés</p><h2>{activeSubjectName ? `Supports · ${activeSubjectName}` : 'Supports'}</h2></div>
-              {resources.length ? <label className="library-search"><span className="sr-only">Rechercher un support</span><input type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Rechercher un support…" autoComplete="off" /></label> : null}
+              {resources.length ? <label className="library-search"><span className="sr-only">Rechercher un support</span><input type="search" value={searchQuery} onChange={(event) => updateFilter('q', event.target.value || null)} placeholder="Rechercher un support…" autoComplete="off" maxLength={240} /></label> : null}
             </div>
             {resources.length ? (
               <div className="library-status-filters" aria-label="Filtrer les supports par état">
@@ -108,7 +111,7 @@ export function LibraryPage() {
             {visibleResources.length ? (
               <div className="resource-grid">
                 {visibleResources.map((resource) => (
-                  <Link to={`/bibliotheque/${resource.id}`} className="resource-card" key={resource.id}>
+                  <Link to={resourceHref(resource.id)} className="resource-card" key={resource.id}>
                     <div className={`resource-icon resource-icon--${resource.kind}`} aria-hidden="true">{resource.kind === 'pdf' ? 'PDF' : 'TXT'}</div>
                     <div className="resource-card__body"><span className="resource-subject">{subjectNames.get(resource.subjectId) ?? 'Matière'}</span><h3>{resource.title}</h3><p>{resource.syncState === 'error' ? `Synchronisation à reprendre · ${resource.syncError ?? 'Erreur de synchronisation.'} Ouvrez le support pour réessayer.` : resource.status === 'ready' ? 'Contenu extrait et disponible.' : resource.extractionError ?? 'Extraction impossible.'}</p></div>
                     <div className="resource-card__footer"><StatusPill status={resource.status} syncState={resource.syncState} /><span aria-hidden="true">→</span></div>

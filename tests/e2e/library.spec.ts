@@ -126,3 +126,47 @@ test('un même contenu n’est pas importé deux fois localement', async ({ page
   await expect(page.getByText('Ce fichier existe déjà dans la bibliothèque.')).toBeVisible();
   await expect(page.getByRole('link', { name: 'Ouvrir le support existant' })).toBeVisible();
 });
+
+
+test('la bibliothèque restaure matière, recherche et état après ouverture puis rechargement d’un support', async ({ page }) => {
+  await page.goto('/bibliotheque');
+
+  await page.getByLabel('Nouvelle matière', { exact: true }).first().fill('Contexte URL E2E');
+  await page.getByRole('button', { name: 'Ajouter', exact: true }).click();
+  await page.getByRole('button', { name: 'Texte', exact: true }).click();
+  await page.getByLabel(/Titre/).fill('Support filtré');
+  await page.getByLabel('Contenu').fill('Contenu servant à vérifier la restauration des filtres de bibliothèque.');
+  await page.getByRole('button', { name: 'Importer le support' }).click();
+  await expect(page.getByRole('heading', { name: 'Support filtré' })).toBeVisible();
+
+  const subjectButton = page.getByRole('button', { name: /Contexte URL E2E/ });
+  await subjectButton.click();
+  let libraryUrl = new URL(page.url());
+  const subjectId = libraryUrl.searchParams.get('subject');
+  expect(subjectId).toBeTruthy();
+
+  const search = page.getByRole('searchbox', { name: 'Rechercher un support' });
+  await search.fill('filtré');
+  await expect(page).toHaveURL(/q=filtr/);
+
+  await page.getByRole('button', { name: 'Extraits' }).click();
+  libraryUrl = new URL(page.url());
+  expect(libraryUrl.searchParams.get('subject')).toBe(subjectId);
+  expect(libraryUrl.searchParams.get('q')).toBe('filtré');
+  expect(libraryUrl.searchParams.get('status')).toBe('ready');
+
+  await page.getByRole('link', { name: /Support filtré/ }).click();
+  await expect(page.getByText('Contenu servant à vérifier la restauration des filtres de bibliothèque.')).toBeVisible();
+  await page.reload();
+  await expect(page.getByText('Contenu servant à vérifier la restauration des filtres de bibliothèque.')).toBeVisible();
+
+  await page.getByRole('link', { name: '← Bibliothèque', exact: true }).click();
+  const returnedUrl = new URL(page.url());
+  expect(returnedUrl.searchParams.get('subject')).toBe(subjectId);
+  expect(returnedUrl.searchParams.get('q')).toBe('filtré');
+  expect(returnedUrl.searchParams.get('status')).toBe('ready');
+  await expect(page.getByRole('searchbox', { name: 'Rechercher un support' })).toHaveValue('filtré');
+  await expect(page.getByRole('button', { name: /Contexte URL E2E/ })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'Extraits' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('heading', { name: 'Support filtré' })).toBeVisible();
+});

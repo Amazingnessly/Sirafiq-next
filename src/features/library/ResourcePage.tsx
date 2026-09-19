@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { StatusPill } from '../../components/StatusPill';
 import { db } from '../../data/db';
 import { retrySyncForResource } from '../../data/repository';
@@ -15,6 +15,8 @@ import { PdfViewer } from './PdfViewer';
 
 export function ResourcePage() {
   const { resourceId = '' } = useParams();
+  const [searchParams] = useSearchParams();
+  const backToLibrary = libraryReturnHref(searchParams.get('library'));
   const localResource = useDexieQuery(() => db.resources.get(resourceId), [resourceId], undefined);
   const localVersion = useDexieQuery(() => localResource ? db.resourceVersions.get(localResource.currentVersionId) : Promise.resolve(undefined), [localResource?.currentVersionId], undefined);
   const localExtraction = useDexieQuery(() => localResource ? db.extractions.get(localResource.currentVersionId) : Promise.resolve(undefined), [localResource?.currentVersionId], undefined);
@@ -61,10 +63,10 @@ export function ResourcePage() {
   async function retryExtraction() { if (!localResource || extracting) return; setExtracting(true); setExtractionRetryError(null); try { await retryServerExtractionForResource(localResource.id); } catch (error) { setExtractionRetryError(error instanceof Error ? error.message : 'L’extraction serveur a échoué.'); } finally { setExtracting(false); } }
 
   if (!localResource && remote.isPending) return <div className="page"><div className="loading-card">Ouverture du support…</div></div>;
-  if (!title || (!localResource && remote.isError)) return <div className="page"><Link className="back-link" to="/bibliotheque">← Bibliothèque</Link><div className="error-page"><h1>Support introuvable</h1><p>Ce support n’est disponible ni dans le stockage local ni sur le serveur.</p></div></div>;
+  if (!title || (!localResource && remote.isError)) return <div className="page"><Link className="back-link" to={backToLibrary}>← Bibliothèque</Link><div className="error-page"><h1>Support introuvable</h1><p>Ce support n’est disponible ni dans le stockage local ni sur le serveur.</p></div></div>;
 
   return <div className="page resource-page">
-    <Link className="back-link" to="/bibliotheque">← Bibliothèque</Link>
+    <Link className="back-link" to={backToLibrary}>← Bibliothèque</Link>
     <header className="resource-header"><div><p className="eyebrow">{subject?.name ?? 'Support'}</p><h1>{title}</h1><p className="resource-meta">{kind === 'pdf' ? 'Document PDF' : 'Texte'}{localVersion ? ` · ${formatBytes(localVersion.size)}` : remote.data ? ` · ${formatBytes(remote.data.version.size)}` : ''}</p></div>{localResource && <StatusPill status={localResource.status} syncState={localResource.syncState} />}</header>
     {localResource?.syncState === 'error' && <div className="error-box error-box--wide" role="alert"><div><strong>{multipartSession ? 'L’envoi du gros fichier est interrompu.' : 'Le support est enregistré localement, mais la synchronisation a échoué.'}</strong><span>{localResource.syncError}</span>{multipartSession && <small>Les morceaux déjà confirmés sont conservés. Resélectionnez le même fichier pour reprendre sans repartir de zéro.</small>}</div>{multipartSession ? <div className="multipart-resume"><input aria-label="Fichier à reprendre" type="file" accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown" disabled={resuming} onChange={(event) => setResumeFile(event.target.files?.[0] ?? null)} />{transferProgress && <span>{progressLabel(transferProgress)}</span>}<button className="button button--secondary" type="button" disabled={!resumeFile || resuming} onClick={resumeMultipart}>{resuming ? 'Reprise en cours…' : 'Reprendre l’envoi'}</button></div> : <button className="button button--secondary" type="button" onClick={retrySync}>Retenter la synchronisation</button>}{retryError && <span className="field-error">{retryError}</span>}</div>}
     {extractionFailed && <div className="extraction-warning" role="alert"><div className="extraction-warning__icon" aria-hidden="true">!</div><div><strong>Contenu non exploitable automatiquement</strong><p>{extractionError || 'Le texte n’a pas pu être extrait.'}</p><small>{multipartSession ? 'Le fichier n’est pas encore déclaré entièrement stocké. Sirāfiq n’utilisera pas ce contenu pour des activités.' : 'Le fichier reste conservé et consultable. Sirāfiq ne prétendra pas créer des activités à partir de ce contenu.'}</small></div></div>}
@@ -85,3 +87,17 @@ function getExtractionRecoveryReason(input: { kind: 'text' | 'pdf' | undefined; 
 }
 function progressLabel(progress: TransferProgress): string { const percent = progress.totalBytes ? Math.round((progress.processedBytes / progress.totalBytes) * 100) : 0; if (progress.phase === 'hashing') return `Vérification · ${percent} %`; if (progress.phase === 'finalizing') return 'Assemblage final…'; return `Morceau ${progress.partNumber ?? 0}/${progress.partCount ?? 0} · ${percent} %`; }
 function formatBytes(bytes: number): string { if (bytes < 1024) return `${bytes} o`; if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} Ko`; return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`; }
+
+function libraryReturnHref(raw: string | null): string {
+  if (!raw) return '/bibliotheque';
+  const source = new URLSearchParams(raw);
+  const safe = new URLSearchParams();
+  const status = source.get('status');
+  if (status === 'ready' || status === 'failed' || status === 'sync-error') safe.set('status', status);
+  const subject = source.get('subject')?.trim();
+  if (subject) safe.set('subject', subject.slice(0, 128));
+  const query = source.get('q')?.trim();
+  if (query) safe.set('q', query.slice(0, 240));
+  const serialized = safe.toString();
+  return serialized ? `/bibliotheque?${serialized}` : '/bibliotheque';
+}
