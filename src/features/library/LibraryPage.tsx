@@ -10,7 +10,7 @@ function normalizeSearchText(value: string) {
   return value.normalize('NFD').replace(/[\p{M}\u0640]/gu, '').toLocaleLowerCase('fr').trim();
 }
 
-type StatusFilter = 'all' | 'ready' | 'failed';
+type StatusFilter = 'all' | 'ready' | 'failed' | 'sync-error';
 
 export function LibraryPage() {
   const subjects = useDexieQuery(() => db.subjects.orderBy('name').toArray(), [], []);
@@ -19,7 +19,7 @@ export function LibraryPage() {
   const [selectedSubjectId, setSelectedSubjectId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const requestedStatus = searchParams.get('status');
-  const statusFilter: StatusFilter = requestedStatus === 'ready' || requestedStatus === 'failed' ? requestedStatus : 'all';
+  const statusFilter: StatusFilter = requestedStatus === 'ready' || requestedStatus === 'failed' || requestedStatus === 'sync-error' ? requestedStatus : 'all';
   const subjectNames = new Map(subjects.map((subject) => [subject.id, subject.name]));
   const resourceCountsBySubject = new Map<string, number>();
   for (const resource of resources) {
@@ -32,7 +32,11 @@ export function LibraryPage() {
     : subjects;
   const normalizedSearchQuery = normalizeSearchText(searchQuery);
   const subjectResources = activeSubjectId ? resources.filter((resource) => resource.subjectId === activeSubjectId) : resources;
-  const statusResources = statusFilter === 'all' ? subjectResources : subjectResources.filter((resource) => resource.status === statusFilter);
+  const statusResources = statusFilter === 'all'
+    ? subjectResources
+    : statusFilter === 'sync-error'
+      ? subjectResources.filter((resource) => resource.syncState === 'error')
+      : subjectResources.filter((resource) => resource.status === statusFilter);
   const visibleResources = normalizedSearchQuery
     ? statusResources.filter((resource) => {
         const subjectName = subjectNames.get(resource.subjectId) ?? '';
@@ -97,6 +101,7 @@ export function LibraryPage() {
                 <button type="button" className={statusFilter === 'all' ? 'tiny-badge is-active' : 'tiny-badge'} aria-pressed={statusFilter === 'all'} onClick={() => setStatusFilter('all')}>Tous</button>
                 <button type="button" className={statusFilter === 'ready' ? 'tiny-badge is-active' : 'tiny-badge'} aria-pressed={statusFilter === 'ready'} onClick={() => setStatusFilter('ready')}>Extraits</button>
                 <button type="button" className={statusFilter === 'failed' ? 'tiny-badge is-active' : 'tiny-badge'} aria-pressed={statusFilter === 'failed'} onClick={() => setStatusFilter('failed')}>À revoir</button>
+                <button type="button" className={statusFilter === 'sync-error' ? 'tiny-badge is-active' : 'tiny-badge'} aria-pressed={statusFilter === 'sync-error'} onClick={() => setStatusFilter('sync-error')}>À synchroniser</button>
               </div>
             ) : null}
 

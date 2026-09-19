@@ -55,7 +55,7 @@ export function SyncIndicator() {
 
   if (multipartErrors > 0 && retryableErrors === 0) {
     return (
-      <Link className="sync-pill sync-pill--error" to="/bibliotheque">
+      <Link className="sync-pill sync-pill--error" to="/bibliotheque?status=sync-error">
         {multipartErrors} envoi{multipartErrors > 1 ? 's' : ''} à reprendre · Resélectionner
       </Link>
     );
