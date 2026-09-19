@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { buildIdentity } from '../buildIdentity';
 import { SyncIndicator } from '../components/SyncIndicator';
+import { SubjectSyncBlocker } from '../components/SubjectSyncBlocker';
 
 export function AppShell() {
   return (
@@ -27,6 +28,7 @@ export function AppShell() {
 
         <div className="sidebar-spacer" />
         <SyncIndicator />
+        <SubjectSyncBlocker />
         <p className="sidebar-note">Seules les fonctions réellement actives sont affichées.</p>
         <div
           className="build-identity"
