@@ -1,23 +1,25 @@
 # Validation — Sirāfiq Next V0.1
 
-Statut cible de cette branche : **implémentée, soumise à CI, pas encore validée sur iPad réel**.
+Statut cible de cette branche : **implémentée et couverte par CI, pas encore validée sur iPad réel**.
 
 | Contrôle | État | Note |
 |---|---|---|
 | Parcours V0.1 défini | ✅ | matière → import → extraction → persistance → sync → consultation |
 | Aucun module futur affiché | ✅ | uniquement Aujourd’hui + Bibliothèque |
-| Aucun bouton sans action | ✅ audit de code | à confirmer également par E2E |
-| Hash SHA-256 anti-doublon | ✅ implémenté | test Vitest fourni |
-| Extraction PDF.js réelle | ✅ implémentée | runtime contrôlé par CI/build, cas PDF réel à enrichir |
-| Persistance IndexedDB/Dexie | ✅ implémentée | scénario Playwright après rechargement |
-| Synchronisation D1/R2 | ✅ implémentée | test local/Cloudflare à compléter avant production |
-| Erreur d’extraction explicite | ✅ implémentée | aucun faux contenu produit |
-| TypeScript + tests unitaires + build | ⏳ CI GitHub | workflow `.github/workflows/ci.yml` |
-| E2E iPad-sized | ⏳ CI GitHub | Playwright, viewport iPad Pro 11 paysage |
+| Aucun bouton sans action | ✅ | audit de code + parcours E2E ; validation appareil réel encore requise |
+| Hash SHA-256 anti-doublon | ✅ | test Vitest fourni |
+| Extraction PDF.js réelle | ✅ | runtime contrôlé par CI/build ; validation avec support réel sur iPad encore requise |
+| Persistance IndexedDB/Dexie | ✅ | scénario Playwright après rechargement |
+| Synchronisation D1/R2 | ✅ implémentée | parcours de reprise couvert ; validation Cloudflare/R2 réel encore requise |
+| Erreur d’extraction explicite | ✅ | aucun faux contenu produit |
+| TypeScript + tests unitaires + build | ✅ CI GitHub | contrôle obligatoire avant fusion des PR ciblées |
+| E2E iPad-sized | ✅ CI GitHub | Playwright WebKit au format iPad paysage |
 | Déploiement Cloudflare production | — | volontairement non activé avant validation du socle |
 | Test Apple Pencil | — | hors périmètre V0.1 |
-| Validation sur iPad réel | ⏳ | après réussite CI et déploiement de test |
+| Validation sur iPad réel | ⏳ | import, ouverture, rechargement, reprise et multipart/R2 réel à confirmer |
 
 ## Règle de promotion
 
-La V0.1 ne doit pas être marquée « validée » tant que la CI n'est pas verte et qu'un essai manuel sur iPad n'a pas confirmé le parcours réel d'import, ouverture, rechargement et reprise.
+La V0.1 ne doit pas être marquée « validée » tant qu'un essai manuel sur l'iPad cible n'a pas confirmé le parcours réel d'import, ouverture, rechargement et reprise, notamment avec Cloudflare D1/R2 réel et un fichier volumineux pour le multipart.
+
+La CI reste une condition nécessaire à chaque fusion, mais elle ne remplace pas la validation sur appareil réel.
