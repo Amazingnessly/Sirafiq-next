@@ -5,23 +5,38 @@ import { useDexieQuery } from '../data/useDexieQuery';
 import { requestSync } from '../lib/sync';
 import { retrySyncErrorsNow } from '../lib/retrySyncErrors';
 
+const TERMINAL_RETRY_AT = Number.MAX_SAFE_INTEGER;
+
 export function SyncIndicator() {
   const pending = useDexieQuery(() => db.outbox.count(), [], 0);
-  const retryableErrors = useDexieQuery(async () => {
-    const [resources, subjectErrors, multipartSessions] = await Promise.all([
+  const syncErrors = useDexieQuery(async () => {
+    const [resources, subjects, multipartSessions, outbox] = await Promise.all([
       db.resources.where('syncState').equals('error').toArray(),
-      db.subjects.where('syncState').equals('error').count(),
+      db.subjects.where('syncState').equals('error').toArray(),
       db.multipartUploads.where('status').equals('error').toArray(),
+      db.outbox.toArray(),
     ]);
     const multipartVersionIds = new Set(multipartSessions.map((session) => session.versionId));
-    const resourceErrors = resources.filter((resource) => !multipartVersionIds.has(resource.currentVersionId)).length;
-    return resourceErrors + subjectErrors;
-  }, [], 0);
-  const multipartErrors = useDexieQuery(
-    () => db.multipartUploads.where('status').equals('error').count(),
-    [],
-    0,
-  );
+    const subjectOutbox = new Map(
+      outbox.filter((item) => item.type === 'subject.upsert').map((item) => [item.entityId, item]),
+    );
+    const resourceOutbox = new Map(
+      outbox.filter((item) => item.type === 'resource.sync').map((item) => [item.entityId, item]),
+    );
+    let retryable = 0;
+    let blocked = 0;
+    for (const subject of subjects) {
+      if (subjectOutbox.get(subject.id)?.nextAttemptAt === TERMINAL_RETRY_AT) blocked += 1;
+      else retryable += 1;
+    }
+    for (const resource of resources) {
+      if (multipartVersionIds.has(resource.currentVersionId)) continue;
+      if (resourceOutbox.get(resource.id)?.nextAttemptAt === TERMINAL_RETRY_AT) blocked += 1;
+      else retryable += 1;
+    }
+    return { retryable, blocked, multipart: multipartSessions.length };
+  }, [], { retryable: 0, blocked: 0, multipart: 0 });
+  const { retryable: retryableErrors, blocked: blockedErrors, multipart: multipartErrors } = syncErrors;
   const [running, setRunning] = useState(false);
   const [online, setOnline] = useState(() => navigator.onLine);
 
@@ -46,7 +61,7 @@ export function SyncIndicator() {
   }
 
   if (!online) {
-    const blocked = retryableErrors + multipartErrors;
+    const blocked = retryableErrors + blockedErrors + multipartErrors;
     const localWork = pending > 0 ? `${pending} en attente` : 'travail local';
     const problemSummary = blocked > 0 ? ` · ${blocked} à reprendre` : '';
     return (
@@ -61,6 +76,7 @@ export function SyncIndicator() {
       <Link className="sync-pill sync-pill--error" to="/bibliotheque?status=sync-error">
         {multipartErrors} envoi{multipartErrors > 1 ? 's' : ''} à reprendre · Resélectionner
         {retryableErrors > 0 ? ` · ${retryableErrors} autre${retryableErrors > 1 ? 's' : ''} erreur${retryableErrors > 1 ? 's' : ''}` : ''}
+        {blockedErrors > 0 ? ` · ${blockedErrors} bloquée${blockedErrors > 1 ? 's' : ''}` : ''}
       </Link>
     );
   }
@@ -68,8 +84,16 @@ export function SyncIndicator() {
   if (retryableErrors > 0) {
     return (
       <button className="sync-pill sync-pill--error" onClick={syncNow} disabled={running}>
-        {running ? 'Nouvel essai…' : `${retryableErrors} erreur${retryableErrors > 1 ? 's' : ''} · Réessayer`}
+        {running ? 'Nouvel essai…' : `${retryableErrors} erreur${retryableErrors > 1 ? 's' : ''} · Réessayer${blockedErrors > 0 ? ` · ${blockedErrors} bloquée${blockedErrors > 1 ? 's' : ''}` : ''}`}
       </button>
+    );
+  }
+
+  if (blockedErrors > 0) {
+    return (
+      <Link className="sync-pill sync-pill--error" to="/bibliotheque?status=sync-error">
+        {blockedErrors} erreur{blockedErrors > 1 ? 's' : ''} bloquée{blockedErrors > 1 ? 's' : ''} · Vérifier
+      </Link>
     );
   }
 
