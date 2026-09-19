@@ -1,35 +1,70 @@
 import { db } from '../data/db';
+import { isoNow, newId } from './ids';
 import { requestSync } from './sync';
 
-/** Retry only outbox entries that are currently in a recoverable sync error state.
- * Pending work keeps its existing retry schedule, and multipart failures remain on
- * their dedicated file-reselection recovery path.
+/** Retry only work that is currently in a recoverable sync error state.
+ * Pending work keeps its existing retry schedule, multipart failures remain on
+ * their dedicated file-reselection recovery path, and a missing outbox entry is
+ * rebuilt so the recovery action cannot become a no-op after local corruption.
  */
 export async function retrySyncErrorsNow(): Promise<void> {
-  const [outbox, multipartSessions] = await Promise.all([
+  const [outbox, multipartSessions, subjectErrors, resourceErrors] = await Promise.all([
     db.outbox.toArray(),
     db.multipartUploads.where('status').equals('error').toArray(),
+    db.subjects.where('syncState').equals('error').toArray(),
+    db.resources.where('syncState').equals('error').toArray(),
   ]);
   const multipartVersionIds = new Set(multipartSessions.map((session) => session.versionId));
-  const now = Date.now();
+  const recoverableResources = resourceErrors.filter(
+    (resource) => !multipartVersionIds.has(resource.currentVersionId),
+  );
+  const subjectOutbox = new Map(
+    outbox.filter((item) => item.type === 'subject.upsert').map((item) => [item.entityId, item]),
+  );
+  const resourceOutbox = new Map(
+    outbox.filter((item) => item.type === 'resource.sync').map((item) => [item.entityId, item]),
+  );
+  const retryAt = Date.now();
+  const createdAt = isoNow();
 
   await db.transaction('rw', db.outbox, db.subjects, db.resources, db.resourceVersions, async () => {
-    for (const item of outbox) {
-      if (item.type === 'subject.upsert') {
-        const subject = await db.subjects.get(item.entityId);
-        if (subject?.syncState !== 'error') continue;
-        await db.outbox.update(item.id, { nextAttemptAt: now, lastError: null });
-        await db.subjects.update(subject.id, { syncState: 'pending', syncError: null });
-        continue;
+    for (const subject of subjectErrors) {
+      const existing = subjectOutbox.get(subject.id);
+      if (existing) {
+        await db.outbox.update(existing.id, { nextAttemptAt: retryAt, lastError: null });
+      } else {
+        await db.outbox.add({
+          id: newId(),
+          type: 'subject.upsert',
+          entityId: subject.id,
+          attempts: 0,
+          nextAttemptAt: retryAt,
+          lastError: null,
+          createdAt,
+        });
       }
+      await db.subjects.update(subject.id, { syncState: 'pending', syncError: null });
+    }
 
-      const resource = await db.resources.get(item.entityId);
-      if (!resource || resource.syncState !== 'error' || multipartVersionIds.has(resource.currentVersionId)) continue;
-      await db.outbox.update(item.id, { nextAttemptAt: now, lastError: null });
+    for (const resource of recoverableResources) {
+      const existing = resourceOutbox.get(resource.id);
+      if (existing) {
+        await db.outbox.update(existing.id, { nextAttemptAt: retryAt, lastError: null });
+      } else {
+        await db.outbox.add({
+          id: newId(),
+          type: 'resource.sync',
+          entityId: resource.id,
+          attempts: 0,
+          nextAttemptAt: retryAt,
+          lastError: null,
+          createdAt,
+        });
+      }
       await db.resources.update(resource.id, { syncState: 'pending', syncError: null });
       await db.resourceVersions.update(resource.currentVersionId, { syncState: 'pending', syncError: null });
     }
   });
 
-  await requestSync();
+  if (subjectErrors.length || recoverableResources.length) await requestSync();
 }
