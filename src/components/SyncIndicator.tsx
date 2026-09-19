@@ -2,10 +2,9 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { db } from '../data/db';
 import { useDexieQuery } from '../data/useDexieQuery';
+import { isRetryableOutboxAttempt } from '../lib/retryableSync';
 import { requestSync } from '../lib/sync';
 import { retrySyncErrorsNow } from '../lib/retrySyncErrors';
-
-const TERMINAL_RETRY_AT = Number.MAX_SAFE_INTEGER;
 
 export function SyncIndicator() {
   const pending = useDexieQuery(() => db.outbox.count(), [], 0);
@@ -26,12 +25,14 @@ export function SyncIndicator() {
     let retryable = 0;
     let blocked = 0;
     for (const subject of subjects) {
-      if (subjectOutbox.get(subject.id)?.nextAttemptAt === TERMINAL_RETRY_AT) blocked += 1;
+      const queued = subjectOutbox.get(subject.id);
+      if (queued && !isRetryableOutboxAttempt(queued.nextAttemptAt)) blocked += 1;
       else retryable += 1;
     }
     for (const resource of resources) {
       if (multipartVersionIds.has(resource.currentVersionId)) continue;
-      if (resourceOutbox.get(resource.id)?.nextAttemptAt === TERMINAL_RETRY_AT) blocked += 1;
+      const queued = resourceOutbox.get(resource.id);
+      if (queued && !isRetryableOutboxAttempt(queued.nextAttemptAt)) blocked += 1;
       else retryable += 1;
     }
     return { retryable, blocked, multipart: multipartSessions.length };
