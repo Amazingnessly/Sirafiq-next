@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { SubjectRecord } from '../data/db';
+import type { OutboxRecord, SubjectRecord } from '../data/db';
 import { db } from '../data/db';
 import { useDexieQuery } from '../data/useDexieQuery';
 import { isRetryableOutboxAttempt } from '../lib/retryableSync';
@@ -8,12 +8,13 @@ import { retrySubjectSyncNow } from '../lib/retrySyncErrors';
 export function SubjectSyncFailurePanel({ subject }: { subject: SubjectRecord }) {
   const [retrying, setRetrying] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const attempt = useDexieQuery(
+  const attempt = useDexieQuery<OutboxRecord | undefined | null>(
     () => db.outbox.where('entityId').equals(subject.id).and((item) => item.type === 'subject.upsert').first(),
     [subject.id],
-    undefined,
+    null,
   );
-  const retryable = !attempt || isRetryableOutboxAttempt(attempt.nextAttemptAt);
+  const attemptLoaded = attempt !== null;
+  const retryable = attemptLoaded && (!attempt || isRetryableOutboxAttempt(attempt.nextAttemptAt));
 
   const retry = async () => {
     setRetrying(true);
@@ -33,7 +34,9 @@ export function SubjectSyncFailurePanel({ subject }: { subject: SubjectRecord })
       <p className="eyebrow">Synchronisation de la matière à vérifier</p>
       <h2>{subject.name}</h2>
       <p>{subject.syncError ?? 'La synchronisation de cette matière n’a pas abouti. Son contenu local reste disponible.'}</p>
-      {retryable ? (
+      {!attemptLoaded ? (
+        <p className="muted">Vérification de la possibilité de reprise…</p>
+      ) : retryable ? (
         <button type="button" className="button button--secondary" onClick={() => void retry()} disabled={retrying}>
           {retrying ? 'Nouvelle tentative…' : 'Réessayer la synchronisation'}
         </button>
