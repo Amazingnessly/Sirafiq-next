@@ -17,7 +17,7 @@ export function LibraryPage() {
   const subjects = useDexieQuery(() => db.subjects.orderBy('name').toArray(), [], []);
   const resources = useDexieQuery(() => db.resources.orderBy('updatedAt').reverse().toArray(), [], []);
   const resourceOutbox = useDexieQuery(() => db.outbox.where('type').equals('resource.sync').toArray(), [], []);
-  const terminalResourceIds = new Set(resourceOutbox.filter((item) => isTerminalOutboxAttempt(item.nextAttemptAt)).map((item) => item.entityId));
+  const terminalResourceIds = new Set(resourceOutbox.filter((item) => item.status === 'error' && isTerminalOutboxAttempt(item.nextAttemptAt)).map((item) => item.entityId));
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedSubjectId = searchParams.get('subject');
   const searchQuery = searchParams.get('q') ?? '';
