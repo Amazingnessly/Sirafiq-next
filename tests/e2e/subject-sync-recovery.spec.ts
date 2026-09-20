@@ -58,7 +58,10 @@ test('une matière en erreur reconstruit son travail de synchronisation manquant
     });
   });
 
-  await page.reload();
+  await page.goto('/');
+  await expect(page.getByRole('link', { name: '1 élément avec une erreur de synchronisation — afficher' })).toBeVisible();
+
+  await page.goto('/bibliotheque');
   const subjectButton = page.getByRole('button', { name: /Matière à reprendre/ });
   await expect(subjectButton).toContainText('à vérifier');
   await subjectButton.click();
