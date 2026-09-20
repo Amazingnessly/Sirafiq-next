@@ -62,9 +62,9 @@ export function SyncIndicator() {
   }
 
   if (!online) {
-    const blocked = retryableErrors + blockedErrors + multipartErrors;
-    const localWork = pending > 0 ? `${pending} en attente` : 'travail local';
-    const problemSummary = blocked > 0 ? ` · ${blocked} à reprendre` : '';
+    const errors = retryableErrors + blockedErrors + multipartErrors;
+    const localWork = pending > 0 ? 'travail local à synchroniser' : 'aucune synchronisation en attente';
+    const problemSummary = errors > 0 ? ` · ${errors} erreur${errors > 1 ? 's' : ''} à reprendre` : '';
     return (
       <div className="sync-pill sync-pill--offline" role="status" aria-live="polite">
         Hors ligne · {localWork}{problemSummary}
