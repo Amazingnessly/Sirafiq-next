@@ -7,7 +7,13 @@ export function TodayPage() {
   const resources = useDexieQuery(() => db.resources.count(), [], 0);
   const ready = useDexieQuery(() => db.resources.where('status').equals('ready').count(), [], 0);
   const failed = useDexieQuery(() => db.resources.where('status').equals('failed').count(), [], 0);
-  const syncErrors = useDexieQuery(() => db.resources.where('syncState').equals('error').count(), [], 0);
+  const syncErrors = useDexieQuery(async () => {
+    const [resourceErrors, subjectErrors] = await Promise.all([
+      db.resources.where('syncState').equals('error').count(),
+      db.subjects.where('syncState').equals('error').count(),
+    ]);
+    return resourceErrors + subjectErrors;
+  }, [], 0);
 
   return (
     <div className="page page--home">
@@ -20,7 +26,7 @@ export function TodayPage() {
           <Metric value={resources} label="supports" />
           <Metric value={ready} label="extraits" />
           <Link className="metric metric--link" to="/bibliotheque?status=failed" aria-label={`${failed} support${failed > 1 ? 's' : ''} à revoir — afficher`}><strong>{failed}</strong><span>à revoir</span></Link>
-          <Link className="metric metric--link" to="/bibliotheque?status=sync-error" aria-label={`${syncErrors} support${syncErrors > 1 ? 's' : ''} avec une erreur de synchronisation — afficher`}><strong>{syncErrors}</strong><span>sync en erreur</span></Link>
+          <Link className="metric metric--link" to="/bibliotheque?status=sync-error" aria-label={`${syncErrors} élément${syncErrors > 1 ? 's' : ''} avec une erreur de synchronisation — afficher`}><strong>{syncErrors}</strong><span>sync en erreur</span></Link>
         </div>
       </section>
       <section className="principles-grid">
