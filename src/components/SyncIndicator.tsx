@@ -72,13 +72,12 @@ export function SyncIndicator() {
     );
   }
 
-  if (multipartErrors > 0 && pending > multipartErrors) {
-    const queued = pending - multipartErrors;
+  if (multipartErrors > 0 && pending > 0) {
     return (
       <button className="sync-pill sync-pill--error" onClick={syncNow} disabled={running}>
         {running
           ? 'Synchronisation…'
-          : `${queued} en attente · Synchroniser · ${multipartErrors} envoi${multipartErrors > 1 ? 's' : ''} à reprendre`}
+          : `${pending} en attente · Synchroniser · ${multipartErrors} envoi${multipartErrors > 1 ? 's' : ''} à reprendre`}
       </button>
     );
   }
