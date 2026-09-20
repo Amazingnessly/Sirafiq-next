@@ -90,6 +90,17 @@ export function SyncIndicator() {
     );
   }
 
+  if (blockedErrors > 0 && pending > blockedErrors) {
+    const queued = pending - blockedErrors;
+    return (
+      <button className="sync-pill sync-pill--error" onClick={syncNow} disabled={running}>
+        {running
+          ? 'Synchronisation…'
+          : `${queued} en attente · Synchroniser · ${blockedErrors} bloquée${blockedErrors > 1 ? 's' : ''}`}
+      </button>
+    );
+  }
+
   if (blockedErrors > 0) {
     return (
       <Link className="sync-pill sync-pill--error" to="/bibliotheque?status=sync-error">
