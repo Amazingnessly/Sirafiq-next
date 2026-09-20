@@ -3,6 +3,7 @@ import { StatusPill } from '../../components/StatusPill';
 import { SubjectSyncFailurePanel } from '../../components/SubjectSyncFailurePanel';
 import { db } from '../../data/db';
 import { useDexieQuery } from '../../data/useDexieQuery';
+import { isTerminalOutboxAttempt } from '../../lib/retryableSync';
 import { ImportPanel } from '../import/ImportPanel';
 import { SubjectForm } from '../import/SubjectForm';
 
@@ -15,6 +16,8 @@ type StatusFilter = 'all' | 'ready' | 'failed' | 'sync-error';
 export function LibraryPage() {
   const subjects = useDexieQuery(() => db.subjects.orderBy('name').toArray(), [], []);
   const resources = useDexieQuery(() => db.resources.orderBy('updatedAt').reverse().toArray(), [], []);
+  const resourceOutbox = useDexieQuery(() => db.outbox.where('type').equals('resource.sync').toArray(), [], []);
+  const terminalResourceIds = new Set(resourceOutbox.filter((item) => isTerminalOutboxAttempt(item.nextAttemptAt)).map((item) => item.entityId));
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedSubjectId = searchParams.get('subject');
   const searchQuery = searchParams.get('q') ?? '';
@@ -108,7 +111,7 @@ export function LibraryPage() {
                 <button type="button" className={statusFilter === 'all' ? 'tiny-badge is-active' : 'tiny-badge'} aria-pressed={statusFilter === 'all'} onClick={() => setStatusFilter('all')}>Tous</button>
                 <button type="button" className={statusFilter === 'ready' ? 'tiny-badge is-active' : 'tiny-badge'} aria-pressed={statusFilter === 'ready'} onClick={() => setStatusFilter('ready')}>Extraits</button>
                 <button type="button" className={statusFilter === 'failed' ? 'tiny-badge is-active' : 'tiny-badge'} aria-pressed={statusFilter === 'failed'} onClick={() => setStatusFilter('failed')}>À revoir</button>
-                <button type="button" className={statusFilter === 'sync-error' ? 'tiny-badge is-active' : 'tiny-badge'} aria-pressed={statusFilter === 'sync-error'} onClick={() => setStatusFilter('sync-error')}>À synchroniser</button>
+                <button type="button" className={statusFilter === 'sync-error' ? 'tiny-badge is-active' : 'tiny-badge'} aria-pressed={statusFilter === 'sync-error'} onClick={() => setStatusFilter('sync-error')}>Sync en erreur</button>
               </div>
             ) : null}
 
@@ -117,7 +120,7 @@ export function LibraryPage() {
                 {visibleResources.map((resource) => (
                   <Link to={resourceHref(resource.id)} className="resource-card" key={resource.id}>
                     <div className={`resource-icon resource-icon--${resource.kind}`} aria-hidden="true">{resource.kind === 'pdf' ? 'PDF' : 'TXT'}</div>
-                    <div className="resource-card__body"><span className="resource-subject">{subjectNames.get(resource.subjectId) ?? 'Matière'}</span><h3>{resource.title}</h3><p>{resource.syncState === 'error' ? `Synchronisation à reprendre · ${resource.syncError ?? 'Erreur de synchronisation.'} Ouvrez le support pour réessayer.` : resource.status === 'ready' ? 'Contenu extrait et disponible.' : resource.extractionError ?? 'Extraction impossible.'}</p></div>
+                    <div className="resource-card__body"><span className="resource-subject">{subjectNames.get(resource.subjectId) ?? 'Matière'}</span><h3>{resource.title}</h3><p>{resource.syncState === 'error' ? (terminalResourceIds.has(resource.id) ? `Synchronisation bloquée · ${resource.syncError ?? 'Erreur de synchronisation.'} Ouvrez le support pour vérifier son état local.` : `Synchronisation à reprendre · ${resource.syncError ?? 'Erreur de synchronisation.'} Ouvrez le support pour réessayer.`) : resource.status === 'ready' ? 'Contenu extrait et disponible.' : resource.extractionError ?? 'Extraction impossible.'}</p></div>
                     <div className="resource-card__footer"><StatusPill status={resource.status} syncState={resource.syncState} /><span aria-hidden="true">→</span></div>
                   </Link>
                 ))}
