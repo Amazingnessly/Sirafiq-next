@@ -20,7 +20,7 @@ export function TodayPage() {
           <Metric value={resources} label="supports" />
           <Metric value={ready} label="extraits" />
           <Link className="metric metric--link" to="/bibliotheque?status=failed" aria-label={`${failed} support${failed > 1 ? 's' : ''} à revoir — afficher`}><strong>{failed}</strong><span>à revoir</span></Link>
-          <Link className="metric metric--link" to="/bibliotheque?status=sync-error" aria-label={`${syncErrors} support${syncErrors > 1 ? 's' : ''} à synchroniser — afficher`}><strong>{syncErrors}</strong><span>à synchroniser</span></Link>
+          <Link className="metric metric--link" to="/bibliotheque?status=sync-error" aria-label={`${syncErrors} support${syncErrors > 1 ? 's' : ''} avec une erreur de synchronisation — afficher`}><strong>{syncErrors}</strong><span>sync en erreur</span></Link>
         </div>
       </section>
       <section className="principles-grid">
