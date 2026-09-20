@@ -59,8 +59,10 @@ test('une matière en erreur reconstruit son travail de synchronisation manquant
   });
 
   await page.reload();
-  await page.getByRole('button', { name: /Matière à reprendre/ }).click();
-  await expect(page.getByText('Échec réseau E2E', { exact: true })).toBeVisible();
+  const subjectButton = page.getByRole('button', { name: /Matière à reprendre/ });
+  await expect(subjectButton).toContainText('à vérifier');
+  await subjectButton.click();
+  await expect(page.getByRole('button', { name: 'Réessayer la synchronisation' })).toBeVisible();
   await page.getByRole('button', { name: 'Réessayer la synchronisation' }).click();
   await expect.poll(() => retryRequests).toBe(1);
 
