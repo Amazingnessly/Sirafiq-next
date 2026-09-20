@@ -33,7 +33,7 @@ test('le filtre de synchronisation isole un support à reprendre', async ({ page
   });
 
   await page.goto('/bibliotheque?status=sync-error');
-  await expect(page.getByRole('button', { name: 'À synchroniser' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'Sync en erreur' })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByRole('heading', { name: 'Support à reprendre' })).toBeVisible();
   const currentSyncError = await page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
