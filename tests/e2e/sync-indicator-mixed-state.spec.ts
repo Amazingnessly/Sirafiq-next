@@ -49,7 +49,10 @@ test('le travail en attente reste synchronisable à côté d’une erreur bloqu�
             entityId: pendingId,
             attempts: 0,
             lastError: null,
-            nextAttemptAt: 0,
+            // Keep this entry pending long enough to inspect the mixed UI state.
+            // A due entry (0) can be consumed by the automatic sync immediately
+            // after reload, making this E2E scenario race the sync worker.
+            nextAttemptAt: Date.now() + 60_000,
             createdAt,
           });
           return;
