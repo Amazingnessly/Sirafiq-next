@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { db } from '../data/db';
 import { useDexieQuery } from '../data/useDexieQuery';
-import { isRetryableOutboxAttempt } from '../lib/retryableSync';
 import { requestSync } from '../lib/sync';
 import { retrySyncErrorsNow } from '../lib/retrySyncErrors';
+import { classifySyncRecoveryState } from '../lib/syncRecoveryState';
 
 export function SyncIndicator() {
   const pending = useDexieQuery(() => db.outbox.count(), [], 0);
@@ -15,27 +15,12 @@ export function SyncIndicator() {
       db.multipartUploads.where('status').equals('error').toArray(),
       db.outbox.toArray(),
     ]);
-    const multipartVersionIds = new Set(multipartSessions.map((session) => session.versionId));
-    const subjectOutbox = new Map(
-      outbox.filter((item) => item.type === 'subject.upsert').map((item) => [item.entityId, item]),
-    );
-    const resourceOutbox = new Map(
-      outbox.filter((item) => item.type === 'resource.sync').map((item) => [item.entityId, item]),
-    );
-    let retryable = 0;
-    let blocked = 0;
-    for (const subject of subjects) {
-      const queued = subjectOutbox.get(subject.id);
-      if (queued && !isRetryableOutboxAttempt(queued.nextAttemptAt)) blocked += 1;
-      else retryable += 1;
-    }
-    for (const resource of resources) {
-      if (multipartVersionIds.has(resource.currentVersionId)) continue;
-      const queued = resourceOutbox.get(resource.id);
-      if (queued && !isRetryableOutboxAttempt(queued.nextAttemptAt)) blocked += 1;
-      else retryable += 1;
-    }
-    return { retryable, blocked, multipart: multipartSessions.length };
+    const recovery = classifySyncRecoveryState(subjects, resources, multipartSessions, outbox);
+    return {
+      retryable: recovery.recoverableSubjects.length + recovery.recoverableResources.length,
+      blocked: recovery.blockedSubjects.length + recovery.blockedResources.length,
+      multipart: recovery.multipartSessions.length,
+    };
   }, [], { retryable: 0, blocked: 0, multipart: 0 });
   const { retryable: retryableErrors, blocked: blockedErrors, multipart: multipartErrors } = syncErrors;
   const [running, setRunning] = useState(false);

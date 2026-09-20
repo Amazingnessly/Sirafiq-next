@@ -2,6 +2,7 @@ import { db } from '../data/db';
 import { isoNow, newId } from './ids';
 import { isRetryableOutboxAttempt } from './retryableSync';
 import { requestSync } from './sync';
+import { classifySyncRecoveryState } from './syncRecoveryState';
 
 /** Retry one subject only when its failure is recoverable.
  * Missing outbox work is rebuilt, while terminal failures remain untouched.
@@ -52,22 +53,18 @@ export async function retrySyncErrorsNow(): Promise<void> {
     db.subjects.where('syncState').equals('error').toArray(),
     db.resources.where('syncState').equals('error').toArray(),
   ]);
-  const multipartVersionIds = new Set(multipartSessions.map((session) => session.versionId));
+  const { recoverableSubjects, recoverableResources } = classifySyncRecoveryState(
+    subjectErrors,
+    resourceErrors,
+    multipartSessions,
+    outbox,
+  );
   const subjectOutbox = new Map(
     outbox.filter((item) => item.type === 'subject.upsert').map((item) => [item.entityId, item]),
   );
   const resourceOutbox = new Map(
     outbox.filter((item) => item.type === 'resource.sync').map((item) => [item.entityId, item]),
   );
-  const recoverableSubjects = subjectErrors.filter((subject) => {
-    const existing = subjectOutbox.get(subject.id);
-    return !existing || isRetryableOutboxAttempt(existing.nextAttemptAt);
-  });
-  const recoverableResources = resourceErrors.filter((resource) => {
-    if (multipartVersionIds.has(resource.currentVersionId)) return false;
-    const existing = resourceOutbox.get(resource.id);
-    return !existing || isRetryableOutboxAttempt(existing.nextAttemptAt);
-  });
   const retryAt = Date.now();
   const createdAt = isoNow();
 
