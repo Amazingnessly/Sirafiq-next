@@ -18,10 +18,12 @@ test('une matière en erreur reconstruit son travail de synchronisation manquant
       const subjects = transaction.objectStore('subjects');
       const outbox = transaction.objectStore('outbox');
       const request = subjects.openCursor();
+      let subjectId = '';
       request.onsuccess = () => {
         const cursor = request.result;
         if (!cursor) return reject(new Error('Matière E2E introuvable'));
         const subject = cursor.value;
+        subjectId = subject.id as string;
         cursor.update({ ...subject, syncState: 'error', syncError: 'Échec réseau E2E' });
         const outboxRequest = outbox.openCursor();
         outboxRequest.onsuccess = () => {
@@ -33,9 +35,14 @@ test('une matière en erreur reconstruit son travail de synchronisation manquant
             outboxCursor.continue();
           }
         };
-        resolve(subject.id as string);
       };
       request.onerror = () => reject(request.error);
+      transaction.oncomplete = () => {
+        if (!subjectId) return reject(new Error('Matière E2E introuvable'));
+        resolve(subjectId);
+      };
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error ?? new Error('Transaction E2E annulée'));
     });
     database.close();
     return id;
