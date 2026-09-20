@@ -76,12 +76,13 @@ export function SyncIndicator() {
     );
   }
 
-  if (multipartErrors > 0 && pending > 0) {
+  if (multipartErrors > 0 && pending > blockedErrors) {
+    const queued = pending - blockedErrors;
     return (
       <button className="sync-pill sync-pill--error" onClick={syncNow} disabled={running}>
         {running
           ? 'Synchronisation…'
-          : `${pending} en attente · Synchroniser · ${multipartErrors} envoi${multipartErrors > 1 ? 's' : ''} à reprendre`}
+          : `${queued} en attente · Synchroniser · ${multipartErrors} envoi${multipartErrors > 1 ? 's' : ''} à reprendre${blockedErrors > 0 ? ` · ${blockedErrors} bloquée${blockedErrors > 1 ? 's' : ''}` : ''}`}
       </button>
     );
   }
