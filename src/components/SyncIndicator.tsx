@@ -72,6 +72,17 @@ export function SyncIndicator() {
     );
   }
 
+  if (multipartErrors > 0 && pending > multipartErrors) {
+    const queued = pending - multipartErrors;
+    return (
+      <button className="sync-pill sync-pill--error" onClick={syncNow} disabled={running}>
+        {running
+          ? 'Synchronisation…'
+          : `${queued} en attente · Synchroniser · ${multipartErrors} envoi${multipartErrors > 1 ? 's' : ''} à reprendre`}
+      </button>
+    );
+  }
+
   if (multipartErrors > 0) {
     return (
       <Link className="sync-pill sync-pill--error" to="/bibliotheque?status=sync-error">
