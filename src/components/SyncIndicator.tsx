@@ -62,9 +62,13 @@ export function SyncIndicator() {
   }
 
   if (!online) {
-    const errors = retryableErrors + blockedErrors + multipartErrors;
     const localWork = pending > 0 ? 'travail local à synchroniser' : 'aucune synchronisation en attente';
-    const problemSummary = errors > 0 ? ` · ${errors} erreur${errors > 1 ? 's' : ''} à reprendre` : '';
+    const recoveryStates = [
+      retryableErrors > 0 ? `${retryableErrors} à réessayer` : '',
+      blockedErrors > 0 ? `${blockedErrors} bloquée${blockedErrors > 1 ? 's' : ''}` : '',
+      multipartErrors > 0 ? `${multipartErrors} envoi${multipartErrors > 1 ? 's' : ''} à reprendre` : '',
+    ].filter(Boolean);
+    const problemSummary = recoveryStates.length > 0 ? ` · ${recoveryStates.join(' · ')}` : '';
     return (
       <div className="sync-pill sync-pill--offline" role="status" aria-live="polite">
         Hors ligne · {localWork}{problemSummary}
