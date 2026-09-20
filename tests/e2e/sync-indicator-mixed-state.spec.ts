@@ -15,41 +15,43 @@ test('le travail en attente reste synchronisable à côté d’une erreur bloqu�
       request.onerror = () => reject(request.error);
     });
 
-    await new Promise<void>((resolve, reject) => {
-      const transaction = database.transaction(['subjects', 'outbox'], 'readwrite');
-      const subjects = transaction.objectStore('subjects');
-      const outbox = transaction.objectStore('outbox');
-      const subjectRequest = subjects.openCursor();
-      let blockedId = '';
-
-      subjectRequest.onsuccess = () => {
-        const cursor = subjectRequest.result;
+    const blockedId = await new Promise<string>((resolve, reject) => {
+      const transaction = database.transaction('subjects', 'readwrite');
+      const request = transaction.objectStore('subjects').openCursor();
+      let id = '';
+      request.onsuccess = () => {
+        const cursor = request.result;
         if (!cursor) return;
         if (cursor.value.name === 'Matière bloquée') {
-          blockedId = cursor.value.id as string;
+          id = cursor.value.id as string;
           cursor.update({ ...cursor.value, syncState: 'error', syncError: 'Erreur terminale E2E' });
+          return;
         }
         cursor.continue();
       };
+      transaction.oncomplete = () => id ? resolve(id) : reject(new Error('Matière bloquée introuvable'));
+      transaction.onerror = () => reject(transaction.error);
+    });
 
-      const outboxRequest = outbox.openCursor();
-      outboxRequest.onsuccess = () => {
-        const cursor = outboxRequest.result;
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction('outbox', 'readwrite');
+      const request = transaction.objectStore('outbox').openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
         if (!cursor) return;
-        if (blockedId && cursor.value.type === 'subject.upsert' && cursor.value.entityId === blockedId) {
+        if (cursor.value.type === 'subject.upsert' && cursor.value.entityId === blockedId) {
           cursor.update({
             ...cursor.value,
             attempts: 5,
             lastError: 'Erreur terminale E2E',
             nextAttemptAt: Number.MAX_SAFE_INTEGER,
           });
+          return;
         }
         cursor.continue();
       };
-
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
-      transaction.onabort = () => reject(transaction.error ?? new Error('Transaction E2E annulée'));
     });
     database.close();
   });
