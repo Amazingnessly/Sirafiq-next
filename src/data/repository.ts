@@ -102,7 +102,6 @@ export async function importFile(
       extraction, resourceId, versionId, now, enqueueSync: false, multipart,
     });
 
-    // Ensure a newly created subject reaches D1 before resource registration.
     await requestSync();
     await uploadMultipartResourceWithRecovery(resource.id, file, onProgress);
     return (await db.resources.get(resource.id)) ?? resource;
@@ -122,7 +121,6 @@ export async function importFile(
     };
   } else {
     try {
-      // PDF.js is intentionally lazy-loaded so older Safari can boot without it.
       const { extractDocument } = await import('../lib/pdf');
       const pages = await extractDocument(file);
       const charCount = pages.reduce((total, page) => total + page.text.length, 0);
@@ -182,7 +180,7 @@ export async function retrySyncForResource(resourceId: string): Promise<void> {
   if (multipart) throw new Error('Pour reprendre ce gros fichier, resélectionnez le même fichier sur l’appareil.');
 
   const existing = await db.outbox.where('entityId').equals(resourceId).and((item) => item.type === 'resource.sync').first();
-  if (existing && !isRetryableOutboxAttempt(existing.nextAttemptAt)) {
+  if (existing?.lastError && !isRetryableOutboxAttempt(existing.nextAttemptAt)) {
     throw new Error('Cette erreur de synchronisation est bloquée et ne peut pas être relancée automatiquement.');
   }
 
