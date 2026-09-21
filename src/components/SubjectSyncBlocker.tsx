@@ -12,7 +12,7 @@ export function SubjectSyncBlocker() {
     const attempts = new Map(outbox.map((item) => [item.entityId, item]));
     return subjects.filter((subject) => {
       const attempt = attempts.get(subject.id);
-      return Boolean(attempt && isTerminalOutboxAttempt(attempt.nextAttemptAt));
+      return Boolean(attempt?.lastError && isTerminalOutboxAttempt(attempt.nextAttemptAt));
     });
   }, [], []);
 
