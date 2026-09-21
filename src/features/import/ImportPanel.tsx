@@ -93,7 +93,7 @@ export function ImportPanel({ subjects, returnQuery = '' }: { subjects: SubjectR
         setTitle('');
         setText('');
       }
-      await requestSync();
+      void requestSync();
     } catch (err) {
       if (err instanceof DuplicateSupportError) {
         setDuplicateId(err.existingResourceId);
