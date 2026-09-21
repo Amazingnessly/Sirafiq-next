@@ -11,6 +11,7 @@ import './styles/extraction-recovery.css';
 import './styles/build-identity.css';
 import './styles/import-feedback.css';
 import './styles/library-filter.css';
+import './styles/error-boundary.css';
 
 const queryClient = new QueryClient({
   defaultOptions: {
