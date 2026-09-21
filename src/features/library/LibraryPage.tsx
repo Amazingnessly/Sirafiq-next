@@ -47,7 +47,11 @@ export function LibraryPage() {
         return normalizeSearchText(`${resource.title} ${subjectName}`).includes(normalizedSearchQuery);
       })
     : statusResources;
+  const visibleSubjectErrors = statusFilter === 'sync-error'
+    ? subjects.filter((subject) => subject.syncState === 'error' && (!activeSubjectId || subject.id === activeSubjectId) && (!normalizedSearchQuery || normalizeSearchText(subject.name).includes(normalizedSearchQuery)))
+    : [];
   const isFiltered = Boolean(activeSubjectId || normalizedSearchQuery || statusFilter !== 'all');
+  const hasVisibleResults = visibleResources.length > 0 || visibleSubjectErrors.length > 0;
   const libraryContext = searchParams.toString();
   const updateFilter = (key: 'status' | 'subject' | 'q', value: string | null) => {
     const next = new URLSearchParams(searchParams);
@@ -106,12 +110,24 @@ export function LibraryPage() {
               <div><p className="eyebrow">Enregistrés</p><h2>{activeSubjectName ? `Supports · ${activeSubjectName}` : 'Supports'}</h2></div>
               {resources.length ? <label className="library-search"><span className="sr-only">Rechercher un support</span><input type="search" value={searchQuery} onChange={(event) => updateFilter('q', event.target.value || null)} placeholder="Rechercher un support…" autoComplete="off" maxLength={240} /></label> : null}
             </div>
-            {resources.length ? (
+            {(resources.length || subjects.some((subject) => subject.syncState === 'error')) ? (
               <div className="library-status-filters" aria-label="Filtrer les supports par état">
                 <button type="button" className={statusFilter === 'all' ? 'tiny-badge is-active' : 'tiny-badge'} aria-pressed={statusFilter === 'all'} onClick={() => setStatusFilter('all')}>Tous</button>
                 <button type="button" className={statusFilter === 'ready' ? 'tiny-badge is-active' : 'tiny-badge'} aria-pressed={statusFilter === 'ready'} onClick={() => setStatusFilter('ready')}>Extraits</button>
                 <button type="button" className={statusFilter === 'failed' ? 'tiny-badge is-active' : 'tiny-badge'} aria-pressed={statusFilter === 'failed'} onClick={() => setStatusFilter('failed')}>À revoir</button>
                 <button type="button" className={statusFilter === 'sync-error' ? 'tiny-badge is-active' : 'tiny-badge'} aria-pressed={statusFilter === 'sync-error'} onClick={() => setStatusFilter('sync-error')}>Sync en erreur</button>
+              </div>
+            ) : null}
+
+            {visibleSubjectErrors.length ? (
+              <div className="resource-grid">
+                {visibleSubjectErrors.map((subject) => (
+                  <button type="button" className="resource-card" key={subject.id} onClick={() => updateFilter('subject', subject.id)}>
+                    <div className="resource-icon" aria-hidden="true">MAT</div>
+                    <div className="resource-card__body"><span className="resource-subject">Matière</span><h3>{subject.name}</h3><p>{subject.syncError ?? 'Synchronisation de la matière à vérifier.'} Ouvrez la matière pour vérifier ou reprendre la synchronisation.</p></div>
+                    <div className="resource-card__footer"><span className="status-pill status-pill--error">À vérifier</span><span aria-hidden="true">→</span></div>
+                  </button>
+                ))}
               </div>
             ) : null}
 
@@ -125,11 +141,11 @@ export function LibraryPage() {
                   </Link>
                 ))}
               </div>
-            ) : isFiltered ? (
-              <div className="empty-library"><div className="empty-library__symbol" aria-hidden="true">◇</div><h3>Aucun support correspondant</h3><p>Modifiez vos filtres ou affichez à nouveau toute la bibliothèque.</p><button type="button" className="button button--secondary" onClick={resetFilters}>Afficher tous les supports</button></div>
-            ) : (
+            ) : !hasVisibleResults && isFiltered ? (
+              <div className="empty-library"><div className="empty-library__symbol" aria-hidden="true">◇</div><h3>Aucun élément correspondant</h3><p>Modifiez vos filtres ou affichez à nouveau toute la bibliothèque.</p><button type="button" className="button button--secondary" onClick={resetFilters}>Afficher toute la bibliothèque</button></div>
+            ) : !hasVisibleResults ? (
               <div className="empty-library"><div className="empty-library__symbol" aria-hidden="true">◇</div><h3>La bibliothèque est vide</h3><p>Le premier support importé apparaîtra ici une fois réellement conservé dans IndexedDB.</p></div>
-            )}
+            ) : null}
           </section>
         </div>
       </div>
