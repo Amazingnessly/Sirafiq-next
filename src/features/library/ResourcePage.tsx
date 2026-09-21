@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { StatusPill } from '../../components/StatusPill';
-import { db } from '../../data/db';
+import { db, type ResourceRecord } from '../../data/db';
 import { retrySyncForResource } from '../../data/repository';
 import { useDexieQuery } from '../../data/useDexieQuery';
 import { apiJson } from '../../lib/api';
@@ -18,13 +18,13 @@ export function ResourcePage() {
   const { resourceId = '' } = useParams();
   const [searchParams] = useSearchParams();
   const backToLibrary = libraryReturnHref(searchParams.get('library'));
-  const localResource = useDexieQuery(() => db.resources.get(resourceId), [resourceId], undefined);
+  const localResource = useDexieQuery<ResourceRecord | undefined | null>(() => db.resources.get(resourceId), [resourceId], null);
   const localVersion = useDexieQuery(() => localResource ? db.resourceVersions.get(localResource.currentVersionId) : Promise.resolve(undefined), [localResource?.currentVersionId], undefined);
   const localExtraction = useDexieQuery(() => localResource ? db.extractions.get(localResource.currentVersionId) : Promise.resolve(undefined), [localResource?.currentVersionId], undefined);
   const multipartSession = useDexieQuery(() => localResource ? db.multipartUploads.get(localResource.currentVersionId) : Promise.resolve(undefined), [localResource?.currentVersionId], undefined);
   const syncAttempt = useDexieQuery(() => localResource ? db.outbox.where('entityId').equals(localResource.id).and((item) => item.type === 'resource.sync').first() : Promise.resolve(undefined), [localResource?.id], undefined);
   const subject = useDexieQuery(() => localResource ? db.subjects.get(localResource.subjectId) : Promise.resolve(undefined), [localResource?.subjectId], undefined);
-  const remote = useQuery({ queryKey: ['resource', resourceId], queryFn: () => apiJson<ResourceDetailPayload>(`/api/resources/${encodeURIComponent(resourceId)}`), enabled: Boolean(resourceId && !localResource), retry: 1 });
+  const remote = useQuery({ queryKey: ['resource', resourceId], queryFn: () => apiJson<ResourceDetailPayload>(`/api/resources/${encodeURIComponent(resourceId)}`), enabled: Boolean(resourceId && localResource !== null && !localResource), retry: 1 });
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [extracting, setExtracting] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
@@ -65,7 +65,7 @@ export function ResourcePage() {
   }
   async function retryExtraction() { if (!localResource || extracting) return; setExtracting(true); setExtractionRetryError(null); try { await retryServerExtractionForResource(localResource.id); } catch (error) { setExtractionRetryError(error instanceof Error ? error.message : 'L’extraction serveur a échoué.'); } finally { setExtracting(false); } }
 
-  if (!localResource && remote.isPending) return <div className="page"><div className="loading-card">Ouverture du support…</div></div>;
+  if (localResource === null || (!localResource && remote.isPending)) return <div className="page"><div className="loading-card">Ouverture du support…</div></div>;
   if (!title || (!localResource && remote.isError)) return <div className="page"><Link className="back-link" to={backToLibrary}>← Bibliothèque</Link><div className="error-page"><h1>Support introuvable</h1><p>Ce support n’est disponible ni dans le stockage local ni sur le serveur.</p></div></div>;
 
   return <div className="page resource-page">
