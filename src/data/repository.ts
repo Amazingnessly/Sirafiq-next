@@ -10,6 +10,7 @@ import { readBlobAsArrayBuffer, readBlobAsText } from '../lib/blob';
 import { sha256ArrayBuffer, sha256Hex } from '../lib/hash';
 import { isoNow, newId } from '../lib/ids';
 import { uploadMultipartResourceWithRecovery } from '../lib/multipartRecovery';
+import { isRetryableOutboxAttempt } from '../lib/retryableSync';
 import { requestSync, type TransferProgress } from '../lib/sync';
 import {
   MAX_RESOURCE_FILE_BYTES,
@@ -176,15 +177,19 @@ export async function importPastedText(subjectId: string, title: string, text: s
 
 export async function retrySyncForResource(resourceId: string): Promise<void> {
   const resource = await db.resources.get(resourceId);
-  if (!resource) return;
+  if (!resource || resource.syncState !== 'error') return;
   const multipart = await db.multipartUploads.get(resource.currentVersionId);
   if (multipart) throw new Error('Pour reprendre ce gros fichier, resélectionnez le même fichier sur l’appareil.');
+
+  const existing = await db.outbox.where('entityId').equals(resourceId).and((item) => item.type === 'resource.sync').first();
+  if (existing && !isRetryableOutboxAttempt(existing.nextAttemptAt)) {
+    throw new Error('Cette erreur de synchronisation est bloquée et ne peut pas être relancée automatiquement.');
+  }
 
   const now = isoNow();
   await db.transaction('rw', db.resources, db.resourceVersions, db.outbox, async () => {
     await db.resources.update(resourceId, { syncState: 'pending', syncError: null, updatedAt: now });
     await db.resourceVersions.update(resource.currentVersionId, { syncState: 'pending', syncError: null });
-    const existing = await db.outbox.where('entityId').equals(resourceId).and((item) => item.type === 'resource.sync').first();
     if (existing) await db.outbox.update(existing.id, { nextAttemptAt: Date.now(), lastError: null });
     else await db.outbox.add({ id: newId(), type: 'resource.sync', entityId: resourceId, attempts: 0, nextAttemptAt: Date.now(), lastError: null, createdAt: now });
   });
