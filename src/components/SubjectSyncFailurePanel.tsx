@@ -14,7 +14,7 @@ export function SubjectSyncFailurePanel({ subject }: { subject: SubjectRecord })
     null,
   );
   const attemptLoaded = attempt !== null;
-  const retryable = attemptLoaded && (!attempt || isRetryableOutboxAttempt(attempt.nextAttemptAt));
+  const retryable = attemptLoaded && (!attempt?.lastError || isRetryableOutboxAttempt(attempt.nextAttemptAt));
 
   const retry = async () => {
     setRetrying(true);
