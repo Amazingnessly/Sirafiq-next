@@ -1,6 +1,13 @@
 import { liveQuery } from 'dexie';
 import { useEffect, useState } from 'react';
 
+export class LocalDataReadError extends Error {
+  constructor(public readonly cause: unknown) {
+    super('IndexedDB query failed');
+    this.name = 'LocalDataReadError';
+  }
+}
+
 export function useDexieQuery<T>(query: () => Promise<T>, deps: readonly unknown[], initial: T): T {
   const [value, setValue] = useState<T>(initial);
   const [error, setError] = useState<unknown>(null);
@@ -16,7 +23,7 @@ export function useDexieQuery<T>(query: () => Promise<T>, deps: readonly unknown
       next: setValue,
       error: (queryError) => {
         console.error('IndexedDB query failed', queryError);
-        setError(queryError);
+        setError(new LocalDataReadError(queryError));
       },
     });
     return () => subscription.unsubscribe();
