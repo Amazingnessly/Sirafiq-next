@@ -14,13 +14,18 @@ export function TodayPage() {
     ]);
     return resourceErrors + subjectErrors;
   }, [], 0);
+  const nextAction = resources > 0
+    ? { label: 'Reprendre mes supports', to: '/bibliotheque' }
+    : subjects > 0
+      ? { label: 'Importer un support', to: '/bibliotheque' }
+      : { label: 'Créer ma première matière', to: '/bibliotheque' };
 
   return (
     <div className="page page--home">
       <header className="page-header home-header"><div><p className="eyebrow">Sirāfiq Next</p><h1>Que faut-il travailler aujourd’hui&nbsp;?</h1><p className="lede">La boussole pédagogique sera activée quand les premières activités réelles existeront. Pour l’instant, Sirāfiq vous conduit uniquement vers les supports effectivement importés.</p></div></header>
       <section className="foundation-card">
         <div className="foundation-card__glow" aria-hidden="true" />
-        <div className="foundation-card__content"><p className="eyebrow">Fondation V0.1</p><h2>Construire une bibliothèque fiable</h2><p>Créez une matière, importez un PDF ou un texte, vérifiez l’extraction, fermez l’application puis revenez : le support reste enregistré localement et se synchronise avec D1/R2 dès que le réseau est disponible.</p><Link className="button button--primary" to="/bibliotheque">Ouvrir la bibliothèque</Link></div>
+        <div className="foundation-card__content"><p className="eyebrow">Fondation V0.1</p><h2>Construire une bibliothèque fiable</h2><p>Créez une matière, importez un PDF ou un texte, vérifiez l’extraction, fermez l’application puis revenez : le support reste enregistré localement et se synchronise avec D1/R2 dès que le réseau est disponible.</p><Link className="button button--primary" to={nextAction.to}>{nextAction.label}</Link></div>
         <div className="metrics" aria-label="État de la bibliothèque">
           <Metric value={subjects} label="matières" />
           <Metric value={resources} label="supports" />
