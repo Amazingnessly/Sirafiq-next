@@ -5,7 +5,7 @@ import { requestSync } from './sync';
 import { classifySyncRecoveryState } from './syncRecoveryState';
 
 /** Retry one subject only when its failure is recoverable.
- * Missing outbox work is rebuilt, while terminal failures remain untouched.
+ * Missing outbox work is rebuilt, while terminal failures with a recorded error remain untouched.
  */
 export async function retrySubjectSyncNow(subjectId: string): Promise<boolean> {
   const subject = await db.subjects.get(subjectId);
@@ -16,7 +16,7 @@ export async function retrySubjectSyncNow(subjectId: string): Promise<boolean> {
     .equals(subjectId)
     .and((item) => item.type === 'subject.upsert')
     .first();
-  if (existing && !isRetryableOutboxAttempt(existing.nextAttemptAt)) return false;
+  if (existing?.lastError && !isRetryableOutboxAttempt(existing.nextAttemptAt)) return false;
 
   const retryAt = Date.now();
   const createdAt = isoNow();
