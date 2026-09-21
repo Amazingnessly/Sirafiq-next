@@ -48,7 +48,7 @@ export function ResourcePage() {
   const extractionError = localExtraction?.errorMessage ?? remote.data?.version.extractionError;
   const remoteBlobAvailable = !localResource || localResource.syncState === 'synced';
   const pdfUrl = blobUrl ?? (versionId && remoteBlobAvailable ? `/api/resource-versions/${encodeURIComponent(versionId)}/blob` : null);
-  const terminalSyncFailure = Boolean(syncAttempt && isTerminalOutboxAttempt(syncAttempt.nextAttemptAt));
+  const terminalSyncFailure = Boolean(syncAttempt?.lastError && isTerminalOutboxAttempt(syncAttempt.nextAttemptAt));
   const canRetryServerExtraction = Boolean(localResource && localVersion && localExtraction && localResource.syncState === 'synced' && shouldTryServerPdfExtraction(localResource.kind, localVersion.size, localExtraction.status));
   const extractionRecoveryReason = getExtractionRecoveryReason({ kind, extractionFailed, hasPages: pages.length > 0, syncState: localResource?.syncState, size: localVersion?.size ?? remote.data?.version.size, hasLocalExtraction: Boolean(localExtraction), hasMultipartSession: Boolean(multipartSession), canRetry: canRetryServerExtraction });
 
