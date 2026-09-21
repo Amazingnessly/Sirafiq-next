@@ -5,7 +5,7 @@ import { StatusPill } from '../../components/StatusPill';
 import { db, type ResourceRecord } from '../../data/db';
 import { retrySyncForResource } from '../../data/repository';
 import { useDexieQuery } from '../../data/useDexieQuery';
-import { apiJson } from '../../lib/api';
+import { ApiRequestError, apiJson } from '../../lib/api';
 import { sha256Hex } from '../../lib/hash';
 import { uploadMultipartResourceWithRecovery } from '../../lib/multipartRecovery';
 import { isTerminalOutboxAttempt } from '../../lib/retryableSync';
@@ -66,7 +66,11 @@ export function ResourcePage() {
   async function retryExtraction() { if (!localResource || extracting) return; setExtracting(true); setExtractionRetryError(null); try { await retryServerExtractionForResource(localResource.id); } catch (error) { setExtractionRetryError(error instanceof Error ? error.message : 'L’extraction serveur a échoué.'); } finally { setExtracting(false); } }
 
   if (localResource === null || (!localResource && remote.isPending)) return <div className="page"><div className="loading-card">Ouverture du support…</div></div>;
-  if (!title || (!localResource && remote.isError)) return <div className="page"><Link className="back-link" to={backToLibrary}>← Bibliothèque</Link><div className="error-page"><h1>Support introuvable</h1><p>Ce support n’est disponible ni dans le stockage local ni sur le serveur.</p></div></div>;
+  if (!localResource && remote.isError) {
+    const missing = remote.error instanceof ApiRequestError && remote.error.status === 404;
+    return <div className="page"><Link className="back-link" to={backToLibrary}>← Bibliothèque</Link><div className="error-page"><h1>{missing ? 'Support introuvable' : 'Impossible de charger le support'}</h1><p>{missing ? 'Ce support n’est disponible ni dans le stockage local ni sur le serveur.' : 'Le serveur n’a pas pu être joint ou a rencontré une erreur. Le support n’est pas déclaré absent.'}</p>{!missing && <button className="button button--secondary" type="button" onClick={() => void remote.refetch()}>Réessayer</button>}</div></div>;
+  }
+  if (!title) return <div className="page"><Link className="back-link" to={backToLibrary}>← Bibliothèque</Link><div className="error-page"><h1>Support introuvable</h1><p>Ce support n’est disponible ni dans le stockage local ni sur le serveur.</p></div></div>;
 
   return <div className="page resource-page">
     <Link className="back-link" to={backToLibrary}>← Bibliothèque</Link>
