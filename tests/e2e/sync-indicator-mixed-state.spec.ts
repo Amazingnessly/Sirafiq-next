@@ -78,3 +78,72 @@ test('le travail en attente reste synchronisable à côté d’une erreur bloqu�
   await page.reload();
   await expect(page.getByRole('button', { name: /1 en attente · Synchroniser · 1 bloquée/ })).toBeVisible();
 });
+
+test('un multipart interrompu ne gonfle pas le compteur de travail synchronisable', async ({ page }) => {
+  await page.goto('/bibliotheque');
+
+  await page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('sirafiq-next');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+
+    const resourceId = 'e2e-multipart-resource';
+    const versionId = 'e2e-multipart-version';
+    const now = new Date().toISOString();
+
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(['resources', 'outbox', 'multipartUploads'], 'readwrite');
+      transaction.objectStore('resources').put({
+        id: resourceId,
+        subjectId: 'e2e-multipart-subject',
+        title: 'PDF multipart interrompu',
+        kind: 'pdf',
+        currentVersionId: versionId,
+        status: 'ready',
+        extractionError: null,
+        createdAt: now,
+        updatedAt: now,
+        syncState: 'error',
+        syncError: 'Envoi interrompu E2E',
+      });
+      transaction.objectStore('outbox').put({
+        id: 'e2e-multipart-outbox',
+        type: 'resource.sync',
+        entityId: resourceId,
+        attempts: 1,
+        lastError: 'Envoi interrompu E2E',
+        // Keep the residual outbox entry from being consumed by the automatic
+        // sync worker while the indicator is inspected.
+        nextAttemptAt: Date.now() + 60_000,
+        createdAt: now,
+      });
+      transaction.objectStore('multipartUploads').put({
+        versionId,
+        resourceId,
+        fileName: 'interrompu.pdf',
+        size: 100 * 1024 * 1024,
+        lastModified: Date.now(),
+        sha256: 'e2e-multipart-sha',
+        uploadId: 'e2e-upload',
+        partSize: 8 * 1024 * 1024,
+        parts: [],
+        status: 'error',
+        error: 'Envoi interrompu E2E',
+        updatedAt: now,
+      });
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error ?? new Error('Transaction E2E annulée'));
+    });
+
+    database.close();
+  });
+
+  await page.reload();
+
+  await expect(page.getByRole('link', { name: /1 envoi à reprendre · Resélectionner/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /en attente · Synchroniser/ })).toHaveCount(0);
+});
+
