@@ -32,7 +32,7 @@ export function classifySyncRecoveryState(
   const blockedSubjects: SubjectRecord[] = [];
   for (const subject of subjectErrors) {
     const existing = subjectOutbox.get(subject.id);
-    (existing && !isRetryableOutboxAttempt(existing.nextAttemptAt) ? blockedSubjects : recoverableSubjects).push(subject);
+    (existing?.lastError && !isRetryableOutboxAttempt(existing.nextAttemptAt) ? blockedSubjects : recoverableSubjects).push(subject);
   }
 
   const recoverableResources: ResourceRecord[] = [];
@@ -40,7 +40,7 @@ export function classifySyncRecoveryState(
   for (const resource of resourceErrors) {
     if (multipartVersionIds.has(resource.currentVersionId)) continue;
     const existing = resourceOutbox.get(resource.id);
-    (existing && !isRetryableOutboxAttempt(existing.nextAttemptAt) ? blockedResources : recoverableResources).push(resource);
+    (existing?.lastError && !isRetryableOutboxAttempt(existing.nextAttemptAt) ? blockedResources : recoverableResources).push(resource);
   }
 
   return {
