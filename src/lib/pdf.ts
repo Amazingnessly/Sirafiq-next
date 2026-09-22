@@ -38,7 +38,7 @@ export async function extractDocument(file: File): Promise<ExtractedPage[]> {
 
   if (file.type.startsWith('text/') || ['txt', 'md'].includes(extension ?? '')) {
     try {
-      return extractTextContent(await readBlobAsText(file)).pages;
+      return extractTextContent((await readBlobAsText(file)).trim()).pages;
     } catch (error) {
       if (error && typeof error === 'object' && 'code' in error && (error.code === 'EMPTY_TEXT' || error.code === 'TOO_LARGE')) {
         throw new DocumentExtractionError(error instanceof Error ? error.message : 'Le texte ne peut pas être extrait.', error.code);
