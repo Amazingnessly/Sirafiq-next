@@ -339,7 +339,9 @@ async function getBlob(versionId: string, request: Request, env: Env): Promise<R
     range = parsedRange;
   }
 
-  const object = await env.FILES.get(version.r2_key, range ? { range } : undefined);
+  const object = range
+    ? await env.FILES.get(version.r2_key, { range })
+    : await env.FILES.get(version.r2_key);
   if (!object) return errorResponse(404, 'FILE_NOT_FOUND', 'Le fichier n’est pas présent dans le stockage.', true);
 
   const headers = new Headers();
@@ -356,6 +358,9 @@ async function getBlob(versionId: string, request: Request, env: Env): Promise<R
     return new Response(object.body, { status: 206, headers });
   }
 
+  // A full read must never inherit range metadata from the local R2 adapter.
+  // Production semantics remain explicit: no Range request => 200 with no Content-Range.
+  headers.delete('Content-Range');
   headers.set('Content-Length', String(object.size));
   return new Response(object.body, { status: 200, headers });
 }
