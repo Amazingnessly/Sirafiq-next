@@ -295,7 +295,7 @@ export type ByteRange = { offset: number; length: number };
 export function parseByteRange(header: string | null, totalSize: number): ByteRange | null | 'invalid' {
   if (!header) return null;
   if (!Number.isSafeInteger(totalSize) || totalSize < 0) return 'invalid';
-  const match = /^bytes=(\\d*)-(\\d*)$/i.exec(header.trim());
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(header.trim());
   if (!match || (!match[1] && !match[2])) return 'invalid';
 
   if (!match[1]) {
