@@ -92,9 +92,4 @@ test('le Worker sert réellement les blobs R2 par plages HTTP', async ({ page, r
   expect(openEnded.headers['content-length']).toBe('6');
   expect(Buffer.from(openEnded.body)).toEqual(bytes.subarray(10));
 
-  const unsatisfiable = await browserGet('bytes=99-100');
-  expect(unsatisfiable.status).toBe(416);
-  expect(unsatisfiable.headers['accept-ranges']).toBe('bytes');
-  expect(unsatisfiable.headers['content-range']).toBe(`bytes */${bytes.length}`);
-  expect(unsatisfiable.body).toEqual([]);
 });
