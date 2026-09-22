@@ -30,6 +30,10 @@ export async function retryTransientSyncFailuresNow(): Promise<void> {
       && isRetryableOutboxAttempt(item.nextAttemptAt)
       && (item.type !== 'resource.sync' || !multipartResourceIds.has(item.entityId)),
   );
+  if (retryable.length === 0 && residualMultipart.length === 0) {
+    await requestSync();
+    return;
+  }
 
   const now = Date.now();
   await db.transaction('rw', db.outbox, db.subjects, db.resources, db.resourceVersions, async () => {
