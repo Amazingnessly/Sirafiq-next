@@ -14,11 +14,15 @@ export function TodayPage() {
     ]);
     return resourceErrors + subjectErrors;
   }, [], 0);
-  const nextAction = resources > 0
-    ? { label: 'Reprendre mes supports', to: '/bibliotheque' }
-    : subjects > 0
-      ? { label: 'Importer un support', to: '/bibliotheque' }
-      : { label: 'Créer ma première matière', to: '/bibliotheque' };
+  const nextAction = failed > 0
+    ? { label: `Revoir ${failed} support${failed > 1 ? 's' : ''}`, to: '/bibliotheque?status=failed' }
+    : syncErrors > 0
+      ? { label: `Corriger ${syncErrors} erreur${syncErrors > 1 ? 's' : ''} de synchronisation`, to: '/bibliotheque?status=sync-error' }
+      : resources > 0
+        ? { label: 'Reprendre mes supports', to: '/bibliotheque' }
+        : subjects > 0
+          ? { label: 'Importer un support', to: '/bibliotheque' }
+          : { label: 'Créer ma première matière', to: '/bibliotheque' };
 
   return (
     <div className="page page--home">
