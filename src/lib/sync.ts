@@ -83,7 +83,7 @@ export async function uploadMultipartResource(
     });
 
     const registration = await registerOrResolveRemoteVersion(toResourcePayload(resource, version));
-  await rememberRemoteVersionId(version.id, registration.versionId);
+    await rememberRemoteVersionId(version.id, registration.versionId);
     if (registration.reusedExisting) {
       if (registration.remote?.version.extractionStatus === 'ready' && registration.remote.extraction) {
         await applyServerExtractionResult(resource.id, version.id, {
