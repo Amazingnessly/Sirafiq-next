@@ -9,6 +9,7 @@ import {
 import { readBlobAsArrayBuffer, readBlobAsText } from '../lib/blob';
 import { sha256ArrayBuffer, sha256Hex } from '../lib/hash';
 import { isoNow, newId } from '../lib/ids';
+import { extractTextContent } from '../lib/textExtraction';
 import { uploadMultipartResourceWithRecovery } from '../lib/multipartRecovery';
 import { isRetryableOutboxAttempt } from '../lib/retryableSync';
 import { requestSync, type TransferProgress } from '../lib/sync';
@@ -109,16 +110,29 @@ export async function importFile(
 
   let extraction: ExtractionRecord;
   if (kind === 'text') {
-    const content = await readBlobAsText(file);
-    extraction = {
-      versionId,
-      status: 'ready',
-      pages: [{ pageNumber: 1, text: content }],
-      charCount: content.length,
-      errorCode: null,
-      errorMessage: null,
-      createdAt: now,
-    };
+    try {
+      const extracted = extractTextContent(await readBlobAsText(file));
+      extraction = {
+        versionId,
+        status: 'ready',
+        pages: extracted.pages,
+        charCount: extracted.charCount,
+        errorCode: null,
+        errorMessage: null,
+        createdAt: now,
+      };
+    } catch (error) {
+      const extractionError = normalizeExtractionError(error);
+      extraction = {
+        versionId,
+        status: 'failed',
+        pages: [],
+        charCount: 0,
+        errorCode: extractionError.code,
+        errorMessage: extractionError.message,
+        createdAt: now,
+      };
+    }
   } else {
     try {
       const { extractDocument } = await import('../lib/pdf');
@@ -151,8 +165,9 @@ export async function importPastedText(subjectId: string, title: string, text: s
   const now = isoNow();
   const resourceId = newId();
   const versionId = newId();
+  const extracted = extractTextContent(cleanText);
   const extraction: ExtractionRecord = {
-    versionId, status: 'ready', pages: [{ pageNumber: 1, text: cleanText }], charCount: cleanText.length,
+    versionId, status: 'ready', pages: extracted.pages, charCount: extracted.charCount,
     errorCode: null, errorMessage: null, createdAt: now,
   };
   return persistImportedResource({
