@@ -12,7 +12,7 @@ import { isoNow, newId } from '../lib/ids';
 import { extractTextContent } from '../lib/textExtraction';
 import { uploadMultipartResourceWithRecovery } from '../lib/multipartRecovery';
 import { isRetryableOutboxAttempt } from '../lib/retryableSync';
-import { requestSync, type TransferProgress } from '../lib/sync';
+import { type TransferProgress } from '../lib/sync';
 import {
   MAX_RESOURCE_FILE_BYTES,
   MULTIPART_PART_BYTES,
