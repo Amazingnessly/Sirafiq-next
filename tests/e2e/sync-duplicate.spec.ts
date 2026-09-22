@@ -4,13 +4,37 @@ test('un doublon déjà synchronisé est réutilisé puis extrait sans réenvoye
   let uploadAttempts = 0;
   const blobReadPaths: string[] = [];
   const extractedText = 'Texte récupéré depuis la version distante déjà synchronisée.';
+  let exposeRemoteBootstrap = false;
 
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
 
     if (request.method() === 'GET' && url.pathname === '/api/bootstrap') {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ subjects: [], resources: [] }) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(exposeRemoteBootstrap ? {
+          subjects: [{
+            id: '22222222-2222-4222-8222-222222222222',
+            name: 'Matière distante originale',
+            parentId: null,
+            createdAt: '2026-08-22T00:00:00.000Z',
+            updatedAt: '2026-08-22T00:00:00.000Z',
+          }],
+          resources: [{
+            id: '11111111-1111-4111-8111-111111111111',
+            subjectId: '22222222-2222-4222-8222-222222222222',
+            title: 'PDF déjà présent',
+            kind: 'pdf',
+            currentVersionId: '33333333-3333-4333-8333-333333333333',
+            status: 'stored',
+            extractionCharCount: null,
+            createdAt: '2026-08-22T00:00:00.000Z',
+            updatedAt: '2026-08-22T00:00:00.000Z',
+          }],
+        } : { subjects: [], resources: [] }),
+      });
       return;
     }
 
@@ -20,6 +44,7 @@ test('un doublon déjà synchronisé est réutilisé puis extrait sans réenvoye
     }
 
     if (request.method() === 'POST' && url.pathname === '/api/resources/register') {
+      exposeRemoteBootstrap = true;
       await route.fulfill({
         status: 409,
         contentType: 'application/json',
@@ -113,7 +138,7 @@ test('un doublon déjà synchronisé est réutilisé puis extrait sans réenvoye
   await expect(page.getByText('Le support est enregistré localement, mais la synchronisation a échoué.')).toHaveCount(0);
   expect(uploadAttempts).toBe(0);
 
-  const remoteVersionId = await page.evaluate(async () => {
+  const remoteIdentity = await page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('sirafiq-next');
       request.onsuccess = () => resolve(request.result);
@@ -135,13 +160,34 @@ test('un doublon déjà synchronisé est réutilisé puis extrait sans réenvoye
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error ?? new Error('Transaction E2E annulée'));
     });
+    const resourceTransaction = database.transaction('resources', 'readonly');
+    const resourcesStore = resourceTransaction.objectStore('resources');
+    const resources = await new Promise<Array<Record<string, unknown>>>((resolve, reject) => {
+      const request = resourcesStore.getAll();
+      request.onsuccess = () => resolve(request.result as Array<Record<string, unknown>>);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      resourceTransaction.oncomplete = () => resolve();
+      resourceTransaction.onerror = () => reject(resourceTransaction.error);
+    });
     database.close();
-    return reconciledId;
+    const localResource = resources.find((item) => item.title === 'PDF doublon distant');
+    return {
+      remoteVersionId: reconciledId,
+      remoteResourceId: typeof localResource?.remoteResourceId === 'string' ? localResource.remoteResourceId : null,
+    };
   });
 
-  expect(remoteVersionId).toBe('33333333-3333-4333-8333-333333333333');
+  expect(remoteIdentity.remoteVersionId).toBe('33333333-3333-4333-8333-333333333333');
+  expect(remoteIdentity.remoteResourceId).toBe('11111111-1111-4111-8111-111111111111');
   await expect.poll(() => blobReadPaths).toContain('/api/resource-versions/33333333-3333-4333-8333-333333333333/blob');
   blobReadPaths.length = 0;
   await page.reload();
   await expect.poll(() => blobReadPaths).toContain('/api/resource-versions/33333333-3333-4333-8333-333333333333/blob');
+
+  await page.getByRole('link', { name: '← Bibliothèque', exact: true }).click();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'PDF doublon distant' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'PDF déjà présent' })).toHaveCount(0);
 });
