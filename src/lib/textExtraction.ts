@@ -12,10 +12,10 @@ export class TextExtractionError extends Error {
 }
 
 export function extractTextContent(input: string): { pages: ExtractedPage[]; charCount: number } {
-  const text = input.trim();
-  if (!text) {
+  if (!input.trim()) {
     throw new TextExtractionError('Ce document ne contient aucun texte exploitable.', 'EMPTY_TEXT');
   }
+  const text = input;
   if (text.length > MAX_EXTRACTED_CHARS) {
     throw new TextExtractionError('Le texte extrait dépasse la limite de cette première version.', 'TOO_LARGE');
   }
