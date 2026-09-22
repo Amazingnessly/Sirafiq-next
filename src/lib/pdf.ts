@@ -8,6 +8,7 @@ import {
   MAX_EXTRACTED_PAGES,
 } from '../shared/importPolicy';
 import { readBlobAsArrayBuffer, readBlobAsText } from './blob';
+import { extractTextContent } from './textExtraction';
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -36,14 +37,14 @@ export async function extractDocument(file: File): Promise<ExtractedPage[]> {
   }
 
   if (file.type.startsWith('text/') || ['txt', 'md'].includes(extension ?? '')) {
-    const text = (await readBlobAsText(file)).trim();
-    if (!text) {
-      throw new DocumentExtractionError('Ce document ne contient aucun texte exploitable.', 'EMPTY_TEXT');
+    try {
+      return extractTextContent(await readBlobAsText(file)).pages;
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && (error.code === 'EMPTY_TEXT' || error.code === 'TOO_LARGE')) {
+        throw new DocumentExtractionError(error instanceof Error ? error.message : 'Le texte ne peut pas être extrait.', error.code);
+      }
+      throw error;
     }
-    if (text.length > MAX_EXTRACTED_CHARS) {
-      throw new DocumentExtractionError('Le texte extrait dépasse la limite de cette première version.', 'TOO_LARGE');
-    }
-    return [{ pageNumber: 1, text }];
   }
 
   throw new DocumentExtractionError('Cette première version accepte les PDF, TXT et Markdown.', 'UNSUPPORTED_TYPE');
