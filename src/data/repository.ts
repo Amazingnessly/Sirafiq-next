@@ -63,7 +63,6 @@ export async function importFile(
     if (!pendingMultipart) throw new DuplicateSupportError(existingVersion.resourceId);
     const existingResource = await db.resources.get(existingVersion.resourceId);
     if (!existingResource) throw new Error('Le support à reprendre est incomplet dans le stockage local.');
-    await requestSync();
     await uploadMultipartResourceWithRecovery(existingResource.id, file, onProgress);
     return (await db.resources.get(existingResource.id)) ?? existingResource;
   }
@@ -103,7 +102,6 @@ export async function importFile(
       extraction, resourceId, versionId, now, enqueueSync: false, multipart,
     });
 
-    await requestSync();
     await uploadMultipartResourceWithRecovery(resource.id, file, onProgress);
     return (await db.resources.get(resource.id)) ?? resource;
   }
