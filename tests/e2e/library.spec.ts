@@ -1,5 +1,18 @@
 import { expect, test } from '@playwright/test';
 
+test.beforeEach(async ({ page }) => {
+  // These scenarios exercise the local library in isolation. D1 state is shared
+  // by the local Worker across E2E files, so explicitly keep remote bootstrap
+  // empty here; remote recovery itself is covered in remote-library-bootstrap.
+  await page.route('**/api/bootstrap', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ subjects: [], resources: [] }),
+    });
+  });
+});
+
 test('matière → texte réel → confirmation → ouverture → persistance après rechargement', async ({ page }) => {
   await page.goto('/bibliotheque');
 
