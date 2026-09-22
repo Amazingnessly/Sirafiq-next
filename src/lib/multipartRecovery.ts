@@ -17,6 +17,47 @@ const FINALIZATION_RECOVERY_CODES = new Set([
   'TIMEOUT',
 ]);
 
+export async function recoverInterruptedMultipartSessionsAfterReload(): Promise<number> {
+  const activeSessions = await db.multipartUploads.filter((session) => session.status !== 'error').toArray();
+  if (activeSessions.length === 0) return 0;
+
+  const message = 'L’envoi a été interrompu par un rechargement ou une fermeture. Resélectionnez le même fichier pour reprendre.';
+  const now = new Date().toISOString();
+  let recovered = 0;
+
+  await db.transaction('rw', db.resources, db.resourceVersions, db.multipartUploads, async () => {
+    for (const session of activeSessions) {
+      const resource = await db.resources.get(session.resourceId);
+
+      // A synchronized resource has already received durable confirmation from
+      // R2. An active multipart record beside it can only be stale residue.
+      if (resource?.syncState === 'synced') {
+        await db.multipartUploads.delete(session.versionId);
+        continue;
+      }
+
+      await db.multipartUploads.update(session.versionId, {
+        status: 'error',
+        error: message,
+        updatedAt: now,
+      });
+      await db.resourceVersions.update(session.versionId, {
+        syncState: 'error',
+        syncError: message,
+      });
+      if (resource?.currentVersionId === session.versionId) {
+        await db.resources.update(resource.id, {
+          syncState: 'error',
+          syncError: message,
+        });
+      }
+      recovered += 1;
+    }
+  });
+
+  return recovered;
+}
+
 export async function uploadMultipartResourceWithRecovery(
   resourceId: string,
   file: File,
