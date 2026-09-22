@@ -43,7 +43,7 @@ export default {
       const blobMatch = url.pathname.match(/^\/api\/resource-versions\/([0-9a-f-]+)\/blob$/i);
       if (blobMatch?.[1]) {
         if (request.method === 'PUT') return putBlob(blobMatch[1], request, env);
-        if (request.method === 'GET') return getBlob(blobMatch[1], env);
+        if (request.method === 'GET') return getBlob(blobMatch[1], request, env);
       }
 
       const multipartMatch = url.pathname.match(/^\/api\/resource-versions\/([0-9a-f-]+)\/multipart\/(create|part|complete)$/i);
@@ -290,12 +290,100 @@ async function completeMultipart(versionId: string, request: Request, env: Env):
   }
 }
 
-async function getBlob(versionId: string, env: Env): Promise<Response> {
-  const version = await env.DB.prepare('SELECT r2_key, mime_type, file_name FROM resource_versions WHERE id = ?')
+export type ByteRange = { offset: number; length: number };
+
+export function parseByteRange(header: string | null, totalSize: number): ByteRange | null | 'invalid' {
+  if (!header) return null;
+  if (!Number.isSafeInteger(totalSize) || totalSize < 0) return 'invalid';
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(header.trim());
+  if (!match || (!match[1] && !match[2])) return 'invalid';
+
+  if (!match[1]) {
+    const suffix = Number(match[2]);
+    if (!Number.isSafeInteger(suffix) || suffix <= 0 || totalSize === 0) return 'invalid';
+    const length = Math.min(suffix, totalSize);
+    return { offset: totalSize - length, length };
+  }
+
+  const start = Number(match[1]);
+  if (!Number.isSafeInteger(start) || start < 0 || start >= totalSize) return 'invalid';
+  const requestedEnd = match[2] ? Number(match[2]) : totalSize - 1;
+  if (!Number.isSafeInteger(requestedEnd) || requestedEnd < start) return 'invalid';
+  const end = Math.min(requestedEnd, totalSize - 1);
+  return { offset: start, length: end - start + 1 };
+}
+
+export function createUnsatisfiableRangeResponse(totalSize: number): Response {
+  return new Response(null, {
+    status: 416,
+    headers: {
+      'Accept-Ranges': 'bytes',
+      'Content-Range': `bytes */${totalSize}`,
+    },
+  });
+}
+
+export function createBlobResponse(
+  body: ReadableStream<Uint8Array>,
+  headers: Headers,
+  fullSize: number,
+  range: (ByteRange & { totalSize: number }) | null,
+): Response {
+  headers.set('Accept-Ranges', 'bytes');
+  if (range) {
+    const end = range.offset + range.length - 1;
+    headers.set('Content-Length', String(range.length));
+    headers.set('Content-Range', `bytes ${range.offset}-${end}/${range.totalSize}`);
+    return new Response(body, { status: 206, headers });
+  }
+
+  headers.delete('Content-Range');
+  headers.set('Content-Length', String(fullSize));
+  return new Response(body, { status: 200, headers });
+}
+
+function detachR2Body(source: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+  const reader = source.getReader();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const next = await reader.read();
+      if (next.done) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(next.value);
+    },
+    async cancel(reason) {
+      await reader.cancel(reason);
+    },
+  });
+}
+
+async function getBlob(versionId: string, request: Request, env: Env): Promise<Response> {
+  const version = await env.DB.prepare('SELECT r2_key, mime_type, file_name, COALESCE(size_bytes, size) AS total_size FROM resource_versions WHERE id = ?')
     .bind(versionId)
-    .first<{ r2_key: string; mime_type: string; file_name: string }>();
+    .first<{ r2_key: string; mime_type: string; file_name: string; total_size: number }>();
   if (!version) return errorResponse(404, 'VERSION_NOT_FOUND', 'La version du support est introuvable.', false);
-  const object = await env.FILES.get(version.r2_key);
+
+  const rangeHeader = request.headers.get('range');
+  let range: ByteRange | null = null;
+  let totalSize: number | null = null;
+  if (rangeHeader) {
+    const metadata = await env.FILES.head(version.r2_key);
+    if (!metadata) return errorResponse(404, 'FILE_NOT_FOUND', 'Le fichier n’est pas présent dans le stockage.', true);
+    // D1 stores the expected full size and uploads are only marked stored after
+    // R2 reports that exact size. The local R2 adapter can expose range-scoped
+    // metadata after partial reads, so HTTP satisfiability must use this durable
+    // full-object size rather than mutable adapter metadata.
+    totalSize = version.total_size;
+    const parsedRange = parseByteRange(rangeHeader, totalSize);
+    if (parsedRange === 'invalid') return createUnsatisfiableRangeResponse(totalSize);
+    range = parsedRange;
+  }
+
+  const object = range
+    ? await env.FILES.get(version.r2_key, { range })
+    : await env.FILES.get(version.r2_key);
   if (!object) return errorResponse(404, 'FILE_NOT_FOUND', 'Le fichier n’est pas présent dans le stockage.', true);
 
   const headers = new Headers();
@@ -303,7 +391,19 @@ async function getBlob(versionId: string, env: Env): Promise<Response> {
   headers.set('Content-Type', headers.get('Content-Type') ?? version.mime_type);
   headers.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(version.file_name)}`);
   headers.set('ETag', object.httpEtag);
-  return new Response(object.body, { headers });
+
+  if (range && totalSize !== null) {
+    const returnedRange = object.range;
+    const offset = returnedRange && 'offset' in returnedRange && typeof returnedRange.offset === 'number'
+      ? returnedRange.offset
+      : range.offset;
+    const length = returnedRange && 'length' in returnedRange && typeof returnedRange.length === 'number'
+      ? returnedRange.length
+      : range.length;
+    return createBlobResponse(object.body, headers, object.size, { offset, length, totalSize });
+  }
+
+  return createBlobResponse(detachR2Body(object.body), headers, object.size, null);
 }
 
 async function extractPdfOnServer(versionId: string, env: WorkerEnv): Promise<Response> {
