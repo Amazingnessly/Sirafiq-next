@@ -17,15 +17,25 @@ export function isTerminalOutboxAttempt(nextAttemptAt: number): boolean {
  * Permanently blocked items keep their MAX_SAFE_INTEGER sentinel untouched.
  */
 export async function retryTransientSyncFailuresNow(): Promise<void> {
-  const queued = await db.outbox.toArray();
-  const retryable = queued.filter((item) => item.lastError && isRetryableOutboxAttempt(item.nextAttemptAt));
-  if (retryable.length === 0) {
-    await requestSync();
-    return;
-  }
+  const [queued, multipartSessions] = await Promise.all([
+    db.outbox.toArray(),
+    db.multipartUploads.toArray(),
+  ]);
+  const multipartResourceIds = new Set(multipartSessions.map((session) => session.resourceId));
+  const residualMultipart = queued.filter(
+    (item) => item.type === 'resource.sync' && multipartResourceIds.has(item.entityId),
+  );
+  const retryable = queued.filter(
+    (item) => item.lastError
+      && isRetryableOutboxAttempt(item.nextAttemptAt)
+      && (item.type !== 'resource.sync' || !multipartResourceIds.has(item.entityId)),
+  );
 
   const now = Date.now();
   await db.transaction('rw', db.outbox, db.subjects, db.resources, db.resourceVersions, async () => {
+    for (const item of residualMultipart) {
+      await db.outbox.delete(item.id);
+    }
     for (const item of retryable) {
       await db.outbox.update(item.id, { nextAttemptAt: now, lastError: null });
       if (item.type === 'subject.upsert') {
