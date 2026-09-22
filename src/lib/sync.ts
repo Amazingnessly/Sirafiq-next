@@ -83,6 +83,7 @@ export async function uploadMultipartResource(
     });
 
     const registration = await registerOrResolveRemoteVersion(toResourcePayload(resource, version));
+  await rememberRemoteVersionId(version.id, registration.versionId);
     if (registration.reusedExisting) {
       if (registration.remote?.version.extractionStatus === 'ready' && registration.remote.extraction) {
         await applyServerExtractionResult(resource.id, version.id, {
@@ -210,6 +211,7 @@ export async function retryServerExtractionForResource(resourceId: string): Prom
   if (resource.syncState !== 'synced') throw new Error('Synchronisez d’abord le fichier avant de relancer son extraction.');
 
   const registration = await registerOrResolveRemoteVersion(toResourcePayload(resource, version));
+  await rememberRemoteVersionId(version.id, registration.versionId);
   if (registration.remote?.version.extractionStatus === 'ready' && registration.remote.extraction) {
     const ready: ServerExtractionResult = {
       status: 'ready',
@@ -291,6 +293,7 @@ async function syncResource(item: OutboxRecord): Promise<void> {
   }
 
   const registration = await registerOrResolveRemoteVersion(toResourcePayload(resource, version));
+  await rememberRemoteVersionId(version.id, registration.versionId);
   if (!registration.reusedExisting) {
     const uploadBlob = new Blob([version.bytes], { type: version.mimeType });
     await apiPutBlob(`/api/resource-versions/${encodeURIComponent(registration.versionId)}/blob`, uploadBlob, version.mimeType, 120_000);
@@ -321,6 +324,11 @@ async function syncResource(item: OutboxRecord): Promise<void> {
     await db.resources.update(resource.id, { syncState: 'synced', syncError: null });
     await db.resourceVersions.update(version.id, { syncState: 'synced', syncError: null });
   });
+}
+
+async function rememberRemoteVersionId(localVersionId: string, remoteVersionId: string): Promise<void> {
+  if (remoteVersionId === localVersionId) return;
+  await db.resourceVersions.update(localVersionId, { remoteVersionId });
 }
 
 async function registerOrResolveRemoteVersion(payload: ResourceRegisterInput): Promise<RemoteRegistration> {
