@@ -11,6 +11,12 @@ test('reprend un multipart interrompu sans renvoyer les morceaux déjà confirm�
   const sha256 = createHash('sha256').update(fileBytes).digest('hex');
   const uploadedParts: number[] = [];
   let completeCalled = false;
+  let requiredSubjectSyncs = 0;
+  let unrelatedSyncStarted = false;
+  let releaseUnrelatedSync!: () => void;
+  const unrelatedSyncGate = new Promise<void>((resolve) => {
+    releaseUnrelatedSync = resolve;
+  });
 
   await page.route('**/api/**', async (route) => {
     const request = route.request();
@@ -19,6 +25,20 @@ test('reprend un multipart interrompu sans renvoyer les morceaux déjà confirm�
     if (request.method() === 'GET' && url.pathname === '/api/bootstrap') {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ subjects: [], resources: [] }) });
       return;
+    }
+    if (request.method() === 'POST' && url.pathname === '/api/subjects/upsert') {
+      const body = request.postDataJSON() as { id?: string };
+      if (body.id === '77777777-7777-4777-8777-777777777777') {
+        unrelatedSyncStarted = true;
+        await unrelatedSyncGate;
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+        return;
+      }
+      if (body.id === SUBJECT_ID) {
+        requiredSubjectSyncs += 1;
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+        return;
+      }
     }
     if (request.method() === 'POST' && url.pathname === '/api/resources/register') {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, uploadMode: 'multipart' }) });
@@ -63,7 +83,30 @@ test('reprend un multipart interrompu sans renvoyer les morceaux déjà confirm�
   await page.evaluate(async ({ resourceId, versionId, subjectId, hash, size }) => {
     const { db } = await import('/src/data/db.ts');
     const now = new Date().toISOString();
-    await db.subjects.add({ id: subjectId, name: 'Gros supports', parentId: null, createdAt: now, updatedAt: now, syncState: 'synced', syncError: null });
+    await db.subjects.bulkAdd([
+      { id: '77777777-7777-4777-8777-777777777777', name: 'File réseau indépendante', parentId: null, createdAt: now, updatedAt: now, syncState: 'pending', syncError: null },
+      { id: subjectId, name: 'Gros supports', parentId: null, createdAt: now, updatedAt: now, syncState: 'pending', syncError: null },
+    ]);
+    await db.outbox.bulkAdd([
+      {
+        id: 'e2e-unrelated-subject-sync',
+        type: 'subject.upsert',
+        entityId: '77777777-7777-4777-8777-777777777777',
+        attempts: 0,
+        nextAttemptAt: Date.now(),
+        lastError: null,
+        createdAt: new Date(Date.now() - 1000).toISOString(),
+      },
+      {
+        id: 'e2e-required-subject-sync',
+        type: 'subject.upsert',
+        entityId: subjectId,
+        attempts: 0,
+        nextAttemptAt: Date.now(),
+        lastError: null,
+        createdAt: now,
+      },
+    ]);
     await db.resources.add({
       id: resourceId,
       subjectId,
@@ -116,9 +159,17 @@ test('reprend un multipart interrompu sans renvoyer les morceaux déjà confirm�
 
   await page.goto(`/bibliotheque/${RESOURCE_ID}`);
   await expect(page.getByText('L’envoi du gros fichier est interrompu.')).toBeVisible();
+  await expect.poll(() => unrelatedSyncStarted).toBe(true);
 
-  await page.getByLabel('Fichier à reprendre').setInputFiles({ name: 'multipart.pdf', mimeType: 'application/pdf', buffer: fileBytes });
-  await page.getByRole('button', { name: 'Reprendre l’envoi' }).click();
+  try {
+    await page.getByLabel('Fichier à reprendre').setInputFiles({ name: 'multipart.pdf', mimeType: 'application/pdf', buffer: fileBytes });
+    await page.getByRole('button', { name: 'Reprendre l’envoi' }).click();
+
+    await expect.poll(() => requiredSubjectSyncs, { timeout: 2_000 }).toBe(1);
+    await expect.poll(() => uploadedParts.length, { timeout: 2_000 }).toBeGreaterThan(0);
+  } finally {
+    releaseUnrelatedSync();
+  }
 
   await expect.poll(async () => page.evaluate(async (versionId) => {
     const { db } = await import('/src/data/db.ts');
