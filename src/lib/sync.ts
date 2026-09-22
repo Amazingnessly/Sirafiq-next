@@ -192,10 +192,11 @@ async function uploadMultipartParts(
 }
 
 async function markMultipartSynced(resourceId: string, versionId: string): Promise<void> {
-  await db.transaction('rw', db.resources, db.resourceVersions, db.multipartUploads, async () => {
+  await db.transaction('rw', db.resources, db.resourceVersions, db.multipartUploads, db.outbox, async () => {
     await db.resources.update(resourceId, { syncState: 'synced', syncError: null });
     await db.resourceVersions.update(versionId, { syncState: 'synced', syncError: null });
     await db.multipartUploads.delete(versionId);
+    await db.outbox.where('entityId').equals(resourceId).and((item) => item.type === 'resource.sync').delete();
   });
 }
 
