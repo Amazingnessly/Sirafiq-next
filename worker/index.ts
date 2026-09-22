@@ -290,9 +290,9 @@ async function completeMultipart(versionId: string, request: Request, env: Env):
   }
 }
 
-type ByteRange = { offset: number; length: number };
+export type ByteRange = { offset: number; length: number };
 
-function parseByteRange(header: string | null, totalSize: number): ByteRange | null | 'invalid' {
+export function parseByteRange(header: string | null, totalSize: number): ByteRange | null | 'invalid' {
   if (!header) return null;
   if (!Number.isSafeInteger(totalSize) || totalSize < 0) return 'invalid';
   const match = /^bytes=(\\d*)-(\\d*)$/i.exec(header.trim());
@@ -311,6 +311,25 @@ function parseByteRange(header: string | null, totalSize: number): ByteRange | n
   if (!Number.isSafeInteger(requestedEnd) || requestedEnd < start) return 'invalid';
   const end = Math.min(requestedEnd, totalSize - 1);
   return { offset: start, length: end - start + 1 };
+}
+
+export function createBlobResponse(
+  body: ReadableStream<Uint8Array>,
+  headers: Headers,
+  fullSize: number,
+  range: (ByteRange & { totalSize: number }) | null,
+): Response {
+  headers.set('Accept-Ranges', 'bytes');
+  if (range) {
+    const end = range.offset + range.length - 1;
+    headers.set('Content-Length', String(range.length));
+    headers.set('Content-Range', `bytes ${range.offset}-${end}/${range.totalSize}`);
+    return new Response(body, { status: 206, headers });
+  }
+
+  headers.delete('Content-Range');
+  headers.set('Content-Length', String(fullSize));
+  return new Response(body, { status: 200, headers });
 }
 
 function detachR2Body(source: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
@@ -366,7 +385,6 @@ async function getBlob(versionId: string, request: Request, env: Env): Promise<R
   headers.set('Content-Type', headers.get('Content-Type') ?? version.mime_type);
   headers.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(version.file_name)}`);
   headers.set('ETag', object.httpEtag);
-  headers.set('Accept-Ranges', 'bytes');
 
   if (range && totalSize !== null) {
     const returnedRange = object.range;
@@ -376,15 +394,10 @@ async function getBlob(versionId: string, request: Request, env: Env): Promise<R
     const length = returnedRange && 'length' in returnedRange && typeof returnedRange.length === 'number'
       ? returnedRange.length
       : range.length;
-    const end = offset + length - 1;
-    headers.set('Content-Length', String(length));
-    headers.set('Content-Range', `bytes ${offset}-${end}/${totalSize}`);
-    return new Response(object.body, { status: 206, headers });
+    return createBlobResponse(object.body, headers, object.size, { offset, length, totalSize });
   }
 
-  headers.delete('Content-Range');
-  headers.set('Content-Length', String(object.size));
-  return new Response(detachR2Body(object.body), { status: 200, headers });
+  return createBlobResponse(detachR2Body(object.body), headers, object.size, null);
 }
 
 async function extractPdfOnServer(versionId: string, env: WorkerEnv): Promise<Response> {
