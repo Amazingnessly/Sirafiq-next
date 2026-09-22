@@ -313,6 +313,16 @@ export function parseByteRange(header: string | null, totalSize: number): ByteRa
   return { offset: start, length: end - start + 1 };
 }
 
+export function createUnsatisfiableRangeResponse(totalSize: number): Response {
+  return new Response(null, {
+    status: 416,
+    headers: {
+      'Accept-Ranges': 'bytes',
+      'Content-Range': `bytes */${totalSize}`,
+    },
+  });
+}
+
 export function createBlobResponse(
   body: ReadableStream<Uint8Array>,
   headers: Headers,
@@ -367,15 +377,7 @@ async function getBlob(versionId: string, request: Request, env: Env): Promise<R
     // full-object size rather than mutable adapter metadata.
     totalSize = version.total_size;
     const parsedRange = parseByteRange(rangeHeader, totalSize);
-    if (parsedRange === 'invalid') {
-      return new Response(null, {
-        status: 416,
-        headers: {
-          'Accept-Ranges': 'bytes',
-          'Content-Range': `bytes */${totalSize}`,
-        },
-      });
-    }
+    if (parsedRange === 'invalid') return createUnsatisfiableRangeResponse(totalSize);
     range = parsedRange;
   }
 
