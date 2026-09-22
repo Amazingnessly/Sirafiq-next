@@ -350,9 +350,9 @@ function detachR2Body(source: ReadableStream<Uint8Array>): ReadableStream<Uint8A
 }
 
 async function getBlob(versionId: string, request: Request, env: Env): Promise<Response> {
-  const version = await env.DB.prepare('SELECT r2_key, mime_type, file_name FROM resource_versions WHERE id = ?')
+  const version = await env.DB.prepare('SELECT r2_key, mime_type, file_name, COALESCE(size_bytes, size) AS total_size FROM resource_versions WHERE id = ?')
     .bind(versionId)
-    .first<{ r2_key: string; mime_type: string; file_name: string }>();
+    .first<{ r2_key: string; mime_type: string; file_name: string; total_size: number }>();
   if (!version) return errorResponse(404, 'VERSION_NOT_FOUND', 'La version du support est introuvable.', false);
 
   const rangeHeader = request.headers.get('range');
@@ -361,7 +361,11 @@ async function getBlob(versionId: string, request: Request, env: Env): Promise<R
   if (rangeHeader) {
     const metadata = await env.FILES.head(version.r2_key);
     if (!metadata) return errorResponse(404, 'FILE_NOT_FOUND', 'Le fichier n’est pas présent dans le stockage.', true);
-    totalSize = metadata.size;
+    // D1 stores the expected full size and uploads are only marked stored after
+    // R2 reports that exact size. The local R2 adapter can expose range-scoped
+    // metadata after partial reads, so HTTP satisfiability must use this durable
+    // full-object size rather than mutable adapter metadata.
+    totalSize = version.total_size;
     const parsedRange = parseByteRange(rangeHeader, totalSize);
     if (parsedRange === 'invalid') {
       return new Response(null, {
