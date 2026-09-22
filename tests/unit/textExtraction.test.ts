@@ -4,11 +4,12 @@ import { extractTextContent, TextExtractionError } from '../../src/lib/textExtra
 
 describe('text extraction sync contract', () => {
   it('splits text into pages accepted by the server contract without losing characters', () => {
-    const text = 'a'.repeat(MAX_EXTRACTED_PAGE_CHARS) + '😀' + 'b'.repeat(17);
+    const text = 'a'.repeat(MAX_EXTRACTED_PAGE_CHARS - 1) + '😀' + 'b'.repeat(17);
     const result = extractTextContent(text);
 
     expect(result.charCount).toBe(text.length);
     expect(result.pages).toHaveLength(2);
+    expect(result.pages[0]?.text.length).toBe(MAX_EXTRACTED_PAGE_CHARS - 1);
     expect(result.pages.every((page) => page.text.length <= MAX_EXTRACTED_PAGE_CHARS)).toBe(true);
     expect(result.pages.map((page) => page.text).join('')).toBe(text);
   });
