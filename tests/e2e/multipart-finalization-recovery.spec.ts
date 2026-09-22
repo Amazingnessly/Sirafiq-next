@@ -65,6 +65,15 @@ async function seedInterruptedMultipart(page: Parameters<typeof test>[0]['page']
       error: 'Réponse de finalisation perdue.',
       updatedAt: now,
     });
+    await db.outbox.add({
+      id: 'residual-resource-sync',
+      type: 'resource.sync',
+      entityId: resourceId,
+      attempts: 2,
+      lastError: 'Ancienne tentative multipart',
+      nextAttemptAt: Number.MAX_SAFE_INTEGER,
+      createdAt: now,
+    });
   }, { resourceId: RESOURCE_ID, versionId: VERSION_ID, subjectId: SUBJECT_ID, hash: sha256, size: fileBytes.length });
 }
 
@@ -141,6 +150,10 @@ test('une réponse de finalisation perdue est réconciliée sans renvoyer le fic
     const { db } = await import('/src/data/db.ts');
     return (await db.resources.get(resourceId))?.syncState;
   }, RESOURCE_ID)).toBe('synced');
+  await expect.poll(async () => page.evaluate(async (resourceId) => {
+    const { db } = await import('/src/data/db.ts');
+    return db.outbox.where('entityId').equals(resourceId).and((item) => item.type === 'resource.sync').count();
+  }, RESOURCE_ID)).toBe(0);
 });
 
 test('une session expirée pendant la finalisation redémarre une seule fois proprement', async ({ page }) => {
@@ -234,4 +247,8 @@ test('une session expirée pendant la finalisation redémarre une seule fois pro
     const { db } = await import('/src/data/db.ts');
     return (await db.resources.get(resourceId))?.syncState;
   }, RESOURCE_ID)).toBe('synced');
+  await expect.poll(async () => page.evaluate(async (resourceId) => {
+    const { db } = await import('/src/data/db.ts');
+    return db.outbox.where('entityId').equals(resourceId).and((item) => item.type === 'resource.sync').count();
+  }, RESOURCE_ID)).toBe(0);
 });
