@@ -26,10 +26,10 @@ export function TodayPage() {
 
   return (
     <div className="page page--home">
-      <header className="page-header home-header"><div><p className="eyebrow">Sirāfiq Next</p><h1>Que faut-il travailler aujourd’hui&nbsp;?</h1><p className="lede">La boussole pédagogique sera activée quand les premières activités réelles existeront. Pour l’instant, Sirāfiq vous conduit uniquement vers les supports effectivement importés.</p></div></header>
+      <header className="page-header home-header"><div><p className="eyebrow">Sirāfiq</p><h1>Que faut-il travailler aujourd’hui&nbsp;?</h1><p className="lede">Retrouvez vos supports et reprenez là où vous vous êtes arrêté. Les activités guidées apparaîtront ici lorsqu’elles seront réellement disponibles.</p></div></header>
       <section className="foundation-card">
         <div className="foundation-card__glow" aria-hidden="true" />
-        <div className="foundation-card__content"><p className="eyebrow">Fondation V0.1</p><h2>Construire une bibliothèque fiable</h2><p>Créez une matière, importez un PDF ou un texte, vérifiez l’extraction, fermez l’application puis revenez : le support reste enregistré localement et se synchronise avec D1/R2 dès que le réseau est disponible.</p><Link className="button button--primary" to={nextAction.to}>{nextAction.label}</Link></div>
+        <div className="foundation-card__content"><p className="eyebrow">Ma bibliothèque</p><h2>{resources > 0 ? 'Continuer à partir de mes supports' : 'Préparer mon espace d’apprentissage'}</h2><p>{resources > 0 ? 'Vos supports restent disponibles sur cet appareil et se synchronisent lorsque le réseau est disponible.' : 'Créez une matière puis ajoutez un PDF ou un texte pour commencer à construire votre espace de travail.'}</p><Link className="button button--primary" to={nextAction.to}>{nextAction.label}</Link></div>
         <div className="metrics" aria-label="État de la bibliothèque">
           <Metric value={subjects} label="matières" />
           <Metric value={resources} label="supports" />
@@ -39,9 +39,9 @@ export function TodayPage() {
         </div>
       </section>
       <section className="principles-grid">
-        <article className="principle-card"><span className="principle-number">01</span><h3>Local d’abord</h3><p>Le travail est enregistré sur l’iPad avant la synchronisation réseau.</p></article>
-        <article className="principle-card"><span className="principle-number">02</span><h3>Pas de faux contenu</h3><p>Si un PDF ne livre pas de texte exploitable, Sirāfiq le signale clairement.</p></article>
-        <article className="principle-card"><span className="principle-number">03</span><h3>Pas de bouton mort</h3><p>Les prochains modules n’apparaîtront qu’au moment où leur parcours sera fonctionnel.</p></article>
+        <article className="principle-card"><span className="principle-number">01</span><h3>Disponible hors ligne</h3><p>Vos supports sont enregistrés sur l’iPad avant la synchronisation réseau.</p></article>
+        <article className="principle-card"><span className="principle-number">02</span><h3>Contenu vérifiable</h3><p>Si un PDF ne livre pas de texte exploitable, Sirāfiq vous le signale clairement.</p></article>
+        <article className="principle-card"><span className="principle-number">03</span><h3>Parcours fonctionnels</h3><p>Une fonction apparaît seulement lorsque son parcours est prêt à être utilisé.</p></article>
       </section>
     </div>
   );
