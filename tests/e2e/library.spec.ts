@@ -68,6 +68,48 @@ test('un fichier TXT réel reste importable sans Blob.arrayBuffer ni Blob.text',
   await expect(page.getByText('Ce fichier TXT est réellement lu, extrait et conservé sur Safari.')).toBeVisible();
 });
 
+test('un TXT dépassant une page serveur reste synchronisable par blocs bornés', async ({ page }) => {
+  const text = 'a'.repeat(250_000) + 'b'.repeat(10_000);
+
+  await page.goto('/bibliotheque');
+  await page.getByLabel('Nouvelle matière', { exact: true }).first().fill('TXT long E2E');
+  await page.getByRole('button', { name: 'Ajouter', exact: true }).click();
+  await expect(page.getByRole('listitem').getByText('TXT long E2E', { exact: true })).toBeVisible();
+
+  await page.getByLabel(/Titre/).fill('Long TXT borné');
+  await page.getByLabel('Fichier du support').setInputFiles({
+    name: 'long.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from(text),
+  });
+  await page.getByRole('button', { name: 'Importer le support' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Long TXT borné' })).toBeVisible();
+  await expect(page.getByText('Synchronisé', { exact: true })).toBeVisible({ timeout: 20_000 });
+
+  const local = await page.evaluate(async (title) => {
+    const { db } = await import('/src/data/db.ts');
+    await db.open();
+    const resource = (await db.resources.toArray()).find((item) => item.title === title);
+    if (!resource) throw new Error('Support TXT E2E introuvable');
+    const extraction = await db.extractions.get(resource.currentVersionId);
+    if (!extraction) throw new Error('Extraction TXT E2E introuvable');
+    return {
+      syncState: resource.syncState,
+      status: extraction.status,
+      charCount: extraction.charCount,
+      lengths: extraction.pages.map((page) => page.text.length),
+      text: extraction.pages.map((page) => page.text).join(''),
+    };
+  }, 'Long TXT borné');
+
+  expect(local.syncState).toBe('synced');
+  expect(local.status).toBe('ready');
+  expect(local.charCount).toBe(text.length);
+  expect(local.lengths).toEqual([250_000, 10_000]);
+  expect(local.text).toBe(text);
+});
+
 test('un PDF refusé par le lecteur local peut être récupéré par le fallback serveur', async ({ page }) => {
   const extractedText = 'Texte réel récupéré par le moteur serveur de secours.';
   await page.route('**/api/resource-versions/*/server-extraction', async (route) => {

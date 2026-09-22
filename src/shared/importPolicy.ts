@@ -19,6 +19,7 @@ export const MAX_RESOURCE_FILE_BYTES = MULTIPART_PART_BYTES * MULTIPART_MAX_PART
 export const MAX_SYNC_FILE_BYTES = MAX_SINGLE_UPLOAD_BYTES;
 
 export const MAX_EXTRACTED_CHARS = 2_000_000;
+export const MAX_EXTRACTED_PAGE_CHARS = 250_000;
 export const MAX_EXTRACTED_PAGES = 500;
 
 export function multipartPartCount(size: number, partSize = MULTIPART_PART_BYTES): number {

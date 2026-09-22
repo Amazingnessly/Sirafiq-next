@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { MAX_EXTRACTED_CHARS, MAX_EXTRACTED_PAGES, MAX_RESOURCE_FILE_BYTES } from './importPolicy';
+import { MAX_EXTRACTED_CHARS, MAX_EXTRACTED_PAGE_CHARS, MAX_EXTRACTED_PAGES, MAX_RESOURCE_FILE_BYTES } from './importPolicy';
 
 export const ResourceKindSchema = z.enum(['text', 'pdf']);
 export type ResourceKind = z.infer<typeof ResourceKindSchema>;
@@ -61,7 +61,7 @@ export type MultipartCompleteInput = z.infer<typeof MultipartCompleteSchema>;
 
 export const ExtractedPageSchema = z.object({
   pageNumber: z.number().int().positive(),
-  text: z.string().max(250_000),
+  text: z.string().max(MAX_EXTRACTED_PAGE_CHARS),
 });
 export type ExtractedPage = z.infer<typeof ExtractedPageSchema>;
 
