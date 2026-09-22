@@ -5,7 +5,7 @@ const SUBJECT_ID = '12121212-1212-4121-8121-121212121212';
 const RESOURCE_ID = '23232323-2323-4232-8232-232323232323';
 const VERSION_ID = '34343434-3434-4343-8343-343434343434';
 
-test('le Worker sert réellement les blobs R2 par plages HTTP', async ({ request }) => {
+test('le Worker sert réellement les blobs R2 par plages HTTP', async ({ page, request }) => {
   const bytes = Buffer.from('0123456789abcdef', 'ascii');
   const sha256 = createHash('sha256').update(bytes).digest('hex');
   const now = '2026-09-22T00:00:00.000Z';
@@ -51,36 +51,47 @@ test('le Worker sert réellement les blobs R2 par plages HTTP', async ({ request
   });
   expect(upload.ok()).toBe(true);
 
-  // Verify the ordinary full-object path before issuing ranged reads. The
-  // Cloudflare local R2 adapter can retain range state between sequential
-  // requests in the same test context, which is not representative of R2.
-  const full = await request.get(`/api/resource-versions/${VERSION_ID}/blob`);
-  expect(full.status()).toBe(200);
-  expect(full.headers()['accept-ranges']).toBe('bytes');
-  expect(full.headers()['content-length']).toBe(String(bytes.length));
-  expect(Buffer.from(await full.body())).toEqual(bytes);
+  await page.goto('/bibliotheque');
 
-  const partial = await request.get(`/api/resource-versions/${VERSION_ID}/blob`, {
-    headers: { Range: 'bytes=4-9' },
-  });
-  expect(partial.status()).toBe(206);
-  expect(partial.headers()['accept-ranges']).toBe('bytes');
-  expect(partial.headers()['content-range']).toBe(`bytes 4-9/${bytes.length}`);
-  expect(partial.headers()['content-length']).toBe('6');
-  expect(Buffer.from(await partial.body())).toEqual(bytes.subarray(4, 10));
+  async function browserGet(range: string | null = null) {
+    return page.evaluate(async ({ versionId, rangeHeader }) => {
+      const headers = rangeHeader ? { Range: rangeHeader } : {};
+      const response = await fetch(`/api/resource-versions/${versionId}/blob`, { headers, cache: 'no-store' });
+      return {
+        status: response.status,
+        headers: Object.fromEntries(response.headers.entries()),
+        body: Array.from(new Uint8Array(await response.arrayBuffer())),
+      };
+    }, { versionId: VERSION_ID, rangeHeader: range });
+  }
 
-  const suffix = await request.get(`/api/resource-versions/${VERSION_ID}/blob`, {
-    headers: { Range: 'bytes=-4' },
-  });
-  expect(suffix.status()).toBe(206);
-  expect(suffix.headers()['content-range']).toBe(`bytes 12-15/${bytes.length}`);
-  expect(Buffer.from(await suffix.body())).toEqual(bytes.subarray(12));
+  const full = await browserGet();
+  expect(full.status).toBe(200);
+  expect(full.headers['accept-ranges']).toBe('bytes');
+  expect(full.headers['content-length']).toBe(String(bytes.length));
+  expect(Buffer.from(full.body)).toEqual(bytes);
 
-  const openEnded = await request.get(`/api/resource-versions/${VERSION_ID}/blob`, {
-    headers: { Range: 'bytes=10-' },
-  });
-  expect(openEnded.status()).toBe(206);
-  expect(openEnded.headers()['content-range']).toBe(`bytes 10-15/${bytes.length}`);
-  expect(openEnded.headers()['content-length']).toBe('6');
-  expect(Buffer.from(await openEnded.body())).toEqual(bytes.subarray(10));
+  const partial = await browserGet('bytes=4-9');
+  expect(partial.status).toBe(206);
+  expect(partial.headers['accept-ranges']).toBe('bytes');
+  expect(partial.headers['content-range']).toBe(`bytes 4-9/${bytes.length}`);
+  expect(partial.headers['content-length']).toBe('6');
+  expect(Buffer.from(partial.body)).toEqual(bytes.subarray(4, 10));
+
+  const suffix = await browserGet('bytes=-4');
+  expect(suffix.status).toBe(206);
+  expect(suffix.headers['content-range']).toBe(`bytes 12-15/${bytes.length}`);
+  expect(Buffer.from(suffix.body)).toEqual(bytes.subarray(12));
+
+  const openEnded = await browserGet('bytes=10-');
+  expect(openEnded.status).toBe(206);
+  expect(openEnded.headers['content-range']).toBe(`bytes 10-15/${bytes.length}`);
+  expect(openEnded.headers['content-length']).toBe('6');
+  expect(Buffer.from(openEnded.body)).toEqual(bytes.subarray(10));
+
+  const unsatisfiable = await browserGet('bytes=99-100');
+  expect(unsatisfiable.status).toBe(416);
+  expect(unsatisfiable.headers['accept-ranges']).toBe('bytes');
+  expect(unsatisfiable.headers['content-range']).toBe(`bytes */${bytes.length}`);
+  expect(unsatisfiable.body).toEqual([]);
 });
