@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createBlobResponse, parseByteRange } from '../../worker/index';
+import { createBlobResponse, createUnsatisfiableRangeResponse, parseByteRange } from '../../worker/index';
 
 function stream(bytes: number[]): ReadableStream<Uint8Array> {
   return new ReadableStream<Uint8Array>({
@@ -34,6 +34,15 @@ describe('Worker blob range responses', () => {
     expect(response.headers.get('Accept-Ranges')).toBe('bytes');
     expect(response.headers.get('Content-Length')).toBe('3');
     expect(response.headers.get('Content-Range')).toBe('bytes 4-6/10');
+  });
+
+  it('returns a strict 416 response for an unsatisfiable byte range', () => {
+    const response = createUnsatisfiableRangeResponse(16);
+
+    expect(response.status).toBe(416);
+    expect(response.headers.get('Accept-Ranges')).toBe('bytes');
+    expect(response.headers.get('Content-Range')).toBe('bytes */16');
+    expect(response.headers.get('Content-Length')).toBeNull();
   });
 
   it('parses bounded, open-ended and suffix ranges and rejects unsatisfiable input', () => {
