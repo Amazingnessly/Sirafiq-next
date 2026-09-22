@@ -23,6 +23,7 @@ let retryTimer: number | null = null;
 let retryTimerAt: number | null = null;
 
 type RemoteRegistration = {
+  resourceId: string;
   versionId: string;
   reusedExisting: boolean;
   remote: ResourceDetailPayload | null;
@@ -87,7 +88,7 @@ export async function uploadMultipartResource(
     await ensureSubjectSynced(resource.subjectId);
 
     const registration = await registerOrResolveRemoteVersion(toResourcePayload(resource, version));
-    await rememberRemoteVersionId(version.id, registration.versionId);
+    await rememberRemoteIdentity(resource.id, version.id, registration);
     if (registration.reusedExisting) {
       if (registration.remote?.version.extractionStatus === 'ready' && registration.remote.extraction) {
         await applyServerExtractionResult(resource.id, version.id, {
@@ -216,7 +217,7 @@ export async function retryServerExtractionForResource(resourceId: string): Prom
   if (resource.syncState !== 'synced') throw new Error('Synchronisez d’abord le fichier avant de relancer son extraction.');
 
   const registration = await registerOrResolveRemoteVersion(toResourcePayload(resource, version));
-  await rememberRemoteVersionId(version.id, registration.versionId);
+  await rememberRemoteIdentity(resource.id, version.id, registration);
   if (registration.remote?.version.extractionStatus === 'ready' && registration.remote.extraction) {
     const ready: ServerExtractionResult = {
       status: 'ready',
@@ -352,7 +353,7 @@ async function syncResource(item: OutboxRecord): Promise<void> {
   }
 
   const registration = await registerOrResolveRemoteVersion(toResourcePayload(resource, version));
-  await rememberRemoteVersionId(version.id, registration.versionId);
+  await rememberRemoteIdentity(resource.id, version.id, registration);
   if (!registration.reusedExisting) {
     const uploadBlob = new Blob([version.bytes], { type: version.mimeType });
     await apiPutBlob(`/api/resource-versions/${encodeURIComponent(registration.versionId)}/blob`, uploadBlob, version.mimeType, 120_000);
@@ -385,15 +386,25 @@ async function syncResource(item: OutboxRecord): Promise<void> {
   });
 }
 
-async function rememberRemoteVersionId(localVersionId: string, remoteVersionId: string): Promise<void> {
-  if (remoteVersionId === localVersionId) return;
-  await db.resourceVersions.update(localVersionId, { remoteVersionId });
+async function rememberRemoteIdentity(
+  localResourceId: string,
+  localVersionId: string,
+  registration: RemoteRegistration,
+): Promise<void> {
+  await db.transaction('rw', db.resources, db.resourceVersions, async () => {
+    if (registration.resourceId !== localResourceId) {
+      await db.resources.update(localResourceId, { remoteResourceId: registration.resourceId });
+    }
+    if (registration.versionId !== localVersionId) {
+      await db.resourceVersions.update(localVersionId, { remoteVersionId: registration.versionId });
+    }
+  });
 }
 
 async function registerOrResolveRemoteVersion(payload: ResourceRegisterInput): Promise<RemoteRegistration> {
   try {
     await apiJson('/api/resources/register', { method: 'POST', body: JSON.stringify(payload) });
-    return { versionId: payload.version.id, reusedExisting: false, remote: null };
+    return { resourceId: payload.resource.id, versionId: payload.version.id, reusedExisting: false, remote: null };
   } catch (error) {
     if (!(error instanceof ApiRequestError) || error.code !== 'DUPLICATE_SUPPORT') throw error;
     const existingResourceId = readExistingResourceId(error.details);
@@ -401,7 +412,7 @@ async function registerOrResolveRemoteVersion(payload: ResourceRegisterInput): P
       throw new ApiRequestError('Le serveur a signalé un doublon sans fournir le support existant.', 409, 'DUPLICATE_RECONCILIATION_FAILED', true, error.details);
     }
     const remote = await apiJson<ResourceDetailPayload>(`/api/resources/${encodeURIComponent(existingResourceId)}`);
-    return { versionId: remote.version.id, reusedExisting: true, remote };
+    return { resourceId: remote.resource.id, versionId: remote.version.id, reusedExisting: true, remote };
   }
 }
 
