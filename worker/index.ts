@@ -370,8 +370,8 @@ async function getBlob(versionId: string, request: Request, env: Env): Promise<R
 
   if (range && totalSize !== null) {
     const returnedRange = object.range;
-    const offset = returnedRange?.offset ?? range.offset;
-    const length = returnedRange?.length ?? range.length;
+    const offset = returnedRange && 'offset' in returnedRange ? returnedRange.offset : range.offset;
+    const length = returnedRange && 'length' in returnedRange ? returnedRange.length : range.length;
     const end = offset + length - 1;
     headers.set('Content-Length', String(length));
     headers.set('Content-Range', `bytes ${offset}-${end}/${totalSize}`);
