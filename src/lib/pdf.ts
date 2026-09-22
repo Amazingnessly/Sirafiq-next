@@ -4,6 +4,7 @@ import type { ExtractedPage } from '../shared/contracts';
 import {
   LOCAL_PDF_EXTRACTION_MAX_BYTES,
   MAX_EXTRACTED_CHARS,
+  MAX_EXTRACTED_PAGE_CHARS,
   MAX_EXTRACTED_PAGES,
 } from '../shared/importPolicy';
 import { readBlobAsArrayBuffer, readBlobAsText } from './blob';
@@ -70,6 +71,9 @@ async function extractPdf(file: File): Promise<ExtractedPage[]> {
         .join(' ')
         .replace(/\s+/g, ' ')
         .trim();
+      if (text.length > MAX_EXTRACTED_PAGE_CHARS) {
+        throw new DocumentExtractionError('Une page PDF dépasse la limite de texte de cette première version.', 'TOO_LARGE');
+      }
       charCount += text.length;
       if (charCount > MAX_EXTRACTED_CHARS) {
         throw new DocumentExtractionError('Le texte extrait dépasse la limite de cette première version.', 'TOO_LARGE');
