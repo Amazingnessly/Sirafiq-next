@@ -161,8 +161,93 @@ test('un multipart actif ne prétend pas que tout est enregistré', async ({ pag
     });
   });
 
-  await page.reload();
-
   await expect(page.getByText('1 envoi en cours', { exact: true })).toBeVisible();
   await expect(page.getByText('Enregistré', { exact: true })).toHaveCount(0);
+});
+
+
+test('un multipart persisté comme actif devient reprenable après rechargement', async ({ page }) => {
+  const resourceId = 'e2e-reloaded-multipart-resource';
+  const versionId = 'e2e-reloaded-multipart-version';
+
+  await page.goto('/bibliotheque');
+  await page.evaluate(async ({ resourceId: rid, versionId: vid }) => {
+    const { db } = await import('/src/data/db.ts');
+    await db.open();
+    const now = new Date().toISOString();
+    await db.resources.put({
+      id: rid,
+      subjectId: 'e2e-reloaded-multipart-subject',
+      title: 'PDF interrompu par reload',
+      kind: 'pdf',
+      currentVersionId: vid,
+      status: 'failed',
+      extractionError: 'Extraction différée.',
+      createdAt: now,
+      updatedAt: now,
+      syncState: 'pending',
+      syncError: null,
+    });
+    await db.resourceVersions.put({
+      id: vid,
+      resourceId: rid,
+      sha256: 'e2e-reloaded-multipart-sha',
+      fileName: 'reload.pdf',
+      mimeType: 'application/pdf',
+      size: 100 * 1024 * 1024,
+      bytes: null,
+      createdAt: now,
+      syncState: 'pending',
+      syncError: null,
+    });
+    await db.extractions.put({
+      versionId: vid,
+      status: 'failed',
+      pages: [],
+      charCount: 0,
+      errorCode: 'LARGE_FILE_EXTRACTION_DEFERRED',
+      errorMessage: 'Extraction différée.',
+      createdAt: now,
+    });
+    await db.multipartUploads.put({
+      versionId: vid,
+      resourceId: rid,
+      fileName: 'reload.pdf',
+      size: 100 * 1024 * 1024,
+      lastModified: Date.now(),
+      sha256: 'e2e-reloaded-multipart-sha',
+      uploadId: 'e2e-reloaded-upload',
+      partSize: 8 * 1024 * 1024,
+      parts: [{ partNumber: 1, etag: 'etag-1' }],
+      status: 'uploading',
+      error: null,
+      updatedAt: now,
+    });
+  }, { resourceId, versionId });
+
+  await expect(page.getByText('1 envoi en cours', { exact: true })).toBeVisible();
+  await page.reload();
+
+  await expect(page.getByRole('link', { name: /1 envoi à reprendre · Resélectionner/ })).toBeVisible();
+  await expect.poll(async () => page.evaluate(async ({ rid, vid }) => {
+    const { db } = await import('/src/data/db.ts');
+    const [resource, version, session] = await Promise.all([
+      db.resources.get(rid),
+      db.resourceVersions.get(vid),
+      db.multipartUploads.get(vid),
+    ]);
+    return {
+      resourceState: resource?.syncState,
+      versionState: version?.syncState,
+      sessionStatus: session?.status,
+    };
+  }, { rid: resourceId, vid: versionId })).toEqual({
+    resourceState: 'error',
+    versionState: 'error',
+    sessionStatus: 'error',
+  });
+
+  await page.goto(`/bibliotheque/${resourceId}`);
+  await expect(page.getByText('L’envoi du gros fichier est interrompu.')).toBeVisible();
+  await expect(page.getByLabel('Fichier à reprendre')).toBeVisible();
 });
