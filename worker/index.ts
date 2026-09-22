@@ -314,22 +314,28 @@ function parseByteRange(header: string | null, totalSize: number): ByteRange | n
 }
 
 async function getBlob(versionId: string, request: Request, env: Env): Promise<Response> {
-  const version = await env.DB.prepare(
-    'SELECT r2_key, mime_type, file_name, COALESCE(size_bytes, size) AS size FROM resource_versions WHERE id = ?',
-  )
+  const version = await env.DB.prepare('SELECT r2_key, mime_type, file_name FROM resource_versions WHERE id = ?')
     .bind(versionId)
-    .first<{ r2_key: string; mime_type: string; file_name: string; size: number }>();
+    .first<{ r2_key: string; mime_type: string; file_name: string }>();
   if (!version) return errorResponse(404, 'VERSION_NOT_FOUND', 'La version du support est introuvable.', false);
 
-  const range = parseByteRange(request.headers.get('range'), version.size);
-  if (range === 'invalid') {
-    return new Response(null, {
-      status: 416,
-      headers: {
-        'Accept-Ranges': 'bytes',
-        'Content-Range': `bytes */${version.size}`,
-      },
-    });
+  const rangeHeader = request.headers.get('range');
+  let range: ByteRange | null = null;
+  let totalSize: number | null = null;
+  if (rangeHeader) {
+    const metadata = await env.FILES.head(version.r2_key);
+    if (!metadata) return errorResponse(404, 'FILE_NOT_FOUND', 'Le fichier n’est pas présent dans le stockage.', true);
+    totalSize = metadata.size;
+    range = parseByteRange(rangeHeader, totalSize);
+    if (range === 'invalid') {
+      return new Response(null, {
+        status: 416,
+        headers: {
+          'Accept-Ranges': 'bytes',
+          'Content-Range': `bytes */${totalSize}`,
+        },
+      });
+    }
   }
 
   const object = await env.FILES.get(version.r2_key, range ? { range } : undefined);
@@ -342,14 +348,14 @@ async function getBlob(versionId: string, request: Request, env: Env): Promise<R
   headers.set('ETag', object.httpEtag);
   headers.set('Accept-Ranges', 'bytes');
 
-  if (range) {
+  if (range && totalSize !== null) {
     const end = range.offset + range.length - 1;
     headers.set('Content-Length', String(range.length));
-    headers.set('Content-Range', `bytes ${range.offset}-${end}/${version.size}`);
+    headers.set('Content-Range', `bytes ${range.offset}-${end}/${totalSize}`);
     return new Response(object.body, { status: 206, headers });
   }
 
-  headers.set('Content-Length', String(version.size));
+  headers.set('Content-Length', String(object.size));
   return new Response(object.body, { status: 200, headers });
 }
 
