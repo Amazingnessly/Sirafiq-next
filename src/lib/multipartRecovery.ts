@@ -23,8 +23,15 @@ export async function uploadMultipartResourceWithRecovery(
   onProgress?: (progress: TransferProgress) => void,
 ): Promise<void> {
   // If the final R2 assembly succeeded but its HTTP response was lost, do not
-  // resend a large file: reconcile the durable remote state first.
-  if (await reconcileAlreadyStoredRemote(resourceId)) return;
+  // resend a large file: reconcile the durable remote state first. A network
+  // failure here still has to turn the persisted multipart into an explicit
+  // recovery state because the original File is not retained across reloads.
+  try {
+    if (await reconcileAlreadyStoredRemote(resourceId)) return;
+  } catch (error) {
+    await markMultipartRecoveryFailure(resourceId, error);
+    throw error;
+  }
 
   const resource = await db.resources.get(resourceId);
   if (!resource) throw new Error('Le support local est introuvable.');
@@ -57,6 +64,27 @@ export async function uploadMultipartResourceWithRecovery(
     await forceFreshMultipartSession(resourceId);
     await uploadMultipartResource(resourceId, file, forwardProgress);
   }
+}
+
+async function markMultipartRecoveryFailure(resourceId: string, error: unknown): Promise<void> {
+  const resource = await db.resources.get(resourceId);
+  if (!resource) return;
+  const [version, session] = await Promise.all([
+    db.resourceVersions.get(resource.currentVersionId),
+    db.multipartUploads.get(resource.currentVersionId),
+  ]);
+  if (!version || !session) return;
+
+  const message = error instanceof Error ? error.message : 'La reprise de l’envoi multipart a échoué.';
+  await db.transaction('rw', db.resources, db.resourceVersions, db.multipartUploads, async () => {
+    await db.resources.update(resource.id, { syncState: 'error', syncError: message });
+    await db.resourceVersions.update(version.id, { syncState: 'error', syncError: message });
+    await db.multipartUploads.update(session.versionId, {
+      status: 'error',
+      error: message,
+      updatedAt: new Date().toISOString(),
+    });
+  });
 }
 
 async function reconcileAlreadyStoredRemote(resourceId: string): Promise<boolean> {
