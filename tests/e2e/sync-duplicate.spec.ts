@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 
 test('un doublon déjà synchronisé est réutilisé puis extrait sans réenvoyer le fichier', async ({ page }) => {
   let uploadAttempts = 0;
+  const blobReadPaths: string[] = [];
   const extractedText = 'Texte récupéré depuis la version distante déjà synchronisée.';
 
   await page.route('**/api/**', async (route) => {
@@ -64,6 +65,12 @@ test('un doublon déjà synchronisé est réutilisé puis extrait sans réenvoye
       return;
     }
 
+    if (request.method() === 'GET' && /^\/api\/resource-versions\/[^/]+\/blob$/.test(url.pathname)) {
+      blobReadPaths.push(url.pathname);
+      await route.fulfill({ status: 200, contentType: 'application/pdf', body: '%PDF-1.4\n%%EOF' });
+      return;
+    }
+
     if (request.method() === 'PUT' && url.pathname.includes('/blob')) {
       uploadAttempts += 1;
       await route.fulfill({ status: 500, contentType: 'application/json', body: '{}' });
@@ -105,4 +112,36 @@ test('un doublon déjà synchronisé est réutilisé puis extrait sans réenvoye
   await expect(page.getByText('caractères extraits', { exact: true })).toBeVisible();
   await expect(page.getByText('Le support est enregistré localement, mais la synchronisation a échoué.')).toHaveCount(0);
   expect(uploadAttempts).toBe(0);
+
+  const remoteVersionId = await page.evaluate(async () => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('sirafiq-next');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const transaction = database.transaction('resourceVersions', 'readwrite');
+    const store = transaction.objectStore('resourceVersions');
+    const versions = await new Promise<Array<Record<string, unknown>>>((resolve, reject) => {
+      const request = store.getAll();
+      request.onsuccess = () => resolve(request.result as Array<Record<string, unknown>>);
+      request.onerror = () => reject(request.error);
+    });
+    const version = versions[0];
+    if (!version || typeof version.id !== 'string') throw new Error('Version locale E2E introuvable');
+    const reconciledId = typeof version.remoteVersionId === 'string' ? version.remoteVersionId : null;
+    store.put({ ...version, bytes: null });
+    await new Promise<void>((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error ?? new Error('Transaction E2E annulée'));
+    });
+    database.close();
+    return reconciledId;
+  });
+
+  expect(remoteVersionId).toBe('33333333-3333-4333-8333-333333333333');
+  await expect.poll(() => blobReadPaths).toContain('/api/resource-versions/33333333-3333-4333-8333-333333333333/blob');
+  blobReadPaths.length = 0;
+  await page.reload();
+  await expect.poll(() => blobReadPaths).toContain('/api/resource-versions/33333333-3333-4333-8333-333333333333/blob');
 });

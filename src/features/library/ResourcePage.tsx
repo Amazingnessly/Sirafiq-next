@@ -43,11 +43,12 @@ export function ResourcePage() {
   const title = localResource?.title ?? remote.data?.resource.title;
   const kind = localResource?.kind ?? remote.data?.resource.kind;
   const versionId = localResource?.currentVersionId ?? remote.data?.version.id;
+  const remoteVersionId = localVersion?.remoteVersionId ?? versionId;
   const pages: ExtractedPage[] = useMemo(() => localExtraction?.pages ?? remote.data?.extraction?.pages ?? [], [localExtraction?.pages, remote.data?.extraction?.pages]);
   const extractionFailed = localExtraction?.status === 'failed' || remote.data?.version.extractionStatus === 'failed';
   const extractionError = localExtraction?.errorMessage ?? remote.data?.version.extractionError;
   const remoteBlobAvailable = !localResource || localResource.syncState === 'synced';
-  const pdfUrl = blobUrl ?? (versionId && remoteBlobAvailable ? `/api/resource-versions/${encodeURIComponent(versionId)}/blob` : null);
+  const pdfUrl = blobUrl ?? (remoteVersionId && remoteBlobAvailable ? `/api/resource-versions/${encodeURIComponent(remoteVersionId)}/blob` : null);
   const terminalSyncFailure = Boolean(syncAttempt?.lastError && isTerminalOutboxAttempt(syncAttempt.nextAttemptAt));
   const canRetryServerExtraction = Boolean(localResource && localVersion && localExtraction && localResource.syncState === 'synced' && shouldTryServerPdfExtraction(localResource.kind, localVersion.size, localExtraction.status));
   const extractionRecoveryReason = getExtractionRecoveryReason({ kind, extractionFailed, hasPages: pages.length > 0, syncState: localResource?.syncState, size: localVersion?.size ?? remote.data?.version.size, hasLocalExtraction: Boolean(localExtraction), hasMultipartSession: Boolean(multipartSession), canRetry: canRetryServerExtraction });

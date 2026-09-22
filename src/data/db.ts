@@ -36,6 +36,7 @@ export interface ResourceVersionRecord {
   mimeType: string;
   size: number;
   bytes: ArrayBuffer | null;
+  remoteVersionId?: string;
   createdAt: string;
   syncState: SyncState;
   syncError: string | null;
