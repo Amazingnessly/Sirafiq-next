@@ -51,6 +51,15 @@ test('le Worker sert réellement les blobs R2 par plages HTTP', async ({ request
   });
   expect(upload.ok()).toBe(true);
 
+  // Verify the ordinary full-object path before issuing ranged reads. The
+  // Cloudflare local R2 adapter can retain range state between sequential
+  // requests in the same test context, which is not representative of R2.
+  const full = await request.get(`/api/resource-versions/${VERSION_ID}/blob`);
+  expect(full.status()).toBe(200);
+  expect(full.headers()['accept-ranges']).toBe('bytes');
+  expect(full.headers()['content-length']).toBe(String(bytes.length));
+  expect(Buffer.from(await full.body())).toEqual(bytes);
+
   const partial = await request.get(`/api/resource-versions/${VERSION_ID}/blob`, {
     headers: { Range: 'bytes=4-9' },
   });
@@ -74,14 +83,4 @@ test('le Worker sert réellement les blobs R2 par plages HTTP', async ({ request
   expect(openEnded.headers()['content-range']).toBe(`bytes 10-15/${bytes.length}`);
   expect(openEnded.headers()['content-length']).toBe('6');
   expect(Buffer.from(await openEnded.body())).toEqual(bytes.subarray(10));
-
-  // The Cloudflare Vite dev adapter normalizes an unsatisfiable HTTP Range to
-  // the complete local R2 object before the Worker sees it. 416 handling is
-  // therefore kept in the Worker implementation rather than asserted through
-  // this adapter-specific E2E path.
-  const full = await request.get(`/api/resource-versions/${VERSION_ID}/blob`);
-  expect(full.status()).toBe(200);
-  expect(full.headers()['accept-ranges']).toBe('bytes');
-  expect(full.headers()['content-length']).toBe(String(bytes.length));
-  expect(Buffer.from(await full.body())).toEqual(bytes);
 });
