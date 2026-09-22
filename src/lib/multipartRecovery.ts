@@ -107,10 +107,11 @@ async function reconcileAlreadyStoredRemote(resourceId: string): Promise<boolean
     });
   }
 
-  await db.transaction('rw', db.resources, db.resourceVersions, db.multipartUploads, async () => {
+  await db.transaction('rw', db.resources, db.resourceVersions, db.multipartUploads, db.outbox, async () => {
     await db.resources.update(resource.id, { syncState: 'synced', syncError: null });
     await db.resourceVersions.update(version.id, { syncState: 'synced', syncError: null });
     await db.multipartUploads.delete(version.id);
+    await db.outbox.where('entityId').equals(resource.id).and((item) => item.type === 'resource.sync').delete();
   });
   return true;
 }
