@@ -12,7 +12,7 @@ import { isoNow, newId } from '../lib/ids';
 import { extractTextContent } from '../lib/textExtraction';
 import { uploadMultipartResourceWithRecovery } from '../lib/multipartRecovery';
 import { isRetryableOutboxAttempt } from '../lib/retryableSync';
-import { requestSync, type TransferProgress } from '../lib/sync';
+import { type TransferProgress } from '../lib/sync';
 import {
   MAX_RESOURCE_FILE_BYTES,
   MULTIPART_PART_BYTES,
@@ -63,7 +63,6 @@ export async function importFile(
     if (!pendingMultipart) throw new DuplicateSupportError(existingVersion.resourceId);
     const existingResource = await db.resources.get(existingVersion.resourceId);
     if (!existingResource) throw new Error('Le support à reprendre est incomplet dans le stockage local.');
-    await requestSync();
     await uploadMultipartResourceWithRecovery(existingResource.id, file, onProgress);
     return (await db.resources.get(existingResource.id)) ?? existingResource;
   }
@@ -103,7 +102,6 @@ export async function importFile(
       extraction, resourceId, versionId, now, enqueueSync: false, multipart,
     });
 
-    await requestSync();
     await uploadMultipartResourceWithRecovery(resource.id, file, onProgress);
     return (await db.resources.get(resource.id)) ?? resource;
   }
