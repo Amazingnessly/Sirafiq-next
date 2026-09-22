@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ExtractionUploadSchema, MultipartCreateSchema, ResourceRegisterSchema } from '../../src/shared/contracts';
 import {
+  LOCAL_PDF_EXTRACTION_MAX_BYTES,
   MAX_RESOURCE_FILE_BYTES,
   MULTIPART_MAX_PARTS,
   MULTIPART_PART_BYTES,
@@ -43,7 +44,8 @@ describe('contrats API', () => {
     expect(shouldUseMultipartUpload(300 * 1024 * 1024)).toBe(true);
   });
 
-  it('bascule au multipart seulement au-delà du chemin simple', () => {
+  it('bascule au multipart au-delà du budget mémoire local de 25 MiB', () => {
+    expect(MULTIPART_UPLOAD_THRESHOLD_BYTES).toBe(LOCAL_PDF_EXTRACTION_MAX_BYTES);
     expect(shouldUseMultipartUpload(MULTIPART_UPLOAD_THRESHOLD_BYTES)).toBe(false);
     expect(shouldUseMultipartUpload(MULTIPART_UPLOAD_THRESHOLD_BYTES + 1)).toBe(true);
     expect(MultipartCreateSchema.safeParse({ partSize: MULTIPART_PART_BYTES }).success).toBe(true);
