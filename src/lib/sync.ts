@@ -15,6 +15,8 @@ import type {
   UploadedPart,
 } from '../shared/contracts';
 import { MULTIPART_PART_BYTES, shouldTryServerPdfExtraction } from '../shared/importPolicy';
+import { newId } from './ids';
+import { isRetryableOutboxAttempt } from './retryableSync';
 
 let activeSync: Promise<void> | null = null;
 let retryTimer: number | null = null;
@@ -81,6 +83,8 @@ export async function uploadMultipartResource(
       await db.resourceVersions.update(version.id, { syncState: 'pending', syncError: null });
       await db.multipartUploads.update(version.id, { status: 'uploading', error: null, updatedAt: new Date().toISOString() });
     });
+
+    await ensureSubjectSynced(resource.subjectId);
 
     const registration = await registerOrResolveRemoteVersion(toResourcePayload(resource, version));
     await rememberRemoteVersionId(version.id, registration.versionId);
@@ -274,6 +278,58 @@ async function runSync(): Promise<void> {
       await markOutboxFailure(item, error);
       if (!navigator.onLine) return;
     }
+  }
+}
+
+async function ensureSubjectSynced(subjectId: string): Promise<void> {
+  const subject = await db.subjects.get(subjectId);
+  if (!subject) throw new ApiRequestError('La matière locale est introuvable.', 0, 'LOCAL_SUBJECT_MISSING', false);
+  if (subject.syncState === 'synced') return;
+
+  let work = await db.outbox
+    .where('entityId')
+    .equals(subject.id)
+    .and((item) => item.type === 'subject.upsert')
+    .first();
+
+  if (work?.lastError && !isRetryableOutboxAttempt(work.nextAttemptAt)) {
+    throw new ApiRequestError(
+      work.lastError,
+      0,
+      'SUBJECT_SYNC_BLOCKED',
+      false,
+    );
+  }
+
+  if (!work) {
+    work = {
+      id: newId(),
+      type: 'subject.upsert',
+      entityId: subject.id,
+      attempts: 0,
+      nextAttemptAt: Date.now(),
+      lastError: null,
+      createdAt: new Date().toISOString(),
+    };
+    await db.outbox.add(work);
+  }
+
+  try {
+    await apiJson('/api/subjects/upsert', {
+      method: 'POST',
+      body: JSON.stringify(toSubjectPayload(subject)),
+    });
+    await db.transaction('rw', db.subjects, db.outbox, async () => {
+      await db.subjects.update(subject.id, { syncState: 'synced', syncError: null });
+      await db.outbox
+        .where('entityId')
+        .equals(subject.id)
+        .and((item) => item.type === 'subject.upsert')
+        .delete();
+    });
+  } catch (error) {
+    await markOutboxFailure(work, error);
+    throw error;
   }
 }
 
