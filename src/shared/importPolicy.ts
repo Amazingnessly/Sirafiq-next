@@ -3,9 +3,11 @@ export const MEBIBYTE = 1024 * 1024;
 export const LOCAL_PDF_EXTRACTION_MAX_BYTES = 25 * MEBIBYTE;
 export const SERVER_PDF_EXTRACTION_MAX_BYTES = 25 * MEBIBYTE;
 
-// A single Worker request remains deliberately below Cloudflare's 100 MB
-// request-body ceiling. Larger supports switch to R2 multipart automatically.
-export const MAX_SINGLE_UPLOAD_BYTES = 90 * MEBIBYTE;
+// Keep the simple-upload path inside the same 25 MiB budget already used
+// for local PDF extraction. Above this point, old iPads must not allocate or
+// persist one complete binary copy in IndexedDB; resumable R2 multipart uses
+// fixed 8 MiB chunks instead.
+export const MAX_SINGLE_UPLOAD_BYTES = LOCAL_PDF_EXTRACTION_MAX_BYTES;
 export const MULTIPART_UPLOAD_THRESHOLD_BYTES = MAX_SINGLE_UPLOAD_BYTES;
 
 // Device-safe sequential chunks for the iPad 6th gen target. R2 allows at
