@@ -358,11 +358,13 @@ async function getBlob(versionId: string, request: Request, env: Env): Promise<R
     return new Response(object.body, { status: 206, headers });
   }
 
-  // A full read must never inherit range metadata from the local R2 adapter.
-  // Production semantics remain explicit: no Range request => 200 with no Content-Range.
+  // A full read must never inherit range metadata from the R2 body stream.
+  // Pipe through a neutral stream so the HTTP response is governed only by
+  // the explicit status/headers below, without buffering the full object.
   headers.delete('Content-Range');
   headers.set('Content-Length', String(object.size));
-  return new Response(object.body, { status: 200, headers });
+  const body = object.body.pipeThrough(new TransformStream());
+  return new Response(body, { status: 200, headers });
 }
 
 async function extractPdfOnServer(versionId: string, env: WorkerEnv): Promise<Response> {
