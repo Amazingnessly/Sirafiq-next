@@ -20,6 +20,7 @@ export interface ResourceRecord {
   title: string;
   kind: ResourceKind;
   currentVersionId: string;
+  remoteResourceId?: string;
   status: LocalResourceStatus;
   extractionError: string | null;
   createdAt: string;
