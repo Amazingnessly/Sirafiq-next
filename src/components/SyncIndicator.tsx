@@ -15,6 +15,11 @@ export function SyncIndicator() {
     const multipartResourceIds = new Set(multipartSessions.map((session) => session.resourceId));
     return outbox.filter((item) => item.type !== 'resource.sync' || !multipartResourceIds.has(item.entityId)).length;
   }, [], 0);
+  const activeMultipart = useDexieQuery(
+    () => db.multipartUploads.filter((session) => session.status !== 'error').count(),
+    [],
+    0,
+  );
   const syncErrors = useDexieQuery(async () => {
     const [resources, subjects, multipartSessions, outbox] = await Promise.all([
       db.resources.where('syncState').equals('error').toArray(),
@@ -121,6 +126,14 @@ export function SyncIndicator() {
       <button className="sync-pill" onClick={syncNow} disabled={running}>
         {running ? 'Synchronisation…' : `${pending} en attente · Synchroniser`}
       </button>
+    );
+  }
+
+  if (activeMultipart > 0) {
+    return (
+      <div className="sync-pill" role="status" aria-live="polite">
+        {activeMultipart} envoi{activeMultipart > 1 ? 's' : ''} en cours
+      </div>
     );
   }
 

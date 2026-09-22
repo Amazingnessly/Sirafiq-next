@@ -136,3 +136,33 @@ test('un multipart interrompu ne gonfle pas le compteur de travail synchronisabl
   await expect(page.getByRole('link', { name: /1 envoi à reprendre · Resélectionner/ })).toBeVisible();
 });
 
+
+
+test('un multipart actif ne prétend pas que tout est enregistré', async ({ page }) => {
+  await page.goto('/bibliotheque');
+
+  await page.evaluate(async () => {
+    const { db } = await import('/src/data/db.ts');
+    await db.open();
+    const now = new Date().toISOString();
+    await db.multipartUploads.put({
+      versionId: 'e2e-active-multipart-version',
+      resourceId: 'e2e-active-multipart-resource',
+      fileName: 'en-cours.pdf',
+      size: 100 * 1024 * 1024,
+      lastModified: Date.now(),
+      sha256: 'e2e-active-multipart-sha',
+      uploadId: 'e2e-active-upload',
+      partSize: 8 * 1024 * 1024,
+      parts: [],
+      status: 'uploading',
+      error: null,
+      updatedAt: now,
+    });
+  });
+
+  await page.reload();
+
+  await expect(page.getByText('1 envoi en cours', { exact: true })).toBeVisible();
+  await expect(page.getByText('Enregistré', { exact: true })).toHaveCount(0);
+});
