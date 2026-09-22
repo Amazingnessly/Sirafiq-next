@@ -12,6 +12,10 @@ test('un support local s’ouvre sans requête distante concurrente', async ({ p
 
   let detailRequests = 0;
   await page.route(/\/api\/resources\/[^/?]+(?:\?.*)?$/, async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.continue();
+      return;
+    }
     detailRequests += 1;
     await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'not found' }) });
   });
