@@ -61,7 +61,7 @@ export function ResourcePage() {
       if (resumeFile.size !== multipartSession.size) throw new Error('Ce n’est pas le même fichier : la taille ne correspond pas.');
       const sha256 = await sha256Hex(resumeFile, (processedBytes, totalBytes) => setTransferProgress({ phase: 'hashing', processedBytes, totalBytes }));
       if (sha256 !== multipartSession.sha256) throw new Error('Ce n’est pas le même fichier : son empreinte SHA-256 ne correspond pas.');
-      await requestSync(); await uploadMultipartResourceWithRecovery(localResource.id, resumeFile, setTransferProgress); setResumeFile(null);
+      await uploadMultipartResourceWithRecovery(localResource.id, resumeFile, setTransferProgress); setResumeFile(null);
     } catch (error) { setRetryError(error instanceof Error ? error.message : 'La reprise de l’envoi a échoué.'); } finally { setResuming(false); }
   }
   async function retryExtraction() { if (!localResource || extracting) return; setExtracting(true); setExtractionRetryError(null); try { await retryServerExtractionForResource(localResource.id); } catch (error) { setExtractionRetryError(error instanceof Error ? error.message : 'L’extraction serveur a échoué.'); } finally { setExtracting(false); } }
