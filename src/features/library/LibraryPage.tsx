@@ -57,7 +57,12 @@ export function LibraryPage() {
       .map((subject) => ({ ...subject, syncState: 'synced' as const, syncError: null })),
   ];
   const localResourceIds = new Set(resources.map((resource) => resource.id));
-  const remoteOnlyResources = (remoteBootstrap.data?.resources ?? []).filter((resource) => !localResourceIds.has(resource.id));
+  const reconciledRemoteResourceIds = new Set(
+    resources.flatMap((resource) => resource.remoteResourceId ? [resource.remoteResourceId] : []),
+  );
+  const remoteOnlyResources = (remoteBootstrap.data?.resources ?? []).filter(
+    (resource) => !localResourceIds.has(resource.id) && !reconciledRemoteResourceIds.has(resource.id),
+  );
   const totalResourceCount = resources.length + remoteOnlyResources.length;
   const subjectNames = new Map((remoteBootstrap.data?.subjects ?? []).map((subject) => [subject.id, subject.name]));
   for (const subject of subjects) subjectNames.set(subject.id, subject.name);
