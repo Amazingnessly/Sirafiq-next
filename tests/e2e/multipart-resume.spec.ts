@@ -184,3 +184,133 @@ test('reprend un multipart interrompu sans renvoyer les morceaux déjà confirm�
     return (await db.resources.get(resourceId))?.syncState;
   }, RESOURCE_ID)).toBe('synced');
 });
+
+
+test('un échec réseau avant le démarrage rend le multipart explicitement reprenable', async ({ page }) => {
+  const resourceId = '88888888-8888-4888-8888-888888888888';
+  const versionId = '99999999-9999-4999-8999-999999999999';
+  const subjectId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const networkMessage = 'Réseau indisponible avant le démarrage E2E';
+
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() === 'GET' && url.pathname === '/api/bootstrap') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ subjects: [], resources: [] }) });
+      return;
+    }
+    if (request.method() === 'GET' && url.pathname === `/api/resources/${resourceId}`) {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { code: 'NETWORK_E2E', message: networkMessage, retryable: true } }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Route de test absente.', retryable: false } }),
+    });
+  });
+
+  await page.goto('/bibliotheque');
+  await page.evaluate(async ({ resourceId: rid, versionId: vid, subjectId: sid }) => {
+    const { db } = await import('/src/data/db.ts');
+    const now = new Date().toISOString();
+    await db.subjects.add({
+      id: sid,
+      name: 'Multipart réseau',
+      parentId: null,
+      createdAt: now,
+      updatedAt: now,
+      syncState: 'synced',
+      syncError: null,
+    });
+    await db.resources.add({
+      id: rid,
+      subjectId: sid,
+      title: 'PDF à reprendre après réseau',
+      kind: 'pdf',
+      currentVersionId: vid,
+      status: 'failed',
+      extractionError: 'Extraction différée.',
+      createdAt: now,
+      updatedAt: now,
+      syncState: 'pending',
+      syncError: null,
+    });
+    await db.resourceVersions.add({
+      id: vid,
+      resourceId: rid,
+      sha256: 'e2e-pre-upload-network-hash',
+      fileName: 'reseau.pdf',
+      mimeType: 'application/pdf',
+      size: 1024,
+      bytes: null,
+      createdAt: now,
+      syncState: 'pending',
+      syncError: null,
+    });
+    await db.extractions.add({
+      versionId: vid,
+      status: 'failed',
+      pages: [],
+      charCount: 0,
+      errorCode: 'LARGE_FILE_EXTRACTION_DEFERRED',
+      errorMessage: 'Extraction différée.',
+      createdAt: now,
+    });
+    await db.multipartUploads.add({
+      versionId: vid,
+      resourceId: rid,
+      fileName: 'reseau.pdf',
+      size: 1024,
+      lastModified: 0,
+      sha256: 'e2e-pre-upload-network-hash',
+      uploadId: null,
+      partSize: 8 * 1024 * 1024,
+      parts: [],
+      status: 'pending',
+      error: null,
+      updatedAt: now,
+    });
+  }, { resourceId, versionId, subjectId });
+
+  const failure = await page.evaluate(async ({ rid }) => {
+    const { uploadMultipartResourceWithRecovery } = await import('/src/lib/multipartRecovery.ts');
+    const file = new File([new Uint8Array(1024)], 'reseau.pdf', { type: 'application/pdf' });
+    try {
+      await uploadMultipartResourceWithRecovery(rid, file);
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }, { rid: resourceId });
+
+  expect(failure).toBe(networkMessage);
+  await expect.poll(async () => page.evaluate(async ({ rid, vid }) => {
+    const { db } = await import('/src/data/db.ts');
+    const [resource, version, session] = await Promise.all([
+      db.resources.get(rid),
+      db.resourceVersions.get(vid),
+      db.multipartUploads.get(vid),
+    ]);
+    return {
+      resourceState: resource?.syncState,
+      versionState: version?.syncState,
+      sessionStatus: session?.status,
+      sessionError: session?.error,
+    };
+  }, { rid: resourceId, vid: versionId })).toEqual({
+    resourceState: 'error',
+    versionState: 'error',
+    sessionStatus: 'error',
+    sessionError: networkMessage,
+  });
+
+  await page.goto(`/bibliotheque/${resourceId}`);
+  await expect(page.getByText('L’envoi du gros fichier est interrompu.')).toBeVisible();
+  await expect(page.getByLabel('Fichier à reprendre')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Reprendre l’envoi' })).toBeVisible();
+});
