@@ -287,6 +287,8 @@ async function syncSubject(item: OutboxRecord): Promise<void> {
 async function syncResource(item: OutboxRecord): Promise<void> {
   const resource = await db.resources.get(item.entityId);
   if (!resource) return;
+  const multipart = await db.multipartUploads.get(resource.currentVersionId);
+  if (multipart) return;
   const version = await db.resourceVersions.get(resource.currentVersionId);
   const extraction = await db.extractions.get(resource.currentVersionId);
   if (!version || !extraction || !version.bytes) {

@@ -145,5 +145,29 @@ test('un multipart interrompu ne gonfle pas le compteur de travail synchronisabl
 
   await expect(page.getByRole('link', { name: /1 envoi à reprendre · Resélectionner/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /en attente · Synchroniser/ })).toHaveCount(0);
+
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+
+  await expect.poll(async () => page.evaluate(async () => {
+    const { db } = await import('/src/data/db.ts');
+    return db.outbox.where('entityId').equals('e2e-multipart-resource').and((item) => item.type === 'resource.sync').count();
+  })).toBe(0);
+  await expect.poll(async () => page.evaluate(async () => {
+    const { db } = await import('/src/data/db.ts');
+    const [resource, multipart] = await Promise.all([
+      db.resources.get('e2e-multipart-resource'),
+      db.multipartUploads.get('e2e-multipart-version'),
+    ]);
+    return {
+      syncState: resource?.syncState,
+      syncError: resource?.syncError,
+      multipartStatus: multipart?.status,
+    };
+  })).toEqual({
+    syncState: 'error',
+    syncError: 'Envoi interrompu E2E',
+    multipartStatus: 'error',
+  });
+  await expect(page.getByRole('link', { name: /1 envoi à reprendre · Resélectionner/ })).toBeVisible();
 });
 
