@@ -119,7 +119,7 @@ test('un support standard attend la réussite de sa matière avant D1', async ({
         versionId: vid,
         status: 'ready',
         pages: [{ pageNumber: 1, text: 'Support dépendant de sa matière' }],
-        charCount: 32,
+        charCount: 31,
         errorCode: null,
         errorMessage: null,
         createdAt: now,
