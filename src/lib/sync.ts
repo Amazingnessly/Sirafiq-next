@@ -411,23 +411,21 @@ async function syncResource(item: OutboxRecord): Promise<void> {
 }
 
 async function releaseDeferredResourcesForSubject(subjectId: string): Promise<void> {
-  const pendingResources = await db.resources
-    .where('subjectId')
-    .equals(subjectId)
-    .filter((resource) => resource.syncState === 'pending')
-    .toArray();
-  if (pendingResources.length === 0) return;
-
-  const pendingResourceIds = new Set(pendingResources.map((resource) => resource.id));
-  const deferred = (await db.outbox.where('type').equals('resource.sync').toArray()).filter(
-    (item) => pendingResourceIds.has(item.entityId)
-      && Boolean(item.lastError)
-      && isRetryableOutboxAttempt(item.nextAttemptAt),
-  );
-  if (deferred.length === 0) return;
-
   const now = Date.now();
-  await db.transaction('rw', db.outbox, async () => {
+  await db.transaction('rw', db.resources, db.outbox, async () => {
+    const pendingResources = await db.resources
+      .where('subjectId')
+      .equals(subjectId)
+      .filter((resource) => resource.syncState === 'pending')
+      .toArray();
+    if (pendingResources.length === 0) return;
+
+    const pendingResourceIds = new Set(pendingResources.map((resource) => resource.id));
+    const deferred = (await db.outbox.where('type').equals('resource.sync').toArray()).filter(
+      (item) => pendingResourceIds.has(item.entityId)
+        && Boolean(item.lastError)
+        && isRetryableOutboxAttempt(item.nextAttemptAt),
+    );
     for (const item of deferred) {
       await db.outbox.update(item.id, { nextAttemptAt: now, lastError: null });
     }
