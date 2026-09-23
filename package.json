@@ -19,7 +19,7 @@
     "test": "vitest run tests/unit",
     "test:e2e": "playwright test",
     "check": "npm run cf:types && npm run typecheck && npm run test && npm run build",
-    "deploy": "npm run cf:types && npm run build:identity && vite build && npm run db:migrate:remote && wrangler deploy",
+    "deploy": "npm run cf:types && node scripts/ensure-production-d1.mjs && npm run build:identity && vite build && npm run db:migrate:remote && wrangler deploy",
     "deploy:preview": "npm run cf:types && node scripts/ensure-preview-d1.mjs && npm run build:identity && CLOUDFLARE_ENV=preview vite build && npm run db:migrate:preview && CLOUDFLARE_ENV=preview wrangler deploy"
   },
   "dependencies": {
@@ -37,7 +37,6 @@
     "@types/node": "24.10.1",
     "@types/react": "19.2.0",
     "@types/react-dom": "19.2.0",
-    "@vitejs/plugin-react": "6.0.5",
     "typescript": "7.0.2",
     "vite": "8.2.1",
     "vitest": "4.1.11",
