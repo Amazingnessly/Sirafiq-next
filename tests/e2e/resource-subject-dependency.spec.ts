@@ -179,3 +179,185 @@ test('un support standard attend la réussite de sa matière avant D1', async ({
     remaining: 0,
   });
 });
+
+
+test('un SUBJECT_MISSING répare une matière localement synced puis retente une seule fois', async ({ page }) => {
+  const subjectId = 'e2e-stale-synced-subject';
+  const resourceId = 'e2e-stale-synced-resource';
+  const versionId = 'e2e-stale-synced-version';
+  const order: string[] = [];
+  let registerAttempts = 0;
+  let subjectRepairs = 0;
+
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (request.method() === 'GET' && url.pathname === '/api/bootstrap') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ subjects: [], resources: [] }),
+      });
+      return;
+    }
+
+    if (request.method() === 'POST' && url.pathname === '/api/resources/register') {
+      registerAttempts += 1;
+      order.push(`resource-${registerAttempts}`);
+      if (registerAttempts === 1) {
+        await route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: {
+              code: 'SUBJECT_MISSING',
+              message: 'La matière n’existe plus dans D1.',
+              retryable: true,
+            },
+          }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, uploadMode: 'single' }),
+      });
+      return;
+    }
+
+    if (request.method() === 'POST' && url.pathname === '/api/subjects/upsert') {
+      subjectRepairs += 1;
+      order.push('subject-repair');
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true }),
+      });
+      return;
+    }
+
+    if (request.method() === 'PUT' && url.pathname === `/api/resource-versions/${versionId}/blob`) {
+      order.push('blob');
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true }),
+      });
+      return;
+    }
+
+    if (request.method() === 'POST' && url.pathname === `/api/resource-versions/${versionId}/extraction`) {
+      order.push('extraction');
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true }),
+      });
+      return;
+    }
+
+    await route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Route E2E absente.', retryable: false } }),
+    });
+  });
+
+  await page.goto('/bibliotheque');
+
+  await page.evaluate(async ({ subjectId: sid, resourceId: rid, versionId: vid }) => {
+    const { db } = await import('/src/data/db.ts');
+    const now = new Date().toISOString();
+    const text = 'Support avec matière locale obsolète';
+    const bytes = new TextEncoder().encode(text).buffer;
+
+    await db.transaction('rw', db.subjects, db.resources, db.resourceVersions, db.extractions, db.outbox, async () => {
+      await db.subjects.put({
+        id: sid,
+        name: 'Matière locale déclarée synchronisée',
+        parentId: null,
+        createdAt: now,
+        updatedAt: now,
+        syncState: 'synced',
+        syncError: null,
+      });
+      await db.resources.put({
+        id: rid,
+        subjectId: sid,
+        title: 'Support après perte D1',
+        kind: 'text',
+        currentVersionId: vid,
+        status: 'ready',
+        extractionError: null,
+        createdAt: now,
+        updatedAt: now,
+        syncState: 'pending',
+        syncError: null,
+      });
+      await db.resourceVersions.put({
+        id: vid,
+        resourceId: rid,
+        sha256: 'e'.repeat(64),
+        fileName: 'stale-subject.txt',
+        mimeType: 'text/plain',
+        size: bytes.byteLength,
+        bytes,
+        createdAt: now,
+        syncState: 'pending',
+        syncError: null,
+      });
+      await db.extractions.put({
+        versionId: vid,
+        status: 'ready',
+        pages: [{ pageNumber: 1, text }],
+        charCount: text.length,
+        errorCode: null,
+        errorMessage: null,
+        createdAt: now,
+      });
+      await db.outbox.add({
+        id: 'e2e-stale-synced-resource-work',
+        type: 'resource.sync',
+        entityId: rid,
+        attempts: 0,
+        nextAttemptAt: Date.now(),
+        lastError: null,
+        createdAt: now,
+      });
+    });
+
+    const { requestSync } = await import('/src/lib/sync.ts');
+    await requestSync();
+    await requestSync();
+  }, { subjectId, resourceId, versionId });
+
+  expect(registerAttempts).toBe(2);
+  expect(subjectRepairs).toBe(1);
+  expect(order.slice(0, 3)).toEqual(['resource-1', 'subject-repair', 'resource-2']);
+  expect(order).toContain('blob');
+  expect(order).toContain('extraction');
+
+  const local = await page.evaluate(async ({ subjectId: sid, resourceId: rid }) => {
+    const { db } = await import('/src/data/db.ts');
+    const [subject, resource, remaining] = await Promise.all([
+      db.subjects.get(sid),
+      db.resources.get(rid),
+      db.outbox.toArray(),
+    ]);
+    return {
+      subjectState: subject?.syncState,
+      subjectError: subject?.syncError,
+      resourceState: resource?.syncState,
+      remaining: remaining.filter((item) => item.entityId === sid || item.entityId === rid).length,
+    };
+  }, { subjectId, resourceId });
+
+  expect(local).toEqual({
+    subjectState: 'synced',
+    subjectError: null,
+    resourceState: 'synced',
+    remaining: 0,
+  });
+});
