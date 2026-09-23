@@ -396,3 +396,158 @@ test('un SUBJECT_MISSING répare une matière localement synced puis retente une
     remaining: 0,
   });
 });
+
+test('une reprise manuelle de matière libère immédiatement ses supports différés', async ({ page }) => {
+  const subjectId = 'e2e-manual-subject-retry';
+  const resourceId = 'e2e-manual-dependent-resource';
+  const versionId = 'e2e-manual-dependent-version';
+  const order: string[] = [];
+
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (request.method() === 'GET' && url.pathname === '/api/bootstrap') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ subjects: [], resources: [] }),
+      });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname === '/api/subjects/upsert') {
+      order.push('subject');
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname === '/api/resources/register') {
+      order.push('resource-register');
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, uploadMode: 'single' }),
+      });
+      return;
+    }
+    if (request.method() === 'PUT' && url.pathname === `/api/resource-versions/${versionId}/blob`) {
+      order.push('blob');
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname === `/api/resource-versions/${versionId}/extraction`) {
+      order.push('extraction');
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+      return;
+    }
+
+    await route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Route E2E absente.', retryable: false } }),
+    });
+  });
+
+  await page.goto('/bibliotheque');
+
+  await page.evaluate(async ({ subjectId: sid, resourceId: rid, versionId: vid }) => {
+    const { db } = await import('/src/data/db.ts');
+    const now = new Date().toISOString();
+    const retryAt = Date.now() + 120_000;
+    const text = 'Support différé derrière une matière en erreur';
+    const bytes = new TextEncoder().encode(text).buffer;
+
+    await db.transaction('rw', db.subjects, db.resources, db.resourceVersions, db.extractions, db.outbox, async () => {
+      await db.subjects.put({
+        id: sid,
+        name: 'Matière à relancer manuellement',
+        parentId: null,
+        createdAt: now,
+        updatedAt: now,
+        syncState: 'error',
+        syncError: 'Matière temporairement indisponible',
+      });
+      await db.resources.put({
+        id: rid,
+        subjectId: sid,
+        title: 'Support différé',
+        kind: 'text',
+        currentVersionId: vid,
+        status: 'ready',
+        extractionError: null,
+        createdAt: now,
+        updatedAt: now,
+        syncState: 'pending',
+        syncError: null,
+      });
+      await db.resourceVersions.put({
+        id: vid,
+        resourceId: rid,
+        sha256: 'f'.repeat(64),
+        fileName: 'deferred.txt',
+        mimeType: 'text/plain',
+        size: bytes.byteLength,
+        bytes,
+        createdAt: now,
+        syncState: 'pending',
+        syncError: null,
+      });
+      await db.extractions.put({
+        versionId: vid,
+        status: 'ready',
+        pages: [{ pageNumber: 1, text }],
+        charCount: text.length,
+        errorCode: null,
+        errorMessage: null,
+        createdAt: now,
+      });
+      await db.outbox.bulkPut([
+        {
+          id: 'e2e-manual-subject-work',
+          type: 'subject.upsert',
+          entityId: sid,
+          attempts: 3,
+          nextAttemptAt: retryAt,
+          lastError: 'Matière temporairement indisponible',
+          createdAt: now,
+        },
+        {
+          id: 'e2e-manual-resource-work',
+          type: 'resource.sync',
+          entityId: rid,
+          attempts: 0,
+          nextAttemptAt: retryAt,
+          lastError: 'Matière temporairement indisponible',
+          createdAt: now,
+        },
+      ]);
+    });
+  }, { subjectId, resourceId, versionId });
+
+  await page.goto(`/bibliotheque?subject=${subjectId}`);
+  await expect(page.getByRole('button', { name: 'Réessayer la synchronisation' })).toBeVisible();
+  await page.getByRole('button', { name: 'Réessayer la synchronisation' }).click();
+
+  await expect.poll(() => order.includes('extraction')).toBe(true);
+  expect(order).toEqual(['subject', 'resource-register', 'blob', 'extraction']);
+
+  const local = await page.evaluate(async ({ subjectId: sid, resourceId: rid }) => {
+    const { db } = await import('/src/data/db.ts');
+    const [subject, resource, remaining] = await Promise.all([
+      db.subjects.get(sid),
+      db.resources.get(rid),
+      db.outbox.toArray(),
+    ]);
+    return {
+      subjectState: subject?.syncState,
+      resourceState: resource?.syncState,
+      remaining: remaining.filter((item) => item.entityId === sid || item.entityId === rid).length,
+    };
+  }, { subjectId, resourceId });
+
+  expect(local).toEqual({
+    subjectState: 'synced',
+    resourceState: 'synced',
+    remaining: 0,
+  });
+});
+
