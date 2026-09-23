@@ -23,6 +23,7 @@ export async function cacheRemoteTextResource(detail: ResourceDetailPayload): Pr
   const duplicateVersion = await db.resourceVersions.where('sha256').equals(detail.version.sha256).first();
   if (duplicateVersion) return false;
 
+  const cachedAt = new Date().toISOString();
   let cached = false;
   await db.transaction('rw', db.resources, db.resourceVersions, db.extractions, async () => {
     if (await db.resources.get(detail.resource.id)) {
@@ -63,7 +64,7 @@ export async function cacheRemoteTextResource(detail: ResourceDetailPayload): Pr
       charCount: detail.extraction.charCount,
       errorCode: null,
       errorMessage: null,
-      createdAt: detail.resource.updatedAt,
+      createdAt: cachedAt,
     });
     cached = true;
   });
