@@ -58,7 +58,11 @@ export function ResourcePage() {
   const kind = localResource?.kind ?? remote.data?.resource.kind;
   const versionId = localResource?.currentVersionId ?? remote.data?.version.id;
   const remoteVersionId = localVersion?.remoteVersionId ?? versionId;
-  const pages: ExtractedPage[] = useMemo(() => localExtraction?.pages ?? remote.data?.extraction?.pages ?? [], [localExtraction?.pages, remote.data?.extraction?.pages]);
+  const pages: ExtractedPage[] = useMemo(() => {
+    if (localExtraction) return localExtraction.status === 'ready' ? localExtraction.pages : [];
+    if (remote.data?.version.extractionStatus === 'ready') return remote.data.extraction?.pages ?? [];
+    return [];
+  }, [localExtraction, remote.data?.extraction?.pages, remote.data?.version.extractionStatus]);
   const extractionFailed = localExtraction?.status === 'failed' || remote.data?.version.extractionStatus === 'failed';
   const remoteExtractionPending = Boolean(!localResource && remote.data?.version.status !== 'uploading' && remote.data?.version.extractionStatus === 'pending');
   const extractionError = localExtraction?.errorMessage ?? remote.data?.version.extractionError;

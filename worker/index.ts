@@ -532,10 +532,13 @@ async function persistReadyExtraction(versionId: string, pages: ExtractedPage[],
 
 async function persistExtractionFailure(versionId: string, code: string, message: string, env: Env): Promise<boolean> {
   const now = new Date().toISOString();
-  const result = await env.DB.prepare(`
-    UPDATE resource_versions SET extraction_status = 'failed', extraction_error = ?, status = 'failed', updated_at = ? WHERE id = ?
-  `).bind(`${code}: ${message}`, now, versionId).run();
-  return Boolean(result.meta.changes);
+  const [versionResult] = await env.DB.batch([
+    env.DB.prepare(`
+      UPDATE resource_versions SET extraction_status = 'failed', extraction_error = ?, status = 'failed', updated_at = ? WHERE id = ?
+    `).bind(`${code}: ${message}`, now, versionId),
+    env.DB.prepare('DELETE FROM extractions WHERE version_id = ?').bind(versionId),
+  ]);
+  return Boolean(versionResult?.meta.changes);
 }
 
 async function persistServerExtractionFailure(versionId: string, code: string, message: string, env: Env): Promise<Response> {
@@ -571,7 +574,8 @@ async function getBootstrap(env: Env): Promise<Response> {
       id: string; name: string; parent_id: string | null; created_at: string; updated_at: string;
     }>(),
     env.DB.prepare(`
-      SELECT r.id, r.subject_id, r.title, r.kind, r.current_version_id, r.created_at, r.updated_at, v.status, e.char_count
+      SELECT r.id, r.subject_id, r.title, r.kind, r.current_version_id, r.created_at, r.updated_at, v.status,
+             CASE WHEN v.extraction_status = 'ready' THEN e.char_count ELSE NULL END AS char_count
       FROM resources r JOIN resource_versions v ON v.id = r.current_version_id
       LEFT JOIN extractions e ON e.version_id = v.id ORDER BY r.updated_at DESC
     `).all<{
@@ -609,7 +613,9 @@ async function getResource(resourceId: string, env: Env): Promise<Response> {
       id: row.current_version_id, fileName: row.file_name, mimeType: row.mime_type, size: row.size, sha256: row.sha256,
       status: row.status, extractionStatus: row.extraction_status, extractionError: row.extraction_error,
     },
-    extraction: row.content_json && row.char_count !== null ? { pages: JSON.parse(row.content_json), charCount: row.char_count } : null,
+    extraction: row.extraction_status === 'ready' && row.content_json && row.char_count !== null
+      ? { pages: JSON.parse(row.content_json), charCount: row.char_count }
+      : null,
   };
   return json(payload);
 }
