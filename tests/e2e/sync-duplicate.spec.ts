@@ -191,3 +191,169 @@ test('un doublon déjà synchronisé est réutilisé puis extrait sans réenvoye
   await expect(page.getByRole('heading', { name: 'PDF doublon distant' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'PDF déjà présent' })).toHaveCount(0);
 });
+
+
+test('un doublon distant encore uploading est réellement terminé avant sync locale', async ({ page }) => {
+  const subjectId = '12121212-1212-4212-8212-121212121212';
+  const resourceId = '13131313-1313-4313-8313-131313131313';
+  const versionId = '14141414-1414-4414-8414-141414141414';
+  const remoteResourceId = '15151515-1515-4515-8515-151515151515';
+  const remoteVersionId = '16161616-1616-4616-8616-161616161616';
+  const text = 'Le doublon distant incomplet doit être réellement téléversé.';
+  let remoteBlobUploads = 0;
+  let extractionUploads = 0;
+
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (request.method() === 'GET' && url.pathname === '/api/bootstrap') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ subjects: [], resources: [] }) });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname === '/api/resources/register') {
+      await route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: {
+            code: 'DUPLICATE_SUPPORT',
+            message: 'Version distante incomplète.',
+            retryable: false,
+            details: { existingResourceId: remoteResourceId },
+          },
+        }),
+      });
+      return;
+    }
+    if (request.method() === 'GET' && url.pathname === \`/api/resources/\${remoteResourceId}\`) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          resource: {
+            id: remoteResourceId,
+            subjectId,
+            title: 'Version distante interrompue',
+            kind: 'text',
+            currentVersionId: remoteVersionId,
+            createdAt: '2026-09-23T00:00:00.000Z',
+            updatedAt: '2026-09-23T00:00:00.000Z',
+          },
+          version: {
+            id: remoteVersionId,
+            fileName: 'incomplete.txt',
+            mimeType: 'text/plain',
+            size: new TextEncoder().encode(text).byteLength,
+            sha256: 'f'.repeat(64),
+            status: 'uploading',
+            extractionStatus: 'pending',
+            extractionError: null,
+          },
+          extraction: null,
+        }),
+      });
+      return;
+    }
+    if (request.method() === 'PUT' && url.pathname === \`/api/resource-versions/\${remoteVersionId}/blob\`) {
+      remoteBlobUploads += 1;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname === \`/api/resource-versions/\${remoteVersionId}/extraction\`) {
+      extractionUploads += 1;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+      return;
+    }
+    await route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Route E2E absente.', retryable: false } }),
+    });
+  });
+
+  await page.goto('/bibliotheque');
+  await page.evaluate(async ({ subjectId: sid, resourceId: rid, versionId: vid, text }) => {
+    const { db } = await import('/src/data/db.ts');
+    const now = new Date().toISOString();
+    const bytes = new TextEncoder().encode(text).buffer;
+    await db.transaction('rw', db.subjects, db.resources, db.resourceVersions, db.extractions, db.outbox, async () => {
+      await db.subjects.put({
+        id: sid,
+        name: 'Doublon incomplet',
+        parentId: null,
+        createdAt: now,
+        updatedAt: now,
+        syncState: 'synced',
+        syncError: null,
+      });
+      await db.resources.put({
+        id: rid,
+        subjectId: sid,
+        title: 'Support local du doublon incomplet',
+        kind: 'text',
+        currentVersionId: vid,
+        status: 'ready',
+        extractionError: null,
+        createdAt: now,
+        updatedAt: now,
+        syncState: 'pending',
+        syncError: null,
+      });
+      await db.resourceVersions.put({
+        id: vid,
+        resourceId: rid,
+        sha256: 'f'.repeat(64),
+        fileName: 'incomplete.txt',
+        mimeType: 'text/plain',
+        size: bytes.byteLength,
+        bytes,
+        createdAt: now,
+        syncState: 'pending',
+        syncError: null,
+      });
+      await db.extractions.put({
+        versionId: vid,
+        status: 'ready',
+        pages: [{ pageNumber: 1, text }],
+        charCount: text.length,
+        errorCode: null,
+        errorMessage: null,
+        createdAt: now,
+      });
+      await db.outbox.add({
+        id: 'e2e-incomplete-duplicate-work',
+        type: 'resource.sync',
+        entityId: rid,
+        attempts: 0,
+        nextAttemptAt: Date.now(),
+        lastError: null,
+        createdAt: now,
+      });
+    });
+    const { requestSync } = await import('/src/lib/sync.ts');
+    await requestSync();
+    await requestSync();
+  }, { subjectId, resourceId, versionId, text });
+
+  expect(remoteBlobUploads).toBe(1);
+  expect(extractionUploads).toBe(1);
+
+  const local = await page.evaluate(async ({ resourceId: rid, versionId: vid }) => {
+    const { db } = await import('/src/data/db.ts');
+    const [resource, version] = await Promise.all([db.resources.get(rid), db.resourceVersions.get(vid)]);
+    return {
+      resourceState: resource?.syncState,
+      remoteResourceId: resource?.remoteResourceId ?? null,
+      versionState: version?.syncState,
+      remoteVersionId: version?.remoteVersionId ?? null,
+    };
+  }, { resourceId, versionId });
+
+  expect(local).toEqual({
+    resourceState: 'synced',
+    remoteResourceId,
+    versionState: 'synced',
+    remoteVersionId,
+  });
+});
