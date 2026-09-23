@@ -282,10 +282,10 @@ async function runSync(): Promise<void> {
   }
 }
 
-async function ensureSubjectSynced(subjectId: string): Promise<void> {
+async function ensureSubjectSynced(subjectId: string, force = false): Promise<void> {
   const subject = await db.subjects.get(subjectId);
   if (!subject) throw new ApiRequestError('La matière locale est introuvable.', 0, 'LOCAL_SUBJECT_MISSING', false);
-  if (subject.syncState === 'synced') return;
+  if (subject.syncState === 'synced' && !force) return;
 
   let work = await db.outbox
     .where('entityId')
@@ -408,11 +408,18 @@ async function rememberRemoteIdentity(
   });
 }
 
-async function registerOrResolveRemoteVersion(payload: ResourceRegisterInput): Promise<RemoteRegistration> {
+async function registerOrResolveRemoteVersion(
+  payload: ResourceRegisterInput,
+  repairedMissingSubject = false,
+): Promise<RemoteRegistration> {
   try {
     await apiJson('/api/resources/register', { method: 'POST', body: JSON.stringify(payload) });
     return { resourceId: payload.resource.id, versionId: payload.version.id, reusedExisting: false, remote: null };
   } catch (error) {
+    if (error instanceof ApiRequestError && error.code === 'SUBJECT_MISSING' && !repairedMissingSubject) {
+      await ensureSubjectSynced(payload.resource.subjectId, true);
+      return registerOrResolveRemoteVersion(payload, true);
+    }
     if (!(error instanceof ApiRequestError) || error.code !== 'DUPLICATE_SUPPORT') throw error;
     const existingResourceId = readExistingResourceId(error.details);
     if (!existingResourceId) {
