@@ -56,3 +56,45 @@ test('une panne du bootstrap ne transforme pas l’accueil en faux état vide', 
   await expect(page.getByRole('link', { name: 'Créer ma première matière' })).toHaveCount(0);
   await expect(page.getByText('Sirāfiq ne considère pas cette erreur réseau comme une bibliothèque vide.')).toBeVisible();
 });
+
+test('l’accueil ne présente pas un envoi distant incomplet comme support consultable', async ({ page }) => {
+  await page.route('**/api/bootstrap', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        subjects: [{
+          id: '44444444-dddd-4444-8444-444444444444',
+          name: 'Matière distante',
+          parentId: null,
+          createdAt: '2026-09-23T00:00:00.000Z',
+          updatedAt: '2026-09-23T00:00:00.000Z',
+        }],
+        resources: [{
+          id: '55555555-eeee-4555-8555-555555555555',
+          subjectId: '44444444-dddd-4444-8444-444444444444',
+          title: 'PDF encore en cours',
+          kind: 'pdf',
+          currentVersionId: '66666666-ffff-4666-8666-666666666666',
+          status: 'uploading',
+          extractionCharCount: null,
+          createdAt: '2026-09-23T00:00:00.000Z',
+          updatedAt: '2026-09-23T00:00:01.000Z',
+        }],
+      }),
+    });
+  });
+
+  await page.goto('/');
+
+  await expect(page.getByRole('heading', { name: 'Retrouver mes envois incomplets' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Vérifier mon envoi' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Retrouver mes supports synchronisés' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Reprendre mes supports' })).toHaveCount(0);
+  await expect(page.getByText(/Il n’est pas encore déclaré consultable/)).toBeVisible();
+
+  const metrics = page.getByLabel('État de la bibliothèque');
+  await expect(metrics.locator('.metric').filter({ hasText: 'supports' }).getByText('1', { exact: true })).toBeVisible();
+  await expect(metrics.locator('.metric').filter({ hasText: 'extraits' }).getByText('0', { exact: true })).toBeVisible();
+});
+
