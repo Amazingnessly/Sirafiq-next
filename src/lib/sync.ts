@@ -89,7 +89,8 @@ export async function uploadMultipartResource(
 
     const registration = await registerOrResolveRemoteVersion(toResourcePayload(resource, version));
     await rememberRemoteIdentity(resource.id, version.id, registration);
-    if (registration.reusedExisting) {
+    const reusedDurableRemote = registration.reusedExisting && registration.remote?.version.status !== 'uploading';
+    if (reusedDurableRemote) {
       if (registration.remote?.version.extractionStatus === 'ready' && registration.remote.extraction) {
         await applyServerExtractionResult(resource.id, version.id, {
           status: 'ready',
@@ -101,6 +102,9 @@ export async function uploadMultipartResource(
       return;
     }
 
+    // A duplicate SHA can point at an interrupted remote upload because D1 keeps
+    // SHA unique even while the remote version is still uploading. In that case,
+    // take over the existing remote version and finish it before marking synced.
     await uploadMultipartParts(registration.versionId, version, file, false, onProgress);
 
     onProgress?.({ phase: 'finalizing', processedBytes: file.size, totalBytes: file.size });
@@ -361,7 +365,8 @@ async function syncResource(item: OutboxRecord): Promise<void> {
 
   const registration = await registerOrResolveRemoteVersion(toResourcePayload(resource, version));
   await rememberRemoteIdentity(resource.id, version.id, registration);
-  if (!registration.reusedExisting) {
+  const remoteUploadIncomplete = registration.reusedExisting && registration.remote?.version.status === 'uploading';
+  if (!registration.reusedExisting || remoteUploadIncomplete) {
     const uploadBlob = new Blob([version.bytes], { type: version.mimeType });
     await apiPutBlob(`/api/resource-versions/${encodeURIComponent(registration.versionId)}/blob`, uploadBlob, version.mimeType, 120_000);
   }
