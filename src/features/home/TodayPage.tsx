@@ -34,6 +34,12 @@ export function TodayPage() {
 
   const remoteUploadingResources = remoteOnlyResources.filter((resource) => resource.status === 'uploading');
   const remoteFinalizedResources = remoteOnlyResources.filter((resource) => resource.status !== 'uploading');
+  const remoteTextsNeedingExtraction = remoteFinalizedResources.filter(
+    (resource) => resource.kind === 'text' && resource.status !== 'ready',
+  );
+  const remoteReadableResources = remoteFinalizedResources.filter(
+    (resource) => resource.kind === 'pdf' || resource.status === 'ready',
+  );
   const resources = localResources.length + remoteOnlyResources.length;
   const ready = localResources.filter((resource) => resource.status === 'ready').length
     + remoteOnlyResources.filter((resource) => resource.status === 'ready').length;
@@ -45,6 +51,10 @@ export function TodayPage() {
   const hasOnlyRemoteUploading = localResources.length === 0
     && remoteFinalizedResources.length === 0
     && remoteUploadingResources.length > 0;
+  const hasOnlyRemoteTextsNeedingExtraction = localResources.length === 0
+    && remoteUploadingResources.length === 0
+    && remoteReadableResources.length === 0
+    && remoteTextsNeedingExtraction.length > 0;
   const hasRemoteFinalizedResources = remoteFinalizedResources.length > 0;
 
   const nextAction = failed > 0
@@ -53,7 +63,9 @@ export function TodayPage() {
       ? { label: `Corriger ${syncErrors} erreur${syncErrors > 1 ? 's' : ''} de synchronisation`, to: '/bibliotheque?status=sync-error' }
       : hasOnlyRemoteUploading
         ? { label: remoteUploadingResources.length > 1 ? 'Vérifier mes envois' : 'Vérifier mon envoi', to: '/bibliotheque' }
-        : resources > 0
+        : hasOnlyRemoteTextsNeedingExtraction
+          ? { label: remoteTextsNeedingExtraction.length > 1 ? 'Vérifier mes textes' : 'Vérifier mon texte', to: '/bibliotheque' }
+          : resources > 0
           ? { label: 'Reprendre mes supports', to: '/bibliotheque' }
           : checkingRemoteLibrary || remoteLibraryUnavailable
           ? { label: 'Vérifier ma bibliothèque', to: '/bibliotheque' }
@@ -63,7 +75,9 @@ export function TodayPage() {
 
   const cardTitle = hasOnlyRemoteUploading
     ? 'Retrouver mes envois incomplets'
-    : resources > 0
+    : hasOnlyRemoteTextsNeedingExtraction
+      ? 'Retrouver mes textes à récupérer'
+      : resources > 0
       ? hasRemoteFinalizedResources && localResources.length === 0
         ? 'Retrouver mes supports synchronisés'
         : 'Continuer à partir de mes supports'
@@ -76,13 +90,18 @@ export function TodayPage() {
   const incompleteUploadNotice = remoteUploadingResources.length > 0
     ? ` ${remoteUploadingResources.length} envoi${remoteUploadingResources.length > 1 ? 's restent incomplets et ne sont' : ' reste incomplet et n’est'} pas encore consultable${remoteUploadingResources.length > 1 ? 's' : ''}.`
     : '';
+  const textRecoveryNotice = remoteTextsNeedingExtraction.length > 0
+    ? ` ${remoteTextsNeedingExtraction.length} texte${remoteTextsNeedingExtraction.length > 1 ? 's synchronisés doivent' : ' synchronisé doit'} encore récupérer ${remoteTextsNeedingExtraction.length > 1 ? 'leur' : 'son'} extraction avant d’être déclaré${remoteTextsNeedingExtraction.length > 1 ? 's' : ''} lisible${remoteTextsNeedingExtraction.length > 1 ? 's' : ''}.`
+    : '';
 
   const cardDescription = hasOnlyRemoteUploading
     ? `Sirāfiq a retrouvé ${remoteUploadingResources.length > 1 ? 'des envois serveur incomplets' : 'un envoi serveur incomplet'}. ${remoteUploadingResources.length > 1 ? 'Ils ne sont' : 'Il n’est'} pas encore déclaré${remoteUploadingResources.length > 1 ? 's' : ''} consultable${remoteUploadingResources.length > 1 ? 's' : ''} ; ouvrez la bibliothèque pour vérifier ${remoteUploadingResources.length > 1 ? 'leur' : 'son'} état.`
-    : resources > 0
-      ? hasRemoteFinalizedResources && localResources.length === 0
-        ? `Sirāfiq a retrouvé vos supports synchronisés. Ouvrez la bibliothèque pour les consulter ; leur disponibilité hors ligne dépend d’une copie locale sur cet appareil.${incompleteUploadNotice}`
-        : `Sirāfiq conserve l’état local de vos supports sur cet appareil et synchronise le reste lorsque le réseau est disponible. La lecture hors ligne dépend des données effectivement conservées en local.${incompleteUploadNotice}`
+    : hasOnlyRemoteTextsNeedingExtraction
+      ? `Sirāfiq a retrouvé ${remoteTextsNeedingExtraction.length > 1 ? 'des fichiers texte synchronisés' : 'un fichier texte synchronisé'}, mais ${remoteTextsNeedingExtraction.length > 1 ? 'leurs contenus ne sont' : 'son contenu n’est'} pas encore déclaré${remoteTextsNeedingExtraction.length > 1 ? 's' : ''} lisible${remoteTextsNeedingExtraction.length > 1 ? 's' : ''}. Ouvrez la bibliothèque pour reprendre l’extraction.`
+      : resources > 0
+        ? hasRemoteFinalizedResources && localResources.length === 0
+          ? `Sirāfiq a retrouvé vos supports synchronisés. Ouvrez la bibliothèque pour voir leur état et consulter ceux dont le contenu est disponible ; leur disponibilité hors ligne dépend d’une copie locale sur cet appareil.${textRecoveryNotice}${incompleteUploadNotice}`
+          : `Sirāfiq conserve l’état local de vos supports sur cet appareil et synchronise le reste lorsque le réseau est disponible. La lecture hors ligne dépend des données effectivement conservées en local.${textRecoveryNotice}${incompleteUploadNotice}`
       : checkingRemoteLibrary
       ? 'Sirāfiq vérifie les données synchronisées avant de conclure que cet appareil ne contient encore aucun support.'
       : remoteLibraryUnavailable
