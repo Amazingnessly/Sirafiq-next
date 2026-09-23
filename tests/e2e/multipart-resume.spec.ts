@@ -314,3 +314,207 @@ test('un échec réseau avant le démarrage rend le multipart explicitement repr
   await expect(page.getByLabel('Fichier à reprendre')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Reprendre l’envoi' })).toBeVisible();
 });
+
+
+test('un doublon multipart distant encore uploading reprend sa version distante', async ({ page }) => {
+  const resourceId = '18181818-1818-4818-8818-181818181818';
+  const versionId = '19191919-1919-4919-8919-191919191919';
+  const subjectId = '20202020-2020-4020-8020-202020202020';
+  const remoteResourceId = '21212121-2121-4121-8121-212121212121';
+  const remoteVersionId = '23232323-2323-4323-8323-232323232323';
+  const fileBytes = Buffer.alloc(11 * MIB, 9);
+  const sha256 = createHash('sha256').update(fileBytes).digest('hex');
+  const uploadedParts: number[] = [];
+  let completedRemote = false;
+
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (request.method() === 'GET' && url.pathname === '/api/bootstrap') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ subjects: [], resources: [] }) });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname === '/api/resources/register') {
+      await route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: {
+            code: 'DUPLICATE_SUPPORT',
+            message: 'Multipart distant interrompu.',
+            retryable: false,
+            details: { existingResourceId: remoteResourceId },
+          },
+        }),
+      });
+      return;
+    }
+    if (request.method() === 'GET' && url.pathname === \`/api/resources/\${remoteResourceId}\`) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          resource: {
+            id: remoteResourceId,
+            subjectId,
+            title: 'Multipart distant incomplet',
+            kind: 'pdf',
+            currentVersionId: remoteVersionId,
+            createdAt: '2026-09-23T00:00:00.000Z',
+            updatedAt: '2026-09-23T00:00:00.000Z',
+          },
+          version: {
+            id: remoteVersionId,
+            fileName: 'remote-incomplete.pdf',
+            mimeType: 'application/pdf',
+            size: fileBytes.length,
+            sha256,
+            status: 'uploading',
+            extractionStatus: 'pending',
+            extractionError: null,
+          },
+          extraction: null,
+        }),
+      });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname === \`/api/resource-versions/\${remoteVersionId}/multipart/create\`) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          uploadId: 'remote-upload',
+          partSize: 5 * MIB,
+          parts: [{ partNumber: 1, etag: 'remote-etag-1' }],
+        }),
+      });
+      return;
+    }
+    if (request.method() === 'PUT' && url.pathname === \`/api/resource-versions/\${remoteVersionId}/multipart/part\`) {
+      const partNumber = Number(url.searchParams.get('partNumber'));
+      uploadedParts.push(partNumber);
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ partNumber, etag: \`remote-etag-\${partNumber}\` }),
+      });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname === \`/api/resource-versions/\${remoteVersionId}/multipart/complete\`) {
+      completedRemote = true;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, size: fileBytes.length, etag: 'remote-final' }),
+      });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname === \`/api/resource-versions/\${remoteVersionId}/extraction-failure\`) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+      return;
+    }
+    await route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Route E2E absente.', retryable: false } }),
+    });
+  });
+
+  await page.goto('/bibliotheque');
+  await page.evaluate(async ({ resourceId: rid, versionId: vid, subjectId: sid, hash, size }) => {
+    const { db } = await import('/src/data/db.ts');
+    const now = new Date().toISOString();
+    await db.subjects.add({
+      id: sid,
+      name: 'Multipart doublon',
+      parentId: null,
+      createdAt: now,
+      updatedAt: now,
+      syncState: 'synced',
+      syncError: null,
+    });
+    await db.resources.add({
+      id: rid,
+      subjectId: sid,
+      title: 'Multipart local incomplet',
+      kind: 'pdf',
+      currentVersionId: vid,
+      status: 'failed',
+      extractionError: 'Extraction différée.',
+      createdAt: now,
+      updatedAt: now,
+      syncState: 'error',
+      syncError: 'Envoi interrompu.',
+    });
+    await db.resourceVersions.add({
+      id: vid,
+      resourceId: rid,
+      sha256: hash,
+      fileName: 'remote-incomplete.pdf',
+      mimeType: 'application/pdf',
+      size,
+      bytes: null,
+      createdAt: now,
+      syncState: 'error',
+      syncError: 'Envoi interrompu.',
+    });
+    await db.extractions.add({
+      versionId: vid,
+      status: 'failed',
+      pages: [],
+      charCount: 0,
+      errorCode: 'LARGE_FILE_EXTRACTION_DEFERRED',
+      errorMessage: 'Extraction différée.',
+      createdAt: now,
+    });
+    await db.multipartUploads.add({
+      versionId: vid,
+      resourceId: rid,
+      fileName: 'remote-incomplete.pdf',
+      size,
+      lastModified: 0,
+      sha256: hash,
+      uploadId: null,
+      partSize: 5 * MIB,
+      parts: [],
+      status: 'error',
+      error: 'Envoi interrompu.',
+      updatedAt: now,
+    });
+  }, { resourceId, versionId, subjectId, hash: sha256, size: fileBytes.length });
+
+  await page.goto(\`/bibliotheque/\${resourceId}\`);
+  await page.getByLabel('Fichier à reprendre').setInputFiles({
+    name: 'remote-incomplete.pdf',
+    mimeType: 'application/pdf',
+    buffer: fileBytes,
+  });
+  await page.getByRole('button', { name: 'Reprendre l’envoi' }).click();
+
+  await expect.poll(async () => page.evaluate(async (vid) => {
+    const { db } = await import('/src/data/db.ts');
+    return Boolean(await db.multipartUploads.get(vid));
+  }, versionId), { timeout: 30_000 }).toBe(false);
+
+  expect(uploadedParts).toEqual([2, 3]);
+  expect(completedRemote).toBe(true);
+
+  const local = await page.evaluate(async ({ rid, vid }) => {
+    const { db } = await import('/src/data/db.ts');
+    const [resource, version] = await Promise.all([db.resources.get(rid), db.resourceVersions.get(vid)]);
+    return {
+      resourceState: resource?.syncState,
+      remoteResourceId: resource?.remoteResourceId ?? null,
+      versionState: version?.syncState,
+      remoteVersionId: version?.remoteVersionId ?? null,
+    };
+  }, { rid: resourceId, vid: versionId });
+
+  expect(local).toEqual({
+    resourceState: 'synced',
+    remoteResourceId,
+    versionState: 'synced',
+    remoteVersionId,
+  });
+});
