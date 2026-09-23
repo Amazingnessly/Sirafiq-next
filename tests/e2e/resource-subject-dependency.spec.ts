@@ -147,6 +147,10 @@ test('un support standard attend la réussite de sa matière avant D1', async ({
     });
 
     const { requestSync } = await import('/src/lib/sync.ts');
+    // The application starts one sync pass on mount. If our fixture is seeded
+    // while that empty pass is still active, the first call deliberately joins
+    // it. A second call then starts a fresh pass over the seeded outbox.
+    await requestSync();
     await requestSync();
   }, { subjectId, resourceId, versionId });
 
