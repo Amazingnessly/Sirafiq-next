@@ -55,12 +55,16 @@ export function ResourcePage() {
   const remoteVersionId = localVersion?.remoteVersionId ?? versionId;
   const pages: ExtractedPage[] = useMemo(() => localExtraction?.pages ?? remote.data?.extraction?.pages ?? [], [localExtraction?.pages, remote.data?.extraction?.pages]);
   const extractionFailed = localExtraction?.status === 'failed' || remote.data?.version.extractionStatus === 'failed';
+  const remoteExtractionPending = Boolean(!localResource && remote.data?.version.status !== 'uploading' && remote.data?.version.extractionStatus === 'pending');
   const extractionError = localExtraction?.errorMessage ?? remote.data?.version.extractionError;
   const remoteBlobAvailable = localResource ? localResource.syncState === 'synced' : remote.data?.version.status !== 'uploading';
   const pdfUrl = blobUrl ?? (remoteVersionId && remoteBlobAvailable ? `/api/resource-versions/${encodeURIComponent(remoteVersionId)}/blob` : null);
   const terminalSyncFailure = Boolean(syncAttempt?.lastError && isTerminalOutboxAttempt(syncAttempt.nextAttemptAt));
   const canRetryServerExtraction = Boolean(localResource && localVersion && localExtraction && localResource.syncState === 'synced' && shouldTryServerPdfExtraction(localResource.kind, localVersion.size, localExtraction.status));
-  const extractionRecoveryReason = getExtractionRecoveryReason({ kind, extractionFailed, hasPages: pages.length > 0, syncState: localResource?.syncState, size: localVersion?.size ?? remote.data?.version.size, hasLocalExtraction: Boolean(localExtraction), hasMultipartSession: Boolean(multipartSession), canRetry: canRetryServerExtraction });
+  const canRetryRemoteServerExtraction = Boolean(!localResource && remoteExtractionPending && kind === 'pdf' && remote.data && remote.data.version.size <= SERVER_PDF_EXTRACTION_MAX_BYTES);
+  const canRetryExtraction = canRetryServerExtraction || canRetryRemoteServerExtraction;
+  const extractionNeedsRecovery = extractionFailed || remoteExtractionPending;
+  const extractionRecoveryReason = getExtractionRecoveryReason({ kind, extractionNeedsRecovery, hasPages: pages.length > 0, syncState: localResource?.syncState, size: localVersion?.size ?? remote.data?.version.size, hasLocalResource: Boolean(localResource), hasLocalExtraction: Boolean(localExtraction), hasMultipartSession: Boolean(multipartSession), canRetry: canRetryExtraction });
 
   async function retrySync() { if (!localResource || terminalSyncFailure) return; setRetryError(null); try { await retrySyncForResource(localResource.id); await requestSync(); } catch (error) { setRetryError(error instanceof Error ? error.message : 'La synchronisation a échoué.'); } }
   async function resumeMultipart() {
@@ -73,7 +77,27 @@ export function ResourcePage() {
       await uploadMultipartResourceWithRecovery(localResource.id, resumeFile, setTransferProgress); setResumeFile(null);
     } catch (error) { setRetryError(error instanceof Error ? error.message : 'La reprise de l’envoi a échoué.'); } finally { setResuming(false); }
   }
-  async function retryExtraction() { if (!localResource || extracting) return; setExtracting(true); setExtractionRetryError(null); try { await retryServerExtractionForResource(localResource.id); } catch (error) { setExtractionRetryError(error instanceof Error ? error.message : 'L’extraction serveur a échoué.'); } finally { setExtracting(false); } }
+  async function retryExtraction() {
+    if (extracting) return;
+    setExtracting(true); setExtractionRetryError(null);
+    try {
+      if (localResource) {
+        await retryServerExtractionForResource(localResource.id);
+      } else if (canRetryRemoteServerExtraction && remote.data) {
+        await apiJson(
+          `/api/resource-versions/${encodeURIComponent(remote.data.version.id)}/server-extraction`,
+          { method: 'POST' },
+          120_000,
+        );
+        const refreshed = await remote.refetch();
+        if (refreshed.isError) throw refreshed.error;
+      }
+    } catch (error) {
+      setExtractionRetryError(error instanceof Error ? error.message : 'L’extraction serveur a échoué.');
+    } finally {
+      setExtracting(false);
+    }
+  }
 
   if (localResource === null || (!localResource && remote.isPending)) return <div className="page"><div className="loading-card">Ouverture du support…</div></div>;
   if (!localResource && remote.isError) {
@@ -89,17 +113,17 @@ export function ResourcePage() {
     {extractionFailed && <div className="extraction-warning" role="alert"><div className="extraction-warning__icon" aria-hidden="true">!</div><div><strong>Contenu non exploitable automatiquement</strong><p>{extractionError || 'Le texte n’a pas pu être extrait.'}</p><small>{multipartSession ? 'Le fichier n’est pas encore déclaré entièrement stocké. Sirāfiq n’utilisera pas ce contenu pour des activités.' : 'Le fichier reste conservé et consultable. Sirāfiq ne prétendra pas créer des activités à partir de ce contenu.'}</small></div></div>}
     <div className={`viewer-layout${kind === 'pdf' ? ' viewer-layout--pdf' : ''}`}>
       {kind === 'pdf' ? (pdfUrl ? <PdfViewer src={pdfUrl} title={title} storageId={versionId} /> : <div className="loading-card">{multipartSession ? 'Le PDF sera consultable après la finalisation de l’envoi.' : 'Le fichier PDF n’est pas disponible.'}</div>) : <section className="text-viewer">{pages.length ? pages.map((page) => <article key={page.pageNumber}>{pages.length > 1 && <span className="page-number">Bloc {page.pageNumber}</span>}<p>{page.text}</p></article>) : <p className="muted">Aucun texte extrait n’est disponible.</p>}</section>}
-      <aside className="source-panel"><p className="eyebrow">État réel</p><h2>Extraction</h2>{pages.length ? <><strong className="large-stat">{pages.reduce((sum, page) => sum + page.text.length, 0).toLocaleString('fr-FR')}</strong><span>caractères extraits</span><div className="source-rule" /><p>{pages.length} bloc{pages.length > 1 ? 's' : ''} de texte disponible{pages.length > 1 ? 's' : ''} pour les prochaines activités.</p></> : <p>Aucune donnée textuelle n’est déclarée utilisable.</p>}{kind === 'pdf' && extractionFailed && !pages.length && <div className="source-recovery" aria-label="Récupération de l’extraction"><strong>Récupération</strong>{canRetryServerExtraction ? <button className="button button--secondary" type="button" onClick={retryExtraction} disabled={extracting}>{extracting ? 'Extraction en cours…' : 'Retenter l’extraction avec le serveur'}</button> : extractionRecoveryReason ? <p>{extractionRecoveryReason}</p> : null}{extractionRetryError && <span className="source-recovery__error" role="alert">{extractionRetryError}</span>}</div>}<div className="source-note">Les activités pédagogiques ne sont pas encore activées dans cette version.</div></aside>
+      <aside className="source-panel"><p className="eyebrow">État réel</p><h2>Extraction</h2>{pages.length ? <><strong className="large-stat">{pages.reduce((sum, page) => sum + page.text.length, 0).toLocaleString('fr-FR')}</strong><span>caractères extraits</span><div className="source-rule" /><p>{pages.length} bloc{pages.length > 1 ? 's' : ''} de texte disponible{pages.length > 1 ? 's' : ''} pour les prochaines activités.</p></> : <p>Aucune donnée textuelle n’est déclarée utilisable.</p>}{kind === 'pdf' && extractionNeedsRecovery && !pages.length && <div className="source-recovery" aria-label="Récupération de l’extraction"><strong>Récupération</strong>{canRetryExtraction ? <button className="button button--secondary" type="button" onClick={retryExtraction} disabled={extracting}>{extracting ? 'Extraction en cours…' : 'Retenter l’extraction avec le serveur'}</button> : extractionRecoveryReason ? <p>{extractionRecoveryReason}</p> : null}{extractionRetryError && <span className="source-recovery__error" role="alert">{extractionRetryError}</span>}</div>}<div className="source-note">Les activités pédagogiques ne sont pas encore activées dans cette version.</div></aside>
     </div>
   </div>;
 }
 
-function getExtractionRecoveryReason(input: { kind: 'text' | 'pdf' | undefined; extractionFailed: boolean; hasPages: boolean; syncState: 'pending' | 'synced' | 'error' | undefined; size: number | undefined; hasLocalExtraction: boolean; hasMultipartSession: boolean; canRetry: boolean }): string | null {
-  if (input.kind !== 'pdf' || !input.extractionFailed || input.hasPages || input.canRetry) return null;
+function getExtractionRecoveryReason(input: { kind: 'text' | 'pdf' | undefined; extractionNeedsRecovery: boolean; hasPages: boolean; syncState: 'pending' | 'synced' | 'error' | undefined; size: number | undefined; hasLocalResource: boolean; hasLocalExtraction: boolean; hasMultipartSession: boolean; canRetry: boolean }): string | null {
+  if (input.kind !== 'pdf' || !input.extractionNeedsRecovery || input.hasPages || input.canRetry) return null;
   if (input.hasMultipartSession) return 'Terminez d’abord l’envoi du fichier. L’extraction ne sera jamais lancée sur un PDF partiellement stocké.';
   if (input.size !== undefined && input.size > SERVER_PDF_EXTRACTION_MAX_BYTES) return `La reprise serveur actuelle est limitée aux PDF de ${formatBytes(SERVER_PDF_EXTRACTION_MAX_BYTES)} maximum. Le fichier reste consultable, mais aucune extraction automatique n’est prétendue pour ce volume.`;
-  if (input.syncState !== 'synced') return 'Le PDF doit d’abord être entièrement synchronisé avant qu’une extraction serveur puisse être relancée.';
-  if (!input.hasLocalExtraction) return 'L’état local d’extraction est incomplet. Aucune relance ne sera proposée tant qu’il n’est pas cohérent.';
+  if (input.hasLocalResource && input.syncState !== 'synced') return 'Le PDF doit d’abord être entièrement synchronisé avant qu’une extraction serveur puisse être relancée.';
+  if (input.hasLocalResource && !input.hasLocalExtraction) return 'L’état local d’extraction est incomplet. Aucune relance ne sera proposée tant qu’il n’est pas cohérent.';
   return 'La reprise serveur n’est pas disponible pour cet état du support.';
 }
 function progressLabel(progress: TransferProgress): string { const percent = progress.totalBytes ? Math.round((progress.processedBytes / progress.totalBytes) * 100) : 0; if (progress.phase === 'hashing') return `Vérification · ${percent} %`; if (progress.phase === 'finalizing') return 'Assemblage final…'; return `Morceau ${progress.partNumber ?? 0}/${progress.partCount ?? 0} · ${percent} %`; }
