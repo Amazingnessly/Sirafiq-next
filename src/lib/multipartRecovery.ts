@@ -63,23 +63,37 @@ export async function uploadMultipartResourceWithRecovery(
   file: File,
   onProgress?: (progress: TransferProgress) => void,
 ): Promise<void> {
-  // If the final R2 assembly succeeded but its HTTP response was lost, do not
-  // resend a large file: reconcile the durable remote state first. A network
-  // failure here still has to turn the persisted multipart into an explicit
-  // recovery state because the original File is not retained across reloads.
-  try {
-    if (await reconcileAlreadyStoredRemote(resourceId)) return;
-  } catch (error) {
-    await markMultipartRecoveryFailure(resourceId, error);
-    throw error;
-  }
-
   const resource = await db.resources.get(resourceId);
   if (!resource) throw new Error('Le support local est introuvable.');
   const version = await db.resourceVersions.get(resource.currentVersionId);
   const session = await db.multipartUploads.get(resource.currentVersionId);
   if (!version || !session) throw new Error('La session multipart locale est introuvable.');
-  await verifyMultipartFileIdentity(file, version, session, onProgress);
+
+  // A brand-new local multipart session has no durable remote state to
+  // reconcile yet. Recovery sessions, on the other hand, must first check
+  // whether R2 already finalized the object before any bytes are resent.
+  const mayHaveRemoteProgress = session.status !== 'pending'
+    || session.uploadId !== null
+    || session.parts.length > 0;
+  if (mayHaveRemoteProgress) {
+    try {
+      if (await reconcileAlreadyStoredRemote(resourceId)) return;
+    } catch (error) {
+      await markMultipartRecoveryFailure(resourceId, error);
+      throw error;
+    }
+  }
+
+  try {
+    await verifyMultipartFileIdentity(file, version, session, onProgress);
+  } catch (error) {
+    // A first upload must never remain visually "in progress" if Safari loses
+    // access to the File or hashing fails before the network phase begins.
+    // Existing recovery sessions already carry the durable error that led the
+    // user here, so preserve it when a reselected file is simply incorrect.
+    if (session.status !== 'error') await markMultipartRecoveryFailure(resourceId, error);
+    throw error;
+  }
 
   let lastPhase: TransferProgress['phase'] | null = null;
   const forwardProgress = (progress: TransferProgress) => {
