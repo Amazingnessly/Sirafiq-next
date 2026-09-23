@@ -350,7 +350,7 @@ test('un doublon multipart distant encore uploading reprend sa version distante'
       });
       return;
     }
-    if (request.method() === 'GET' && url.pathname === \`/api/resources/\${remoteResourceId}\`) {
+    if (request.method() === 'GET' && url.pathname === `/api/resources/${remoteResourceId}`) {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -379,7 +379,7 @@ test('un doublon multipart distant encore uploading reprend sa version distante'
       });
       return;
     }
-    if (request.method() === 'POST' && url.pathname === \`/api/resource-versions/\${remoteVersionId}/multipart/create\`) {
+    if (request.method() === 'POST' && url.pathname === `/api/resource-versions/${remoteVersionId}/multipart/create`) {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -391,17 +391,17 @@ test('un doublon multipart distant encore uploading reprend sa version distante'
       });
       return;
     }
-    if (request.method() === 'PUT' && url.pathname === \`/api/resource-versions/\${remoteVersionId}/multipart/part\`) {
+    if (request.method() === 'PUT' && url.pathname === `/api/resource-versions/${remoteVersionId}/multipart/part`) {
       const partNumber = Number(url.searchParams.get('partNumber'));
       uploadedParts.push(partNumber);
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ partNumber, etag: \`remote-etag-\${partNumber}\` }),
+        body: JSON.stringify({ partNumber, etag: `remote-etag-${partNumber}` }),
       });
       return;
     }
-    if (request.method() === 'POST' && url.pathname === \`/api/resource-versions/\${remoteVersionId}/multipart/complete\`) {
+    if (request.method() === 'POST' && url.pathname === `/api/resource-versions/${remoteVersionId}/multipart/complete`) {
       completedRemote = true;
       await route.fulfill({
         status: 200,
@@ -410,7 +410,7 @@ test('un doublon multipart distant encore uploading reprend sa version distante'
       });
       return;
     }
-    if (request.method() === 'POST' && url.pathname === \`/api/resource-versions/\${remoteVersionId}/extraction-failure\`) {
+    if (request.method() === 'POST' && url.pathname === `/api/resource-versions/${remoteVersionId}/extraction-failure`) {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
       return;
     }
@@ -484,7 +484,7 @@ test('un doublon multipart distant encore uploading reprend sa version distante'
     });
   }, { resourceId, versionId, subjectId, hash: sha256, size: fileBytes.length });
 
-  await page.goto(\`/bibliotheque/\${resourceId}\`);
+  await page.goto(`/bibliotheque/${resourceId}`);
   await page.getByLabel('Fichier à reprendre').setInputFiles({
     name: 'remote-incomplete.pdf',
     mimeType: 'application/pdf',
