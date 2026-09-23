@@ -152,6 +152,15 @@ test('affiche et navigue un PDF distant multipage avec des requêtes Range', asy
   await expect(pageInput).toHaveValue('2');
   await expect(page.getByRole('button', { name: 'Page suivante' })).toBeDisabled();
 
+  // PdfViewer releases the rendered page resources once the canvas is ready.
+  // Navigate back to the cleaned first page in the same document, then forward
+  // again to prove PDF.js can reconstruct it without keeping every page alive.
+  await page.getByRole('button', { name: 'Page précédente' }).click();
+  await expect(pageInput).toHaveValue('1');
+  await expect(page.locator('.pdf-reader canvas')).toBeVisible();
+  await page.getByRole('button', { name: 'Page suivante' }).click();
+  await expect(pageInput).toHaveValue('2');
+
   await page.reload();
   const restoredPageInput = page.getByRole('spinbutton', { name: 'Aller à la page' });
   await expect(restoredPageInput).toBeVisible({ timeout: 20_000 });
