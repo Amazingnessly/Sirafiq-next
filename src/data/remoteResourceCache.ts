@@ -17,6 +17,7 @@ export async function cacheRemoteTextResource(detail: ResourceDetailPayload): Pr
     return false;
   }
 
+  const extraction = detail.extraction;
   const existing = await db.resources.get(detail.resource.id);
   if (existing) return true;
 
@@ -60,8 +61,8 @@ export async function cacheRemoteTextResource(detail: ResourceDetailPayload): Pr
     await db.extractions.add({
       versionId: detail.version.id,
       status: 'ready',
-      pages: detail.extraction.pages,
-      charCount: detail.extraction.charCount,
+      pages: extraction.pages,
+      charCount: extraction.charCount,
       errorCode: null,
       errorMessage: null,
       createdAt: cachedAt,
