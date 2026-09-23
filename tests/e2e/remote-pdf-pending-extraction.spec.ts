@@ -150,3 +150,117 @@ test('un PDF distant stocké mais extraction pending peut être repris par le se
   expect(extractionCalls).toBe(1);
   expect(detailRequests).toBeGreaterThanOrEqual(2);
 });
+
+
+test('un PDF distant en extraction failed expose une vraie relance serveur', async ({ page }) => {
+  const pdf = makePdf();
+  const extractedText = 'Extraction distante relancée après échec.';
+  let recovered = false;
+  let extractionCalls = 0;
+
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (request.method() === 'GET' && url.pathname === `/api/resources/${RESOURCE_ID}`) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          resource: {
+            id: RESOURCE_ID,
+            subjectId: SUBJECT_ID,
+            title: 'PDF distant failed',
+            kind: 'pdf',
+            currentVersionId: VERSION_ID,
+            createdAt: '2026-09-23T00:00:00.000Z',
+            updatedAt: '2026-09-23T00:00:00.000Z',
+          },
+          version: {
+            id: VERSION_ID,
+            fileName: 'failed.pdf',
+            mimeType: 'application/pdf',
+            size: pdf.length,
+            sha256: 'c'.repeat(64),
+            status: recovered ? 'ready' : 'failed',
+            extractionStatus: recovered ? 'ready' : 'failed',
+            extractionError: recovered ? null : 'SERVER_EXTRACTION_FAILED: échec initial E2E',
+          },
+          extraction: recovered ? {
+            pages: [{ pageNumber: 1, text: extractedText }],
+            charCount: extractedText.length,
+          } : null,
+        }),
+      });
+      return;
+    }
+
+    if (request.method() === 'GET' && url.pathname === `/api/resource-versions/${VERSION_ID}/blob`) {
+      const rangeHeader = request.headers()['range'];
+      if (rangeHeader) {
+        const range = parseRange(rangeHeader, pdf.length);
+        if (!range) {
+          await route.fulfill({ status: 416, headers: { 'Content-Range': `bytes */${pdf.length}` } });
+          return;
+        }
+        const body = pdf.subarray(range.start, range.end + 1);
+        await route.fulfill({
+          status: 206,
+          headers: {
+            'Accept-Ranges': 'bytes',
+            'Content-Type': 'application/pdf',
+            'Content-Length': String(body.length),
+            'Content-Range': `bytes ${range.start}-${range.end}/${pdf.length}`,
+          },
+          body,
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'Accept-Ranges': 'bytes',
+          'Content-Type': 'application/pdf',
+          'Content-Length': String(pdf.length),
+        },
+        body: pdf,
+      });
+      return;
+    }
+
+    if (request.method() === 'POST' && url.pathname === `/api/resource-versions/${VERSION_ID}/server-extraction`) {
+      extractionCalls += 1;
+      recovered = true;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          status: 'ready',
+          pages: [{ pageNumber: 1, text: extractedText }],
+          charCount: extractedText.length,
+        }),
+      });
+      return;
+    }
+
+    await route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Route de test absente.', retryable: false } }),
+    });
+  });
+
+  await page.goto(`/bibliotheque/${RESOURCE_ID}`);
+
+  await expect(page.getByText('Contenu non exploitable automatiquement')).toBeVisible();
+  const recovery = page.getByLabel('Récupération de l’extraction');
+  const retry = recovery.getByRole('button', { name: 'Retenter l’extraction avec le serveur' });
+  await expect(retry).toBeVisible();
+  await retry.click();
+
+  await expect(page.getByText(String(extractedText.length), { exact: true })).toBeVisible();
+  await expect(page.getByText('caractères extraits', { exact: true })).toBeVisible();
+  await expect(page.getByText('Contenu non exploitable automatiquement')).toHaveCount(0);
+  await expect(page.getByLabel('Récupération de l’extraction')).toHaveCount(0);
+  expect(extractionCalls).toBe(1);
+});
