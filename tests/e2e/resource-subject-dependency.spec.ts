@@ -138,7 +138,7 @@ test('un support standard attend la réussite de sa matière avant D1', async ({
           id: 'e2e-dependent-resource-work',
           type: 'resource.sync',
           entityId: rid,
-          attempts: 5,
+          attempts: 0,
           nextAttemptAt: Date.now(),
           lastError: null,
           createdAt: now,
@@ -167,6 +167,9 @@ test('un support standard attend la réussite de sa matière avant D1', async ({
     return {
       subjectRetryInFuture: Boolean(subjectWork && subjectWork.nextAttemptAt > Date.now()),
       resourceRetryInFuture: Boolean(resourceWork && resourceWork.nextAttemptAt > Date.now()),
+      sameRetryDeadline: Boolean(subjectWork && resourceWork && subjectWork.nextAttemptAt === resourceWork.nextAttemptAt),
+      subjectAttempts: subjectWork?.attempts ?? -1,
+      resourceAttempts: resourceWork?.attempts ?? -1,
       subjectError: subjectWork?.lastError ?? null,
       resourceError: resourceWork?.lastError ?? null,
     };
@@ -175,6 +178,9 @@ test('un support standard attend la réussite de sa matière avant D1', async ({
   expect(deferred).toEqual({
     subjectRetryInFuture: true,
     resourceRetryInFuture: true,
+    sameRetryDeadline: true,
+    subjectAttempts: 6,
+    resourceAttempts: 0,
     subjectError: 'Matière temporairement indisponible',
     resourceError: 'Matière temporairement indisponible',
   });
