@@ -2,6 +2,7 @@ export const MEBIBYTE = 1024 * 1024;
 
 export const LOCAL_PDF_EXTRACTION_MAX_BYTES = 25 * MEBIBYTE;
 export const SERVER_PDF_EXTRACTION_MAX_BYTES = 25 * MEBIBYTE;
+export const SERVER_TEXT_EXTRACTION_MAX_BYTES = 25 * MEBIBYTE;
 
 // Keep the simple-upload path inside the same 25 MiB budget already used
 // for local PDF extraction. Above this point, old iPads must not allocate or
@@ -32,10 +33,23 @@ export function shouldUseMultipartUpload(size: number): boolean {
   return size > MULTIPART_UPLOAD_THRESHOLD_BYTES;
 }
 
+export function canUseServerExtraction(kind: 'text' | 'pdf', size: number): boolean {
+  const maxBytes = kind === 'pdf' ? SERVER_PDF_EXTRACTION_MAX_BYTES : SERVER_TEXT_EXTRACTION_MAX_BYTES;
+  return size <= maxBytes;
+}
+
+export function shouldTryServerExtraction(
+  kind: 'text' | 'pdf',
+  size: number,
+  extractionStatus: 'ready' | 'failed',
+): boolean {
+  return extractionStatus === 'failed' && canUseServerExtraction(kind, size);
+}
+
 export function shouldTryServerPdfExtraction(
   kind: 'text' | 'pdf',
   size: number,
   extractionStatus: 'ready' | 'failed',
 ): boolean {
-  return kind === 'pdf' && extractionStatus === 'failed' && size <= SERVER_PDF_EXTRACTION_MAX_BYTES;
+  return kind === 'pdf' && shouldTryServerExtraction(kind, size, extractionStatus);
 }
