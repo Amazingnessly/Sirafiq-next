@@ -129,7 +129,7 @@ test('un support standard attend la réussite de sa matière avant D1', async ({
           id: 'e2e-dependent-subject-work',
           type: 'subject.upsert',
           entityId: sid,
-          attempts: 0,
+          attempts: 5,
           nextAttemptAt: Date.now(),
           lastError: null,
           createdAt: new Date(Date.now() - 1000).toISOString(),
@@ -154,6 +154,41 @@ test('un support standard attend la réussite de sa matière avant D1', async ({
     await requestSync();
   }, { subjectId, resourceId, versionId });
 
+  expect(prematureRegistration).toBe(false);
+  expect(subjectAttempts).toBe(1);
+  expect(order).toEqual(['subject-1']);
+
+  const deferred = await page.evaluate(async ({ subjectId: sid, resourceId: rid }) => {
+    const { db } = await import('/src/data/db.ts');
+    const [subjectWork, resourceWork] = await Promise.all([
+      db.outbox.where('entityId').equals(sid).and((item) => item.type === 'subject.upsert').first(),
+      db.outbox.where('entityId').equals(rid).and((item) => item.type === 'resource.sync').first(),
+    ]);
+    return {
+      subjectRetryInFuture: Boolean(subjectWork && subjectWork.nextAttemptAt > Date.now()),
+      resourceRetryInFuture: Boolean(resourceWork && resourceWork.nextAttemptAt > Date.now()),
+      sameRetryDeadline: Boolean(subjectWork && resourceWork && subjectWork.nextAttemptAt === resourceWork.nextAttemptAt),
+      subjectAttempts: subjectWork?.attempts ?? -1,
+      resourceAttempts: resourceWork?.attempts ?? -1,
+      subjectError: subjectWork?.lastError ?? null,
+      resourceError: resourceWork?.lastError ?? null,
+    };
+  }, { subjectId, resourceId });
+
+  expect(deferred).toEqual({
+    subjectRetryInFuture: true,
+    resourceRetryInFuture: true,
+    sameRetryDeadline: true,
+    subjectAttempts: 6,
+    resourceAttempts: 0,
+    subjectError: 'Matière temporairement indisponible',
+    resourceError: 'Matière temporairement indisponible',
+  });
+
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+
+  await expect.poll(() => subjectAttempts).toBe(2);
+  await expect.poll(() => order.includes('resource-register')).toBe(true);
   expect(prematureRegistration).toBe(false);
   expect(order.slice(0, 3)).toEqual(['subject-1', 'subject-2', 'resource-register']);
   expect(order).toContain('blob');

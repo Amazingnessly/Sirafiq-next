@@ -282,7 +282,11 @@ async function runSync(): Promise<void> {
   }
 }
 
-async function ensureSubjectSynced(subjectId: string, force = false): Promise<void> {
+async function ensureSubjectSynced(
+  subjectId: string,
+  options: { force?: boolean; respectBackoff?: boolean } = {},
+): Promise<void> {
+  const { force = false, respectBackoff = false } = options;
   const subject = await db.subjects.get(subjectId);
   if (!subject) throw new ApiRequestError('La matière locale est introuvable.', 0, 'LOCAL_SUBJECT_MISSING', false);
   if (subject.syncState === 'synced' && !force) return;
@@ -293,13 +297,24 @@ async function ensureSubjectSynced(subjectId: string, force = false): Promise<vo
     .and((item) => item.type === 'subject.upsert')
     .first();
 
-  if (work?.lastError && !isRetryableOutboxAttempt(work.nextAttemptAt)) {
-    throw new ApiRequestError(
-      work.lastError,
-      0,
-      'SUBJECT_SYNC_BLOCKED',
-      false,
-    );
+  if (work?.lastError) {
+    if (!isRetryableOutboxAttempt(work.nextAttemptAt)) {
+      throw new ApiRequestError(
+        work.lastError,
+        0,
+        'SUBJECT_SYNC_BLOCKED',
+        false,
+      );
+    }
+    if (respectBackoff && work.nextAttemptAt > Date.now()) {
+      throw new ApiRequestError(
+        work.lastError,
+        0,
+        'SUBJECT_SYNC_BACKOFF',
+        true,
+        { nextAttemptAt: work.nextAttemptAt },
+      );
+    }
   }
 
   if (!work) {
@@ -351,7 +366,7 @@ async function syncResource(item: OutboxRecord): Promise<void> {
   // sync path aligned with multipart: satisfy that dependency before attempting
   // resource registration instead of manufacturing a secondary SUBJECT_MISSING
   // failure on an otherwise valid local support.
-  await ensureSubjectSynced(resource.subjectId);
+  await ensureSubjectSynced(resource.subjectId, { respectBackoff: true });
 
   const version = await db.resourceVersions.get(resource.currentVersionId);
   const extraction = await db.extractions.get(resource.currentVersionId);
@@ -417,7 +432,7 @@ async function registerOrResolveRemoteVersion(
     return { resourceId: payload.resource.id, versionId: payload.version.id, reusedExisting: false, remote: null };
   } catch (error) {
     if (error instanceof ApiRequestError && error.code === 'SUBJECT_MISSING' && !repairedMissingSubject) {
-      await ensureSubjectSynced(payload.resource.subjectId, true);
+      await ensureSubjectSynced(payload.resource.subjectId, { force: true });
       return registerOrResolveRemoteVersion(payload, true);
     }
     if (!(error instanceof ApiRequestError) || error.code !== 'DUPLICATE_SUPPORT') throw error;
@@ -464,6 +479,16 @@ async function applyServerExtractionResult(resourceId: string, versionId: string
 
 async function markOutboxFailure(item: OutboxRecord, error: unknown): Promise<void> {
   const message = error instanceof Error ? error.message : 'Erreur de synchronisation inconnue.';
+
+  if (error instanceof ApiRequestError && error.code === 'SUBJECT_SYNC_BACKOFF') {
+    const subjectRetryAt = readRetryDeadline(error.details);
+    if (subjectRetryAt !== null) {
+      await db.outbox.update(item.id, { lastError: message, nextAttemptAt: subjectRetryAt });
+      scheduleRetry(Math.max(0, subjectRetryAt - Date.now()));
+      return;
+    }
+  }
+
   const attempts = item.attempts + 1;
   const retryable = !(error instanceof ApiRequestError) || error.retryable;
   const nextDelay = Math.min(5 * 60_000, 2 ** Math.min(attempts, 6) * 1_000);
@@ -482,6 +507,12 @@ async function markOutboxFailure(item: OutboxRecord, error: unknown): Promise<vo
       });
     }
   }
+}
+
+function readRetryDeadline(details: unknown): number | null {
+  if (!details || typeof details !== 'object') return null;
+  const candidate = (details as { nextAttemptAt?: unknown }).nextAttemptAt;
+  return typeof candidate === 'number' && Number.isFinite(candidate) ? candidate : null;
 }
 
 function scheduleRetry(delay: number): void {
