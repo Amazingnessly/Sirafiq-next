@@ -54,7 +54,7 @@ La CI GitHub exécute les contrôles de qualité et le scénario E2E WebKit au f
 
 Le dépôt est préparé pour Cloudflare Workers + Static Assets, D1 et R2. D1 et R2 portent des noms explicites dans la configuration, mais leurs identifiants de compte ne sont pas codés en dur : Wrangler peut les provisionner et les lier.
 
-Le déploiement de production automatique n'est pas activé tant que le socle V0.1 n'a pas passé la CI puis la validation sur iPad réel.
+L’intégration Git Cloudflare Workers Builds est actuellement active et tente des déploiements de production sur les commits/PR. Ces déploiements échouent encore même lorsque la CI GitHub applicative est verte ; ils ne constituent donc pas une validation du socle. Le dépôt prépare la résolution D1 côté script, mais l’état réel du déploiement Cloudflare doit être confirmé séparément avant validation.
 
 Avant tout usage avec des données personnelles réelles, l'application devra être protégée par une couche d'authentification/contrôle d'accès adaptée.
 
