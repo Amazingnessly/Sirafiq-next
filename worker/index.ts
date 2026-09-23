@@ -19,7 +19,9 @@ import {
   MAX_SINGLE_UPLOAD_BYTES,
   MULTIPART_UPLOAD_THRESHOLD_BYTES,
   SERVER_PDF_EXTRACTION_MAX_BYTES,
+  SERVER_TEXT_EXTRACTION_MAX_BYTES,
 } from '../src/shared/importPolicy';
+import { extractTextContent, TextExtractionError } from '../src/lib/textExtraction';
 
 type WorkerEnv = Env & { AI?: Cloudflare.PreviewEnv['AI'] };
 
@@ -56,7 +58,7 @@ export default {
       }
 
       const serverExtractionMatch = url.pathname.match(/^\/api\/resource-versions\/([0-9a-f-]+)\/server-extraction$/i);
-      if (request.method === 'POST' && serverExtractionMatch?.[1]) return extractPdfOnServer(serverExtractionMatch[1], env);
+      if (request.method === 'POST' && serverExtractionMatch?.[1]) return extractOnServer(serverExtractionMatch[1], env);
 
       const extractionMatch = url.pathname.match(/^\/api\/resource-versions\/([0-9a-f-]+)\/extraction$/i);
       if (request.method === 'POST' && extractionMatch?.[1]) return storeExtraction(extractionMatch[1], request, env);
@@ -406,24 +408,64 @@ async function getBlob(versionId: string, request: Request, env: Env): Promise<R
   return createBlobResponse(detachR2Body(object.body), headers, object.size, null);
 }
 
-async function extractPdfOnServer(versionId: string, env: WorkerEnv): Promise<Response> {
-  const ai = env.AI;
-  if (!ai) return errorResponse(503, 'SERVER_EXTRACTION_UNAVAILABLE', 'L’extraction PDF serveur n’est pas disponible dans cet environnement.', true);
-
+async function extractOnServer(versionId: string, env: WorkerEnv): Promise<Response> {
   const version = await env.DB.prepare(`
     SELECT r2_key, mime_type, file_name, COALESCE(size_bytes, size) AS size
     FROM resource_versions WHERE id = ?
   `).bind(versionId).first<{ r2_key: string; mime_type: string; file_name: string; size: number }>();
   if (!version) return errorResponse(404, 'VERSION_NOT_FOUND', 'La version du support est introuvable.', false);
-  if (version.mime_type !== 'application/pdf' && !version.file_name.toLowerCase().endsWith('.pdf')) {
-    return errorResponse(400, 'NOT_A_PDF', 'Cette extraction serveur est réservée aux PDF.', false);
+
+  const fileName = version.file_name.toLowerCase();
+  const isPdf = version.mime_type === 'application/pdf' || fileName.endsWith('.pdf');
+  const isText = version.mime_type.startsWith('text/') || fileName.endsWith('.txt') || fileName.endsWith('.md');
+  if (!isPdf && !isText) {
+    return errorResponse(400, 'UNSUPPORTED_SERVER_EXTRACTION', 'Ce format ne peut pas être extrait par le serveur dans cette version.', false);
   }
-  if (version.size > SERVER_PDF_EXTRACTION_MAX_BYTES) {
-    return errorResponse(413, 'SERVER_EXTRACTION_TOO_LARGE', 'L’extraction PDF serveur est limitée à 25 Mo pour cette version.', false);
+
+  const maxBytes = isPdf ? SERVER_PDF_EXTRACTION_MAX_BYTES : SERVER_TEXT_EXTRACTION_MAX_BYTES;
+  if (version.size > maxBytes) {
+    return errorResponse(
+      413,
+      'SERVER_EXTRACTION_TOO_LARGE',
+      `L’extraction serveur est limitée à ${Math.round(maxBytes / (1024 * 1024))} Mo pour ce type de support.`,
+      false,
+    );
   }
 
   const object = await env.FILES.get(version.r2_key);
-  if (!object) return errorResponse(409, 'FILE_NOT_STORED', 'Le PDF doit d’abord être synchronisé avant une extraction serveur.', true);
+  if (!object) return errorResponse(409, 'FILE_NOT_STORED', 'Le fichier doit d’abord être synchronisé avant une extraction serveur.', true);
+
+  if (isText) {
+    try {
+      const extracted = extractTextContent((await object.text()).replace(/\u0000/g, ''));
+      await persistReadyExtraction(versionId, extracted.pages, extracted.charCount, env);
+      const payload: ServerExtractionResult = {
+        status: 'ready',
+        pages: extracted.pages,
+        charCount: extracted.charCount,
+      };
+      return json(payload);
+    } catch (error) {
+      if (error instanceof TextExtractionError) {
+        return persistServerExtractionFailure(versionId, error.code, error.message, env);
+      }
+      console.error(JSON.stringify({
+        level: 'error',
+        operation: 'server-text-extraction',
+        versionId,
+        message: error instanceof Error ? error.message : 'Unknown text extraction error',
+      }));
+      return persistServerExtractionFailure(
+        versionId,
+        'SERVER_EXTRACTION_FAILED',
+        'L’extraction serveur du texte a échoué. Le fichier reste conservé.',
+        env,
+      );
+    }
+  }
+
+  const ai = env.AI;
+  if (!ai) return errorResponse(503, 'SERVER_EXTRACTION_UNAVAILABLE', 'L’extraction PDF serveur n’est pas disponible dans cet environnement.', true);
 
   try {
     const converted = await ai.toMarkdown(
