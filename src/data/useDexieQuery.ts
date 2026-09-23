@@ -8,28 +8,39 @@ export class LocalDataReadError extends Error {
   }
 }
 
+type QueryState<T> = {
+  deps: readonly unknown[];
+  value: T;
+  error: unknown;
+};
+
+function sameDeps(left: readonly unknown[], right: readonly unknown[]): boolean {
+  return left.length === right.length && left.every((value, index) => Object.is(value, right[index]));
+}
+
 export function useDexieQuery<T>(query: () => Promise<T>, deps: readonly unknown[], initial: T): T {
-  const [value, setValue] = useState<T>(initial);
-  const [error, setError] = useState<unknown>(null);
+  const [state, setState] = useState<QueryState<T>>({ deps, value: initial, error: null });
+  const currentState = sameDeps(state.deps, deps) ? state : { deps, value: initial, error: null };
 
   useEffect(() => {
-    // A dependency change means this value belongs to a different query scope.
-    // Clear the previous result immediately so navigation cannot briefly expose
-    // data from the previously selected subject/resource while IndexedDB loads.
-    setValue(initial);
-    setError(null);
+    // Scope the result to the dependency snapshot that produced it. Effects run
+    // after render, so clearing state only here can expose the previous query's
+    // value for one paint after navigation. A stale subscription may also emit
+    // before React runs its cleanup; tagging every emission with its dependency
+    // snapshot keeps that old value hidden during the transition.
+    setState((previous) => sameDeps(previous.deps, deps) ? previous : { deps, value: initial, error: null });
 
     const subscription = liveQuery(query).subscribe({
-      next: setValue,
+      next: (value) => setState({ deps, value, error: null }),
       error: (queryError) => {
         console.error('IndexedDB query failed', queryError);
-        setError(new LocalDataReadError(queryError));
+        setState({ deps, value: initial, error: new LocalDataReadError(queryError) });
       },
     });
     return () => subscription.unsubscribe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 
-  if (error) throw error;
-  return value;
+  if (currentState.error) throw currentState.error;
+  return currentState.value;
 }

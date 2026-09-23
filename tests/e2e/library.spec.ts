@@ -161,11 +161,10 @@ test('un même contenu n’est pas importé deux fois localement', async ({ page
   await page.goto('/bibliotheque');
 
   const subjectInput = page.getByLabel('Nouvelle matière', { exact: true }).first();
-  if (await subjectInput.isVisible()) {
-    await subjectInput.fill('Doublons E2E');
-    await page.getByRole('button', { name: 'Ajouter', exact: true }).click();
-    await expect(page.getByRole('listitem').getByText('Doublons E2E', { exact: true })).toBeVisible();
-  }
+  await expect(subjectInput).toBeVisible();
+  await subjectInput.fill('Doublons E2E');
+  await page.getByRole('button', { name: 'Ajouter', exact: true }).click();
+  await expect(page.getByRole('listitem').getByText('Doublons E2E', { exact: true })).toBeVisible();
 
   await page.getByRole('button', { name: 'Texte', exact: true }).click();
   await page.getByLabel(/Titre/).fill('Même contenu A');
