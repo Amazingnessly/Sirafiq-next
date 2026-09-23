@@ -4,6 +4,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { StatusPill } from '../../components/StatusPill';
 import { db, type ResourceRecord } from '../../data/db';
 import { retrySyncForResource } from '../../data/repository';
+import { cacheRemoteTextResource } from '../../data/remoteResourceCache';
 import { useDexieQuery } from '../../data/useDexieQuery';
 import { ApiRequestError, apiJson } from '../../lib/api';
 import { sha256Hex } from '../../lib/hash';
@@ -39,6 +40,14 @@ export function ResourcePage() {
     const url = URL.createObjectURL(blob); setBlobUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [localVersion?.bytes, localVersion?.mimeType]);
+
+  useEffect(() => {
+    if (localResource || !remote.data) return;
+    void cacheRemoteTextResource(remote.data).catch((error) => {
+      console.error('Remote text local cache failed', error);
+    });
+  }, [localResource, remote.data]);
+
 
   const title = localResource?.title ?? remote.data?.resource.title;
   const kind = localResource?.kind ?? remote.data?.resource.kind;
