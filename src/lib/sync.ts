@@ -343,6 +343,7 @@ async function ensureSubjectSynced(
         .and((item) => item.type === 'subject.upsert')
         .delete();
     });
+    await releaseDeferredResourcesForSubject(subject.id);
   } catch (error) {
     await markOutboxFailure(work, error);
     throw error;
@@ -354,6 +355,7 @@ async function syncSubject(item: OutboxRecord): Promise<void> {
   if (!subject) return;
   await apiJson('/api/subjects/upsert', { method: 'POST', body: JSON.stringify(toSubjectPayload(subject)) });
   await db.subjects.update(subject.id, { syncState: 'synced', syncError: null });
+  await releaseDeferredResourcesForSubject(subject.id);
 }
 
 async function syncResource(item: OutboxRecord): Promise<void> {
@@ -405,6 +407,30 @@ async function syncResource(item: OutboxRecord): Promise<void> {
   await db.transaction('rw', db.resources, db.resourceVersions, async () => {
     await db.resources.update(resource.id, { syncState: 'synced', syncError: null });
     await db.resourceVersions.update(version.id, { syncState: 'synced', syncError: null });
+  });
+}
+
+async function releaseDeferredResourcesForSubject(subjectId: string): Promise<void> {
+  const pendingResources = await db.resources
+    .where('subjectId')
+    .equals(subjectId)
+    .filter((resource) => resource.syncState === 'pending')
+    .toArray();
+  if (pendingResources.length === 0) return;
+
+  const pendingResourceIds = new Set(pendingResources.map((resource) => resource.id));
+  const deferred = (await db.outbox.where('type').equals('resource.sync').toArray()).filter(
+    (item) => pendingResourceIds.has(item.entityId)
+      && Boolean(item.lastError)
+      && isRetryableOutboxAttempt(item.nextAttemptAt),
+  );
+  if (deferred.length === 0) return;
+
+  const now = Date.now();
+  await db.transaction('rw', db.outbox, async () => {
+    for (const item of deferred) {
+      await db.outbox.update(item.id, { nextAttemptAt: now, lastError: null });
+    }
   });
 }
 
