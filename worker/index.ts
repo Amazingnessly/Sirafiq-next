@@ -23,7 +23,7 @@ import {
 } from '../src/shared/importPolicy';
 import { extractTextContent, TextExtractionError } from '../src/lib/textExtraction';
 
-type WorkerEnv = Env & { AI?: Cloudflare.PreviewEnv['AI'] };
+type WorkerEnv = Env;
 
 const LEGACY_D1_SIZE_LIMIT = 25 * 1024 * 1024;
 
