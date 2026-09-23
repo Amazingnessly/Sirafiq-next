@@ -226,7 +226,7 @@ test('un doublon distant encore uploading est réellement terminé avant sync lo
       });
       return;
     }
-    if (request.method() === 'GET' && url.pathname === \`/api/resources/\${remoteResourceId}\`) {
+    if (request.method() === 'GET' && url.pathname === `/api/resources/${remoteResourceId}`) {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -255,12 +255,12 @@ test('un doublon distant encore uploading est réellement terminé avant sync lo
       });
       return;
     }
-    if (request.method() === 'PUT' && url.pathname === \`/api/resource-versions/\${remoteVersionId}/blob\`) {
+    if (request.method() === 'PUT' && url.pathname === `/api/resource-versions/${remoteVersionId}/blob`) {
       remoteBlobUploads += 1;
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
       return;
     }
-    if (request.method() === 'POST' && url.pathname === \`/api/resource-versions/\${remoteVersionId}/extraction\`) {
+    if (request.method() === 'POST' && url.pathname === `/api/resource-versions/${remoteVersionId}/extraction`) {
       extractionUploads += 1;
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
       return;
