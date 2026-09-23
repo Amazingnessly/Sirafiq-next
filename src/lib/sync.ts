@@ -14,7 +14,7 @@ import type {
   ServerExtractionResult,
   UploadedPart,
 } from '../shared/contracts';
-import { MULTIPART_PART_BYTES, shouldTryServerPdfExtraction } from '../shared/importPolicy';
+import { MULTIPART_PART_BYTES, shouldTryServerExtraction } from '../shared/importPolicy';
 import { newId } from './ids';
 import { isRetryableOutboxAttempt } from './retryableSync';
 
@@ -211,8 +211,8 @@ export async function retryServerExtractionForResource(resourceId: string): Prom
   const version = await db.resourceVersions.get(resource.currentVersionId);
   const extraction = await db.extractions.get(resource.currentVersionId);
   if (!version || !extraction) throw new Error('Les données locales du support sont incomplètes.');
-  if (!shouldTryServerPdfExtraction(resource.kind, version.size, extraction.status)) {
-    throw new Error('Ce support ne peut pas utiliser l’extraction PDF serveur dans cette version.');
+  if (!shouldTryServerExtraction(resource.kind, version.size, extraction.status)) {
+    throw new Error('Ce support ne peut pas utiliser l’extraction serveur dans cette version.');
   }
   if (resource.syncState !== 'synced') throw new Error('Synchronisez d’abord le fichier avant de relancer son extraction.');
 
@@ -392,7 +392,7 @@ async function syncResource(item: OutboxRecord): Promise<void> {
     await applyServerExtractionResult(resource.id, version.id, {
       status: 'ready', pages: registration.remote.extraction.pages, charCount: registration.remote.extraction.charCount,
     });
-  } else if (shouldTryServerPdfExtraction(resource.kind, version.size, extraction.status)) {
+  } else if (shouldTryServerExtraction(resource.kind, version.size, extraction.status)) {
     const serverResult = await apiJson<ServerExtractionResult>(
       `/api/resource-versions/${encodeURIComponent(registration.versionId)}/server-extraction`, { method: 'POST' }, 120_000,
     );
