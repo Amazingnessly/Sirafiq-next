@@ -41,12 +41,14 @@ test('un PDF distant stocké mais extraction pending peut être repris par le se
   const extractedText = 'Extraction distante reprise après interruption.';
   let recovered = false;
   let extractionCalls = 0;
+  let detailRequests = 0;
 
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
 
     if (request.method() === 'GET' && url.pathname === `/api/resources/${RESOURCE_ID}`) {
+      detailRequests += 1;
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -142,7 +144,9 @@ test('un PDF distant stocké mais extraction pending peut être repris par le se
   await expect(retry).toBeVisible();
   await retry.click();
 
-  await expect(page.getByText(extractedText)).toBeVisible();
+  await expect(page.getByText(String(extractedText.length), { exact: true })).toBeVisible();
+  await expect(page.getByText('caractères extraits', { exact: true })).toBeVisible();
   await expect(page.getByLabel('Récupération de l’extraction')).toHaveCount(0);
   expect(extractionCalls).toBe(1);
+  expect(detailRequests).toBeGreaterThanOrEqual(2);
 });
