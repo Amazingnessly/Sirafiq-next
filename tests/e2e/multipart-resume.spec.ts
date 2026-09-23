@@ -199,7 +199,7 @@ test('un échec réseau avant le démarrage rend le multipart explicitement repr
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ subjects: [], resources: [] }) });
       return;
     }
-    if (request.method() === 'GET' && url.pathname === `/api/resources/${resourceId}`) {
+    if (request.method() === 'POST' && url.pathname === '/api/resources/register') {
       await route.fulfill({
         status: 503,
         contentType: 'application/json',
@@ -243,7 +243,7 @@ test('un échec réseau avant le démarrage rend le multipart explicitement repr
     await db.resourceVersions.add({
       id: vid,
       resourceId: rid,
-      sha256: 'e2e-pre-upload-network-hash',
+      sha256: '5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef',
       fileName: 'reseau.pdf',
       mimeType: 'application/pdf',
       size: 1024,
@@ -267,7 +267,7 @@ test('un échec réseau avant le démarrage rend le multipart explicitement repr
       fileName: 'reseau.pdf',
       size: 1024,
       lastModified: 0,
-      sha256: 'e2e-pre-upload-network-hash',
+      sha256: '5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef',
       uploadId: null,
       partSize: 8 * 1024 * 1024,
       parts: [],
@@ -314,3 +314,140 @@ test('un échec réseau avant le démarrage rend le multipart explicitement repr
   await expect(page.getByLabel('Fichier à reprendre')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Reprendre l’envoi' })).toBeVisible();
 });
+
+test('un échec de vérification initial ne laisse pas un multipart faussement actif', async ({ page }) => {
+  const resourceId = 'abababab-abab-4bab-8bab-abababababab';
+  const versionId = 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
+  const subjectId = 'efefefef-efef-4fef-8fef-efefefefefef';
+  const size = 1024;
+  const expectedBytes = Buffer.alloc(size, 1);
+  const expectedSha = createHash('sha256').update(expectedBytes).digest('hex');
+  let resourceReads = 0;
+  let registrations = 0;
+
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (request.method() === 'GET' && url.pathname === '/api/bootstrap') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ subjects: [], resources: [] }) });
+      return;
+    }
+    if (request.method() === 'GET' && url.pathname === `/api/resources/${resourceId}`) {
+      resourceReads += 1;
+      await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: { code: 'RESOURCE_NOT_FOUND', message: 'Absent', retryable: false } }) });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname === '/api/resources/register') {
+      registrations += 1;
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, uploadMode: 'multipart' }) });
+      return;
+    }
+    await route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Route E2E absente.', retryable: false } }),
+    });
+  });
+
+  await page.goto('/bibliotheque');
+  await page.evaluate(async ({ resourceId: rid, versionId: vid, subjectId: sid, sha, size: fileSize }) => {
+    const { db } = await import('/src/data/db.ts');
+    const now = new Date().toISOString();
+    await db.subjects.add({
+      id: sid,
+      name: 'Multipart préflight',
+      parentId: null,
+      createdAt: now,
+      updatedAt: now,
+      syncState: 'synced',
+      syncError: null,
+    });
+    await db.resources.add({
+      id: rid,
+      subjectId: sid,
+      title: 'Multipart avant réseau',
+      kind: 'pdf',
+      currentVersionId: vid,
+      status: 'failed',
+      extractionError: 'Extraction différée.',
+      createdAt: now,
+      updatedAt: now,
+      syncState: 'pending',
+      syncError: null,
+    });
+    await db.resourceVersions.add({
+      id: vid,
+      resourceId: rid,
+      sha256: sha,
+      fileName: 'pending.pdf',
+      mimeType: 'application/pdf',
+      size: fileSize,
+      bytes: null,
+      createdAt: now,
+      syncState: 'pending',
+      syncError: null,
+    });
+    await db.extractions.add({
+      versionId: vid,
+      status: 'failed',
+      pages: [],
+      charCount: 0,
+      errorCode: 'LARGE_FILE_EXTRACTION_DEFERRED',
+      errorMessage: 'Extraction différée.',
+      createdAt: now,
+    });
+    await db.multipartUploads.add({
+      versionId: vid,
+      resourceId: rid,
+      fileName: 'pending.pdf',
+      size: fileSize,
+      lastModified: 0,
+      sha256: sha,
+      uploadId: null,
+      partSize: 8 * 1024 * 1024,
+      parts: [],
+      status: 'pending',
+      error: null,
+      updatedAt: now,
+    });
+  }, { resourceId, versionId, subjectId, sha: expectedSha, size });
+
+  const failure = await page.evaluate(async ({ rid, fileSize }) => {
+    const { uploadMultipartResourceWithRecovery } = await import('/src/lib/multipartRecovery.ts');
+    const wrongBytes = new Uint8Array(fileSize);
+    wrongBytes.fill(2);
+    const file = new File([wrongBytes], 'pending.pdf', { type: 'application/pdf' });
+    try {
+      await uploadMultipartResourceWithRecovery(rid, file);
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }, { rid: resourceId, fileSize: size });
+
+  expect(failure).toBe('Le contenu du fichier sélectionné ne correspond pas au support à reprendre.');
+  expect(resourceReads).toBe(0);
+  expect(registrations).toBe(0);
+
+  await expect.poll(async () => page.evaluate(async ({ rid, vid }) => {
+    const { db } = await import('/src/data/db.ts');
+    const [resource, version, session] = await Promise.all([
+      db.resources.get(rid),
+      db.resourceVersions.get(vid),
+      db.multipartUploads.get(vid),
+    ]);
+    return {
+      resourceState: resource?.syncState,
+      versionState: version?.syncState,
+      sessionStatus: session?.status,
+      sessionError: session?.error,
+    };
+  }, { rid: resourceId, vid: versionId })).toEqual({
+    resourceState: 'error',
+    versionState: 'error',
+    sessionStatus: 'error',
+    sessionError: 'Le contenu du fichier sélectionné ne correspond pas au support à reprendre.',
+  });
+});
+
