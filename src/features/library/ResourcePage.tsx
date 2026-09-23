@@ -135,7 +135,11 @@ export function ResourcePage() {
 
 function getExtractionRecoveryReason(input: { kind: 'text' | 'pdf' | undefined; extractionNeedsRecovery: boolean; hasPages: boolean; syncState: 'pending' | 'synced' | 'error' | undefined; size: number | undefined; hasLocalResource: boolean; hasLocalExtraction: boolean; hasMultipartSession: boolean; canRetry: boolean }): string | null {
   if (!input.kind || !input.extractionNeedsRecovery || input.hasPages || input.canRetry) return null;
-  if (input.hasMultipartSession) return 'Terminez d’abord l’envoi du fichier. L’extraction ne sera jamais lancée sur un fichier partiellement stocké.';
+  if (input.hasMultipartSession) {
+    return input.kind === 'pdf'
+      ? 'Terminez d’abord l’envoi du fichier. L’extraction ne sera jamais lancée sur un PDF partiellement stocké.'
+      : 'Terminez d’abord l’envoi du fichier. L’extraction ne sera jamais lancée sur un texte partiellement stocké.';
+  }
   const maxBytes = input.kind === 'pdf' ? SERVER_PDF_EXTRACTION_MAX_BYTES : SERVER_TEXT_EXTRACTION_MAX_BYTES;
   if (input.size !== undefined && input.size > maxBytes) {
     const label = input.kind === 'pdf' ? 'PDF' : 'textes';
@@ -144,7 +148,11 @@ function getExtractionRecoveryReason(input: { kind: 'text' | 'pdf' | undefined; 
       : 'Le fichier reste conservé, mais Sirāfiq ne prétend pas pouvoir le lire automatiquement pour ce volume.';
     return `La reprise serveur actuelle est limitée aux ${label} de ${formatBytes(maxBytes)} maximum. ${availability}`;
   }
-  if (input.hasLocalResource && input.syncState !== 'synced') return 'Le fichier doit d’abord être entièrement synchronisé avant qu’une extraction serveur puisse être relancée.';
+  if (input.hasLocalResource && input.syncState !== 'synced') {
+    return input.kind === 'pdf'
+      ? 'Le PDF doit d’abord être entièrement synchronisé avant qu’une extraction serveur puisse être relancée.'
+      : 'Le texte doit d’abord être entièrement synchronisé avant qu’une extraction serveur puisse être relancée.';
+  }
   if (input.hasLocalResource && !input.hasLocalExtraction) return 'L’état local d’extraction est incomplet. Aucune relance ne sera proposée tant qu’il n’est pas cohérent.';
   return 'La reprise serveur n’est pas disponible pour cet état du support.';
 }
