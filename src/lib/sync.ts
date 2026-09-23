@@ -19,6 +19,7 @@ import { newId } from './ids';
 import { isRetryableOutboxAttempt } from './retryableSync';
 
 let activeSync: Promise<void> | null = null;
+const activeSubjectSyncs = new Map<string, Promise<void>>();
 let retryTimer: number | null = null;
 let retryTimerAt: number | null = null;
 
@@ -276,7 +277,10 @@ async function runSync(): Promise<void> {
       if (item.type === 'resource.sync') await syncResource(item);
       await db.outbox.delete(item.id);
     } catch (error) {
-      await markOutboxFailure(item, error);
+      // Subject synchronization owns its own failure bookkeeping so every
+      // caller that joins the same in-flight request observes one durable
+      // outcome instead of incrementing the same outbox attempt twice.
+      if (item.type !== 'subject.upsert') await markOutboxFailure(item, error);
       if (!navigator.onLine) return;
     }
   }
@@ -286,12 +290,47 @@ async function ensureSubjectSynced(
   subjectId: string,
   options: { force?: boolean; respectBackoff?: boolean } = {},
 ): Promise<void> {
+  await synchronizeSubjectById(subjectId, options);
+}
+
+async function syncSubject(item: OutboxRecord): Promise<void> {
+  await synchronizeSubjectById(item.entityId, { force: true }, item);
+}
+
+async function synchronizeSubjectById(
+  subjectId: string,
+  options: { force?: boolean; respectBackoff?: boolean } = {},
+  workHint?: OutboxRecord,
+): Promise<void> {
+  const existing = activeSubjectSyncs.get(subjectId);
+  if (existing) {
+    await existing;
+    return;
+  }
+
+  const task = performSubjectSync(subjectId, options, workHint);
+  activeSubjectSyncs.set(subjectId, task);
+  try {
+    await task;
+  } finally {
+    if (activeSubjectSyncs.get(subjectId) === task) activeSubjectSyncs.delete(subjectId);
+  }
+}
+
+async function performSubjectSync(
+  subjectId: string,
+  options: { force?: boolean; respectBackoff?: boolean },
+  workHint?: OutboxRecord,
+): Promise<void> {
   const { force = false, respectBackoff = false } = options;
   const subject = await db.subjects.get(subjectId);
-  if (!subject) throw new ApiRequestError('La matière locale est introuvable.', 0, 'LOCAL_SUBJECT_MISSING', false);
+  if (!subject) {
+    if (workHint) return;
+    throw new ApiRequestError('La matière locale est introuvable.', 0, 'LOCAL_SUBJECT_MISSING', false);
+  }
   if (subject.syncState === 'synced' && !force) return;
 
-  let work = await db.outbox
+  let work = workHint ?? await db.outbox
     .where('entityId')
     .equals(subject.id)
     .and((item) => item.type === 'subject.upsert')
@@ -348,14 +387,6 @@ async function ensureSubjectSynced(
     await markOutboxFailure(work, error);
     throw error;
   }
-}
-
-async function syncSubject(item: OutboxRecord): Promise<void> {
-  const subject = await db.subjects.get(item.entityId);
-  if (!subject) return;
-  await apiJson('/api/subjects/upsert', { method: 'POST', body: JSON.stringify(toSubjectPayload(subject)) });
-  await db.subjects.update(subject.id, { syncState: 'synced', syncError: null });
-  await releaseDeferredResourcesForSubject(subject.id);
 }
 
 async function syncResource(item: OutboxRecord): Promise<void> {
