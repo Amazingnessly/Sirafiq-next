@@ -40,10 +40,16 @@ export function SyncIndicator() {
 
   useEffect(() => {
     const update = () => setOnline(navigator.onLine);
-    window.addEventListener('online', update);
+    const resumeSync = () => {
+      setOnline(true);
+      void requestSync().catch((error) => {
+        console.warn('Sirāfiq could not resume synchronization after reconnecting.', error);
+      });
+    };
+    window.addEventListener('online', resumeSync);
     window.addEventListener('offline', update);
     return () => {
-      window.removeEventListener('online', update);
+      window.removeEventListener('online', resumeSync);
       window.removeEventListener('offline', update);
     };
   }, []);
