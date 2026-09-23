@@ -61,7 +61,17 @@ export function ResourcePage() {
   const pdfUrl = blobUrl ?? (remoteVersionId && remoteBlobAvailable ? `/api/resource-versions/${encodeURIComponent(remoteVersionId)}/blob` : null);
   const terminalSyncFailure = Boolean(syncAttempt?.lastError && isTerminalOutboxAttempt(syncAttempt.nextAttemptAt));
   const canRetryServerExtraction = Boolean(localResource && localVersion && localExtraction && localResource.syncState === 'synced' && shouldTryServerPdfExtraction(localResource.kind, localVersion.size, localExtraction.status));
-  const canRetryRemoteServerExtraction = Boolean(!localResource && remoteExtractionPending && kind === 'pdf' && remote.data && remote.data.version.size <= SERVER_PDF_EXTRACTION_MAX_BYTES);
+  const remoteExtractionRecoverable = Boolean(
+    !localResource
+    && remote.data?.version.status !== 'uploading'
+    && (remote.data?.version.extractionStatus === 'pending' || remote.data?.version.extractionStatus === 'failed')
+  );
+  const canRetryRemoteServerExtraction = Boolean(
+    remoteExtractionRecoverable
+    && kind === 'pdf'
+    && remote.data
+    && remote.data.version.size <= SERVER_PDF_EXTRACTION_MAX_BYTES
+  );
   const canRetryExtraction = canRetryServerExtraction || canRetryRemoteServerExtraction;
   const extractionNeedsRecovery = extractionFailed || remoteExtractionPending;
   const extractionRecoveryReason = getExtractionRecoveryReason({ kind, extractionNeedsRecovery, hasPages: pages.length > 0, syncState: localResource?.syncState, size: localVersion?.size ?? remote.data?.version.size, hasLocalResource: Boolean(localResource), hasLocalExtraction: Boolean(localExtraction), hasMultipartSession: Boolean(multipartSession), canRetry: canRetryExtraction });
