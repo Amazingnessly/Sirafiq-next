@@ -312,6 +312,7 @@ async function ensureSubjectSynced(
         0,
         'SUBJECT_SYNC_BACKOFF',
         true,
+        { nextAttemptAt: work.nextAttemptAt },
       );
     }
   }
@@ -478,6 +479,16 @@ async function applyServerExtractionResult(resourceId: string, versionId: string
 
 async function markOutboxFailure(item: OutboxRecord, error: unknown): Promise<void> {
   const message = error instanceof Error ? error.message : 'Erreur de synchronisation inconnue.';
+
+  if (error instanceof ApiRequestError && error.code === 'SUBJECT_SYNC_BACKOFF') {
+    const subjectRetryAt = readRetryDeadline(error.details);
+    if (subjectRetryAt !== null) {
+      await db.outbox.update(item.id, { lastError: message, nextAttemptAt: subjectRetryAt });
+      scheduleRetry(Math.max(0, subjectRetryAt - Date.now()));
+      return;
+    }
+  }
+
   const attempts = item.attempts + 1;
   const retryable = !(error instanceof ApiRequestError) || error.retryable;
   const nextDelay = Math.min(5 * 60_000, 2 ** Math.min(attempts, 6) * 1_000);
@@ -496,6 +507,12 @@ async function markOutboxFailure(item: OutboxRecord, error: unknown): Promise<vo
       });
     }
   }
+}
+
+function readRetryDeadline(details: unknown): number | null {
+  if (!details || typeof details !== 'object') return null;
+  const candidate = (details as { nextAttemptAt?: unknown }).nextAttemptAt;
+  return typeof candidate === 'number' && Number.isFinite(candidate) ? candidate : null;
 }
 
 function scheduleRetry(delay: number): void {
