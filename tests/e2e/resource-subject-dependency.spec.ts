@@ -551,3 +551,194 @@ test('une reprise manuelle de matière libère immédiatement ses supports diff�
   });
 });
 
+test('la file standard et un multipart partagent une seule synchronisation de matière', async ({ page }) => {
+  const subjectId = 'e2e-coalesced-subject';
+  const resourceId = 'e2e-coalesced-multipart-resource';
+  const versionId = 'e2e-coalesced-multipart-version';
+  const fileSize = 1024;
+  const fileByte = 3;
+  const { createHash } = await import('node:crypto');
+  const sha256 = createHash('sha256').update(Buffer.alloc(fileSize, fileByte)).digest('hex');
+  let subjectAttempts = 0;
+  let releaseFirstSubject!: () => void;
+  const secondSubjectAttempt = new Promise<void>((resolve) => {
+    releaseFirstSubject = resolve;
+  });
+
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (request.method() === 'GET' && url.pathname === '/api/bootstrap') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ subjects: [], resources: [] }) });
+      return;
+    }
+
+    if (request.method() === 'POST' && url.pathname === '/api/subjects/upsert') {
+      subjectAttempts += 1;
+      if (subjectAttempts === 1) {
+        await Promise.race([
+          secondSubjectAttempt,
+          new Promise<void>((resolve) => setTimeout(resolve, 400)),
+        ]);
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+        return;
+      }
+
+      releaseFirstSubject();
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: {
+            code: 'DUPLICATE_SUBJECT_RACE_E2E',
+            message: 'La requête concurrente ne doit jamais exister.',
+            retryable: true,
+          },
+        }),
+      });
+      return;
+    }
+
+    if (request.method() === 'POST' && url.pathname === '/api/resources/register') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, uploadMode: 'multipart' }) });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname === `/api/resource-versions/${versionId}/multipart/create`) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ uploadId: 'coalesced-upload', partSize: fileSize, parts: [] }),
+      });
+      return;
+    }
+    if (request.method() === 'PUT' && url.pathname === `/api/resource-versions/${versionId}/multipart/part`) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ partNumber: 1, etag: 'coalesced-etag' }),
+      });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname === `/api/resource-versions/${versionId}/multipart/complete`) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, size: fileSize, etag: 'final-etag' }) });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname === `/api/resource-versions/${versionId}/extraction-failure`) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+      return;
+    }
+
+    await route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Route E2E absente.', retryable: false } }),
+    });
+  });
+
+  await page.goto('/bibliotheque');
+  await page.evaluate(async ({ subjectId: sid, resourceId: rid, versionId: vid, hash, size }) => {
+    const { db } = await import('/src/data/db.ts');
+    const now = new Date().toISOString();
+    await db.transaction('rw', db.subjects, db.resources, db.resourceVersions, db.extractions, db.multipartUploads, db.outbox, async () => {
+      await db.subjects.put({
+        id: sid,
+        name: 'Matière concurrence',
+        parentId: null,
+        createdAt: now,
+        updatedAt: now,
+        syncState: 'pending',
+        syncError: null,
+      });
+      await db.resources.put({
+        id: rid,
+        subjectId: sid,
+        title: 'Multipart concurrence',
+        kind: 'pdf',
+        currentVersionId: vid,
+        status: 'failed',
+        extractionError: 'Extraction différée.',
+        createdAt: now,
+        updatedAt: now,
+        syncState: 'pending',
+        syncError: null,
+      });
+      await db.resourceVersions.put({
+        id: vid,
+        resourceId: rid,
+        sha256: hash,
+        fileName: 'concurrence.pdf',
+        mimeType: 'application/pdf',
+        size,
+        bytes: null,
+        createdAt: now,
+        syncState: 'pending',
+        syncError: null,
+      });
+      await db.extractions.put({
+        versionId: vid,
+        status: 'failed',
+        pages: [],
+        charCount: 0,
+        errorCode: 'LARGE_FILE_EXTRACTION_DEFERRED',
+        errorMessage: 'Extraction différée.',
+        createdAt: now,
+      });
+      await db.multipartUploads.put({
+        versionId: vid,
+        resourceId: rid,
+        fileName: 'concurrence.pdf',
+        size,
+        lastModified: 0,
+        sha256: hash,
+        uploadId: null,
+        partSize: size,
+        parts: [],
+        status: 'pending',
+        error: null,
+        updatedAt: now,
+      });
+      await db.outbox.put({
+        id: 'e2e-coalesced-subject-work',
+        type: 'subject.upsert',
+        entityId: sid,
+        attempts: 0,
+        nextAttemptAt: Date.now(),
+        lastError: null,
+        createdAt: now,
+      });
+    });
+
+    const { requestSync } = await import('/src/lib/sync.ts');
+    void requestSync().then(() => requestSync());
+  }, { subjectId, resourceId, versionId, hash: sha256, size: fileSize });
+
+  await expect.poll(() => subjectAttempts).toBe(1);
+
+  await page.evaluate(async ({ rid, size, byte }) => {
+    const { uploadMultipartResourceWithRecovery } = await import('/src/lib/multipartRecovery.ts');
+    const bytes = new Uint8Array(size);
+    bytes.fill(byte);
+    const file = new File([bytes], 'concurrence.pdf', { type: 'application/pdf' });
+    void uploadMultipartResourceWithRecovery(rid, file).catch(() => undefined);
+  }, { rid: resourceId, size: fileSize, byte: fileByte });
+
+  await expect.poll(async () => page.evaluate(async (vid) => {
+    const { db } = await import('/src/data/db.ts');
+    return (await db.multipartUploads.get(vid))?.status;
+  }, versionId)).toBe('uploading');
+
+  await expect.poll(async () => page.evaluate(async (rid) => {
+    const { db } = await import('/src/data/db.ts');
+    return (await db.resources.get(rid))?.syncState;
+  }, resourceId), { timeout: 10_000 }).toBe('synced');
+
+  expect(subjectAttempts).toBe(1);
+  const subject = await page.evaluate(async (sid) => {
+    const { db } = await import('/src/data/db.ts');
+    return db.subjects.get(sid);
+  }, subjectId);
+  expect(subject?.syncState).toBe('synced');
+  expect(subject?.syncError).toBeNull();
+});
+
