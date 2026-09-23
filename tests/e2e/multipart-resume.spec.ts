@@ -243,7 +243,7 @@ test('un échec réseau avant le démarrage rend le multipart explicitement repr
     await db.resourceVersions.add({
       id: vid,
       resourceId: rid,
-      sha256: 'e2e-pre-upload-network-hash',
+      sha256: '5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef',
       fileName: 'reseau.pdf',
       mimeType: 'application/pdf',
       size: 1024,
@@ -267,7 +267,7 @@ test('un échec réseau avant le démarrage rend le multipart explicitement repr
       fileName: 'reseau.pdf',
       size: 1024,
       lastModified: 0,
-      sha256: 'e2e-pre-upload-network-hash',
+      sha256: '5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef',
       uploadId: null,
       partSize: 8 * 1024 * 1024,
       parts: [],
