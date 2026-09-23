@@ -64,7 +64,7 @@ test('un texte récupéré depuis D1 reste lisible après un reload hors ligne',
     return {
       resourceState: resource?.syncState,
       versionState: version?.syncState,
-      bytes: version?.bytes ?? 'missing',
+      bytes: version ? version.bytes : 'missing',
       extractionStatus: extraction?.status,
       extractedText: extraction?.pages.map((entry) => entry.text).join('') ?? null,
     };
