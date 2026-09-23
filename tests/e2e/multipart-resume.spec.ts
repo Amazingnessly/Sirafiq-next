@@ -199,7 +199,7 @@ test('un échec réseau avant le démarrage rend le multipart explicitement repr
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ subjects: [], resources: [] }) });
       return;
     }
-    if (request.method() === 'GET' && url.pathname === `/api/resources/${resourceId}`) {
+    if (request.method() === 'POST' && url.pathname === '/api/resources/register') {
       await route.fulfill({
         status: 503,
         contentType: 'application/json',
