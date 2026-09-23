@@ -12,6 +12,7 @@ type PdfRenderTask = { promise: Promise<void>; cancel: () => void };
 type PdfPage = {
   getViewport: (options: { scale: number }) => PdfViewport;
   render: (options: { canvasContext: CanvasRenderingContext2D; viewport: PdfViewport; transform?: [number, number, number, number, number, number]; canvas: HTMLCanvasElement }) => PdfRenderTask;
+  cleanup: () => boolean;
 };
 type PdfDocument = { numPages: number; getPage: (pageNumber: number) => Promise<PdfPage>; destroy: () => Promise<void> };
 type PdfLoadingTask = { promise: Promise<PdfDocument>; destroy: () => Promise<void> };
@@ -74,14 +75,18 @@ export function PdfViewer({ src, title, storageId }: PdfViewerProps) {
     if (!currentDocument || !currentCanvas || !pageCount || !stageWidth) return;
     let cancelled = false; setRenderingPage(true); setError(null);
     async function renderPage(pdfDocument: PdfDocument, canvasElement: HTMLCanvasElement) {
+      let page: PdfPage | null = null;
       try {
-        renderTaskRef.current?.cancel(); const page = await pdfDocument.getPage(pageNumber); if (cancelled) return;
+        renderTaskRef.current?.cancel(); page = await pdfDocument.getPage(pageNumber); if (cancelled) return;
         const baseViewport = page.getViewport({ scale: 1 }); const availableWidth = Math.max(240, stageWidth - 32); const cssScale = Math.min(2, availableWidth / baseViewport.width); const viewport = page.getViewport({ scale: cssScale }); const outputScale = Math.min(window.devicePixelRatio || 1, 1.5);
         const context = canvasElement.getContext('2d', { alpha: false }); if (!context) throw new Error('Le moteur de dessin du navigateur est indisponible.');
         canvasElement.width = Math.max(1, Math.floor(viewport.width * outputScale)); canvasElement.height = Math.max(1, Math.floor(viewport.height * outputScale)); canvasElement.style.width = `${Math.floor(viewport.width)}px`; canvasElement.style.height = `${Math.floor(viewport.height)}px`;
         const transform = outputScale === 1 ? undefined : [outputScale, 0, 0, outputScale, 0, 0] as [number, number, number, number, number, number]; const renderTask = page.render({ canvasContext: context, viewport, transform, canvas: canvasElement }); renderTaskRef.current = renderTask; await renderTask.promise;
       } catch (cause) { if (!cancelled && !(cause instanceof Error && cause.name === 'RenderingCancelledException')) setError(cause instanceof Error ? cause.message : 'Cette page n’a pas pu être affichée.'); }
-      finally { if (!cancelled) setRenderingPage(false); }
+      finally {
+        page?.cleanup();
+        if (!cancelled) setRenderingPage(false);
+      }
     }
     void renderPage(currentDocument, currentCanvas); return () => { cancelled = true; renderTaskRef.current?.cancel(); renderTaskRef.current = null; };
   }, [pageCount, pageNumber, stageWidth]);
