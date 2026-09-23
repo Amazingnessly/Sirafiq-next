@@ -410,17 +410,18 @@ async function getBlob(versionId: string, request: Request, env: Env): Promise<R
 
 async function extractOnServer(versionId: string, env: WorkerEnv): Promise<Response> {
   const version = await env.DB.prepare(`
-    SELECT r2_key, mime_type, file_name, COALESCE(size_bytes, size) AS size
-    FROM resource_versions WHERE id = ?
-  `).bind(versionId).first<{ r2_key: string; mime_type: string; file_name: string; size: number }>();
+    SELECT v.r2_key, v.mime_type, v.file_name, COALESCE(v.size_bytes, v.size) AS size, r.kind
+    FROM resource_versions v
+    JOIN resources r ON r.id = v.resource_id
+    WHERE v.id = ?
+  `).bind(versionId).first<{ r2_key: string; mime_type: string; file_name: string; size: number; kind: string }>();
   if (!version) return errorResponse(404, 'VERSION_NOT_FOUND', 'La version du support est introuvable.', false);
 
-  const fileName = version.file_name.toLowerCase();
-  const isPdf = version.mime_type === 'application/pdf' || fileName.endsWith('.pdf');
-  const isText = version.mime_type.startsWith('text/') || fileName.endsWith('.txt') || fileName.endsWith('.md');
-  if (!isPdf && !isText) {
+  if (version.kind !== 'pdf' && version.kind !== 'text') {
     return errorResponse(400, 'UNSUPPORTED_SERVER_EXTRACTION', 'Ce format ne peut pas être extrait par le serveur dans cette version.', false);
   }
+  const isPdf = version.kind === 'pdf';
+  const isText = version.kind === 'text';
 
   const maxBytes = isPdf ? SERVER_PDF_EXTRACTION_MAX_BYTES : SERVER_TEXT_EXTRACTION_MAX_BYTES;
   if (version.size > maxBytes) {
