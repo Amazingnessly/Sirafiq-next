@@ -23,6 +23,7 @@ export function ImportPanel({ subjects, returnQuery = '' }: { subjects: SubjectR
   const [error, setError] = useState<string | null>(null);
   const [duplicateId, setDuplicateId] = useState<string | null>(null);
   const [importedId, setImportedId] = useState<string | null>(null);
+  const [importedMultipart, setImportedMultipart] = useState(false);
   const [progress, setProgress] = useState<TransferProgress | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const submitLockRef = useRef(false);
@@ -51,6 +52,7 @@ export function ImportPanel({ subjects, returnQuery = '' }: { subjects: SubjectR
     setError(null);
     setDuplicateId(null);
     setImportedId(null);
+    setImportedMultipart(false);
     setProgress(null);
   }
 
@@ -82,8 +84,11 @@ export function ImportPanel({ subjects, returnQuery = '' }: { subjects: SubjectR
       if (mode === 'file') {
         if (!file) throw new Error('Choisissez un fichier PDF, TXT ou Markdown.');
         if (file.size > MAX_RESOURCE_FILE_BYTES) throw new Error('Ce fichier dépasse la taille maximale acceptée par le stockage R2.');
+        const multipart = file.size > MULTIPART_UPLOAD_THRESHOLD_BYTES;
         const imported = await importFile(effectiveSubjectId, file, title, setProgress);
         setImportedId(imported.id);
+        setImportedMultipart(multipart);
+        setProgress(null);
         setFile(null);
         setTitle('');
         if (inputRef.current) inputRef.current.value = '';
@@ -173,7 +178,9 @@ export function ImportPanel({ subjects, returnQuery = '' }: { subjects: SubjectR
       {importedId && (
         <div className="success-box" role="status" aria-live="polite">
           <strong>Support importé</strong>
-          <span>Il est maintenant disponible dans votre bibliothèque.</span>
+          <span>{importedMultipart
+            ? 'Le support est enregistré dans la bibliothèque. Son envoi R2 continue sans bloquer cet écran ; s’il est interrompu, vous pourrez le reprendre en resélectionnant le même fichier.'
+            : 'Il est maintenant disponible dans votre bibliothèque.'}</span>
           <Link to={resourceHref(importedId)}>Ouvrir le support</Link>
         </div>
       )}

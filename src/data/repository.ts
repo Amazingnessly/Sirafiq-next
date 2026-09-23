@@ -27,6 +27,23 @@ export class DuplicateSupportError extends Error {
   }
 }
 
+const activeMultipartImports = new Map<string, Promise<void>>();
+
+function startMultipartImport(resourceId: string, file: File): void {
+  if (activeMultipartImports.has(resourceId)) return;
+  const transfer = uploadMultipartResourceWithRecovery(
+    resourceId,
+    file,
+    undefined,
+    { identityAlreadyVerified: true },
+  )
+    .catch(() => undefined)
+    .finally(() => {
+      activeMultipartImports.delete(resourceId);
+    });
+  activeMultipartImports.set(resourceId, transfer);
+}
+
 export async function createSubject(name: string, parentId: string | null = null): Promise<SubjectRecord> {
   const cleanName = name.trim();
   if (!cleanName) throw new Error('Le nom de la matière est obligatoire.');
@@ -63,8 +80,8 @@ export async function importFile(
     if (!pendingMultipart) throw new DuplicateSupportError(existingVersion.resourceId);
     const existingResource = await db.resources.get(existingVersion.resourceId);
     if (!existingResource) throw new Error('Le support à reprendre est incomplet dans le stockage local.');
-    await uploadMultipartResourceWithRecovery(existingResource.id, file, onProgress);
-    return (await db.resources.get(existingResource.id)) ?? existingResource;
+    startMultipartImport(existingResource.id, file);
+    return existingResource;
   }
 
   const now = isoNow();
@@ -102,8 +119,12 @@ export async function importFile(
       extraction, resourceId, versionId, now, enqueueSync: false, multipart,
     });
 
-    await uploadMultipartResourceWithRecovery(resource.id, file, onProgress);
-    return (await db.resources.get(resource.id)) ?? resource;
+    // The support is now durably represented in IndexedDB. Network transfer
+    // must not decide whether the import itself succeeds: launch multipart in
+    // the current app session, persist any later failure, and let the user
+    // navigate immediately.
+    startMultipartImport(resource.id, file);
+    return resource;
   }
 
   let extraction: ExtractionRecord;

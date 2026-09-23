@@ -1,9 +1,14 @@
 import { expect, test } from '@playwright/test';
 import { LOCAL_PDF_EXTRACTION_MAX_BYTES } from '../../src/shared/importPolicy';
 
-test('un fichier au-dessus de 25 MiB n’est jamais relu intégralement pour IndexedDB', async ({ page }) => {
+test('un fichier au-dessus de 25 MiB est persisté sans attendre le réseau ni être relu intégralement', async ({ page }) => {
   const subjectId = '25252525-2525-4252-8252-252525252525';
   const networkMessage = 'Arrêt réseau E2E après persistance locale';
+  let registrationStarted = false;
+  let releaseRegistration!: () => void;
+  const registrationGate = new Promise<void>((resolve) => {
+    releaseRegistration = resolve;
+  });
 
   await page.route('**/api/bootstrap', async (route) => {
     await route.fulfill({
@@ -12,7 +17,9 @@ test('un fichier au-dessus de 25 MiB n’est jamais relu intégralement pour Ind
       body: JSON.stringify({ subjects: [], resources: [] }),
     });
   });
-  await page.route('**/api/resources/*', async (route) => {
+  await page.route('**/api/resources/register', async (route) => {
+    registrationStarted = true;
+    await registrationGate;
     await route.fulfill({
       status: 503,
       contentType: 'application/json',
@@ -57,14 +64,8 @@ test('un fichier au-dessus de 25 MiB n’est jamais relu intégralement pour Ind
       },
     } as unknown as File;
 
-    let errorMessage: string | null = null;
-    try {
-      await importFile(sid, fakeLargeFile, 'PDF mémoire iPad');
-    } catch (error) {
-      errorMessage = error instanceof Error ? error.message : String(error);
-    }
-
-    const resource = (await db.resources.toArray()).find((item) => item.title === 'PDF mémoire iPad');
+    const imported = await importFile(sid, fakeLargeFile, 'PDF mémoire iPad');
+    const resource = await db.resources.get(imported.id);
     if (!resource) throw new Error('Le support volumineux n’a pas été persisté');
     const [version, session] = await Promise.all([
       db.resourceVersions.get(resource.currentVersionId),
@@ -73,12 +74,10 @@ test('un fichier au-dessus de 25 MiB n’est jamais relu intégralement pour Ind
     if (!version || !session) throw new Error('Le parcours multipart n’a pas été créé');
 
     return {
-      errorMessage,
+      resourceId: resource.id,
       expectedMessage,
       bytesAreNull: version.bytes === null,
       storedSize: version.size,
-      sessionStatus: session.status,
-      resourceState: resource.syncState,
     };
   }, {
     subjectId,
@@ -86,9 +85,37 @@ test('un fichier au-dessus de 25 MiB n’est jamais relu intégralement pour Ind
     expectedMessage: networkMessage,
   });
 
-  expect(result.errorMessage).toBe(result.expectedMessage);
   expect(result.bytesAreNull).toBe(true);
   expect(result.storedSize).toBe(LOCAL_PDF_EXTRACTION_MAX_BYTES + 1);
-  expect(result.sessionStatus).toBe('error');
-  expect(result.resourceState).toBe('error');
+
+  try {
+    await expect.poll(() => registrationStarted).toBe(true);
+  } finally {
+    releaseRegistration();
+  }
+
+  await expect.poll(async () => page.evaluate(async ({ resourceId, expectedMessage }) => {
+    const { db } = await import('/src/data/db.ts');
+    const resource = await db.resources.get(resourceId);
+    if (!resource) return null;
+    const [version, session] = await Promise.all([
+      db.resourceVersions.get(resource.currentVersionId),
+      db.multipartUploads.get(resource.currentVersionId),
+    ]);
+    return {
+      resourceState: resource.syncState,
+      resourceError: resource.syncError,
+      versionState: version?.syncState,
+      sessionStatus: session?.status,
+      sessionError: session?.error,
+      expectedMessage,
+    };
+  }, { resourceId: result.resourceId, expectedMessage: result.expectedMessage })).toEqual({
+    resourceState: 'error',
+    resourceError: result.expectedMessage,
+    versionState: 'error',
+    sessionStatus: 'error',
+    sessionError: result.expectedMessage,
+    expectedMessage: result.expectedMessage,
+  });
 });

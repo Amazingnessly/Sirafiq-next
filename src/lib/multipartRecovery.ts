@@ -62,6 +62,7 @@ export async function uploadMultipartResourceWithRecovery(
   resourceId: string,
   file: File,
   onProgress?: (progress: TransferProgress) => void,
+  options: { identityAlreadyVerified?: boolean } = {},
 ): Promise<void> {
   const resource = await db.resources.get(resourceId);
   if (!resource) throw new Error('Le support local est introuvable.');
@@ -84,15 +85,16 @@ export async function uploadMultipartResourceWithRecovery(
     }
   }
 
-  try {
-    await verifyMultipartFileIdentity(file, version, session, onProgress);
-  } catch (error) {
-    // A first upload must never remain visually "in progress" if Safari loses
-    // access to the File or hashing fails before the network phase begins.
-    // Existing recovery sessions already carry the durable error that led the
-    // user here, so preserve it when a reselected file is simply incorrect.
-    if (session.status !== 'error') await markMultipartRecoveryFailure(resourceId, error);
-    throw error;
+  if (!options.identityAlreadyVerified) {
+    try {
+      await verifyMultipartFileIdentity(file, version, session, onProgress);
+    } catch (error) {
+      // A resumed upload must never trust file metadata alone. Brand-new
+      // imports may skip this second hash only because importFile just computed
+      // the authoritative SHA-256 for this exact File before persisting it.
+      if (session.status !== 'error') await markMultipartRecoveryFailure(resourceId, error);
+      throw error;
+    }
   }
 
   let lastPhase: TransferProgress['phase'] | null = null;
