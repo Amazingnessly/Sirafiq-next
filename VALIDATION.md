@@ -14,12 +14,12 @@ Statut cible de cette branche : **implémentée et couverte par CI, pas encore v
 | Erreur d’extraction explicite | ✅ | aucun faux contenu produit |
 | TypeScript + tests unitaires + build | ✅ CI GitHub | contrôle obligatoire avant fusion des PR ciblées |
 | E2E iPad-sized | ✅ CI GitHub | Playwright WebKit au format iPad paysage |
-| Déploiement Cloudflare production | — | volontairement non activé avant validation du socle |
+| Déploiement Cloudflare production | ⚠️ | intégration Workers Builds active, mais le déploiement production échoue encore ; ne pas confondre avec la CI GitHub verte |
 | Test Apple Pencil | — | hors périmètre V0.1 |
 | Validation sur iPad réel | ⏳ | import, ouverture, rechargement, reprise et multipart/R2 réel à confirmer |
 
 ## Règle de promotion
 
-La V0.1 ne doit pas être marquée « validée » tant qu'un essai manuel sur l'iPad cible n'a pas confirmé le parcours réel d'import, ouverture, rechargement et reprise, notamment avec Cloudflare D1/R2 réel et un fichier volumineux pour le multipart.
+La V0.1 ne doit pas être marquée « validée » tant qu'un essai manuel sur l'iPad cible n'a pas confirmé le parcours réel d'import, ouverture, rechargement et reprise, notamment avec Cloudflare D1/R2 réel et un fichier volumineux pour le multipart. L’intégration Git Cloudflare tente actuellement les déploiements de production mais ceux-ci échouent encore ; ce signal doit être résolu et un déploiement réel confirmé avant toute validation du socle.
 
 La CI reste une condition nécessaire à chaque fusion, mais elle ne remplace pas la validation sur appareil réel.
