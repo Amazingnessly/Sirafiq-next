@@ -346,6 +346,13 @@ async function syncResource(item: OutboxRecord): Promise<void> {
   if (!resource) return;
   const multipart = await db.multipartUploads.get(resource.currentVersionId);
   if (multipart) return;
+
+  // D1 rejects a resource whose subject is not present yet. Keep the ordinary
+  // sync path aligned with multipart: satisfy that dependency before attempting
+  // resource registration instead of manufacturing a secondary SUBJECT_MISSING
+  // failure on an otherwise valid local support.
+  await ensureSubjectSynced(resource.subjectId);
+
   const version = await db.resourceVersions.get(resource.currentVersionId);
   const extraction = await db.extractions.get(resource.currentVersionId);
   if (!version || !extraction || !version.bytes) {
