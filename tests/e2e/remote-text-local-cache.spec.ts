@@ -77,10 +77,10 @@ test('un texte récupéré depuis D1 reste lisible après un reload hors ligne',
   await page.goto(`/bibliotheque/${RESOURCE_ID}`);
   await expect(page.getByText(text)).toBeVisible();
 
-  await expect.poll(async () => page.evaluate(async ({ resourceId, versionId }) => {
+  await expect.poll(async () => page.evaluate(async ({ subjectId, resourceId, versionId }) => {
     const { db } = await import('/src/data/db.ts');
     const [subject, resource, version, extraction] = await Promise.all([
-      db.subjects.get(SUBJECT_ID),
+      db.subjects.get(subjectId),
       db.resources.get(resourceId),
       db.resourceVersions.get(versionId),
       db.extractions.get(versionId),
@@ -94,7 +94,7 @@ test('un texte récupéré depuis D1 reste lisible après un reload hors ligne',
       extractionStatus: extraction?.status,
       extractedText: extraction?.pages.map((entry) => entry.text).join('') ?? null,
     };
-  }, { resourceId: RESOURCE_ID, versionId: VERSION_ID })).toEqual({
+  }, { subjectId: SUBJECT_ID, resourceId: RESOURCE_ID, versionId: VERSION_ID })).toEqual({
     subjectName: 'Matière D1 réhydratée',
     subjectState: 'synced',
     resourceState: 'synced',
