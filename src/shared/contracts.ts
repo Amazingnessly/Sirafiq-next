@@ -35,6 +35,13 @@ export const ResourceRegisterSchema = z.object({
 });
 export type ResourceRegisterInput = z.infer<typeof ResourceRegisterSchema>;
 
+export const ResourceRegisterResultSchema = z.object({
+  ok: z.literal(true),
+  uploadMode: z.enum(['single', 'multipart']),
+  alreadyStored: z.boolean().optional().default(false),
+});
+export type ResourceRegisterResult = z.infer<typeof ResourceRegisterResultSchema>;
+
 export const MultipartCreateSchema = z.object({
   partSize: z.number().int().min(5 * 1024 * 1024).max(90 * 1024 * 1024),
   restart: z.boolean().optional().default(false),
