@@ -274,22 +274,82 @@ async function completeMultipart(versionId: string, request: Request, env: Env):
   }
 
   try {
+    // R2 completion and the following D1 update are not atomic. A previous
+    // request may therefore have finalized the object while D1 still reports
+    // "uploading". R2 is strongly consistent after complete(), so repair D1
+    // from the exact object identity before touching the old multipart id.
+    const recovered = await recoverCompletedMultipartObject(versionId, version, env);
+    if (recovered) {
+      return json({ ok: true, size: recovered.size, etag: recovered.httpEtag, recovered: true });
+    }
+
     const upload = env.FILES.resumeMultipartUpload(version.r2_key, version.multipart_upload_id);
     const object = await upload.complete(parts);
     if (object.size !== version.size) {
       await env.FILES.delete(version.r2_key);
       return errorResponse(400, 'UPLOAD_INTEGRITY_ERROR', 'Le fichier assemblé n’a pas la taille attendue et a été supprimé.', true);
     }
-    await env.DB.prepare(`
-      UPDATE resource_versions
-      SET status = ?, multipart_upload_id = NULL, multipart_part_size = NULL,
-          multipart_parts_json = NULL, updated_at = ?
-      WHERE id = ?
-    `).bind(version.extraction_status === 'ready' ? 'ready' : version.extraction_status === 'failed' ? 'failed' : 'stored', new Date().toISOString(), versionId).run();
+    await markMultipartComplete(versionId, version.extraction_status, env);
     return json({ ok: true, size: object.size, etag: object.httpEtag });
   } catch (error) {
+    // complete() can have committed in R2 even when the request later failed
+    // (for example while persisting the final status in D1). Check the object
+    // once more before telling the client to restart a large transfer.
+    try {
+      const recovered = await recoverCompletedMultipartObject(versionId, version, env);
+      if (recovered) {
+        return json({ ok: true, size: recovered.size, etag: recovered.httpEtag, recovered: true });
+      }
+    } catch (recoveryError) {
+      console.error(JSON.stringify({
+        level: 'error',
+        operation: 'multipart-finalization-recovery',
+        versionId,
+        message: recoveryError instanceof Error ? recoveryError.message : 'Unknown multipart recovery error',
+      }));
+    }
     return errorResponse(409, 'MULTIPART_COMPLETE_FAILED', error instanceof Error ? error.message : 'L’assemblage final du fichier a échoué.', true);
   }
+}
+
+export function matchesCompletedMultipartObject(
+  object: { size: number; customMetadata?: Record<string, string> } | null,
+  expectedSize: number,
+  expectedSha256: string,
+): boolean {
+  return Boolean(
+    object
+    && object.size === expectedSize
+    && object.customMetadata?.sha256 === expectedSha256,
+  );
+}
+
+async function recoverCompletedMultipartObject(
+  versionId: string,
+  version: VersionUploadRow,
+  env: Env,
+) {
+  const object = await env.FILES.head(version.r2_key);
+  if (!matchesCompletedMultipartObject(object, version.size, version.sha256)) return null;
+  await markMultipartComplete(versionId, version.extraction_status, env);
+  return object;
+}
+
+async function markMultipartComplete(
+  versionId: string,
+  extractionStatus: VersionUploadRow['extraction_status'],
+  env: Env,
+): Promise<void> {
+  await env.DB.prepare(`
+    UPDATE resource_versions
+    SET status = ?, multipart_upload_id = NULL, multipart_part_size = NULL,
+        multipart_parts_json = NULL, updated_at = ?
+    WHERE id = ?
+  `).bind(
+    extractionStatus === 'ready' ? 'ready' : extractionStatus === 'failed' ? 'failed' : 'stored',
+    new Date().toISOString(),
+    versionId,
+  ).run();
 }
 
 export type ByteRange = { offset: number; length: number };
