@@ -163,7 +163,32 @@ async function reconcileAlreadyStoredRemote(resourceId: string): Promise<boolean
   const sameObject = remote.version.id === version.id
     && remote.version.sha256 === version.sha256
     && remote.version.size === version.size;
-  if (!sameObject || remote.version.status === 'uploading') return false;
+  if (!sameObject) return false;
+
+  if (remote.version.status === 'uploading') {
+    const totalParts = session.partSize > 0 ? Math.ceil(version.size / session.partSize) : 0;
+    const hasAllConfirmedParts = Boolean(
+      session.uploadId
+      && totalParts > 0
+      && session.parts.length === totalParts
+      && session.parts.every((part, index) => part.partNumber === index + 1),
+    );
+    if (!hasAllConfirmedParts) return false;
+
+    // R2 and D1 are separate durability boundaries. If complete() reached R2
+    // but D1 still says "uploading", retry the same finalization once before
+    // discarding a valid large-file session and sending every byte again.
+    try {
+      await apiJson(
+        `/api/resource-versions/${encodeURIComponent(version.id)}/multipart/complete`,
+        { method: 'POST', body: JSON.stringify({ uploadId: session.uploadId }) },
+        120_000,
+      );
+    } catch (error) {
+      if (error instanceof ApiRequestError && FINALIZATION_RECOVERY_CODES.has(error.code)) return false;
+      throw error;
+    }
+  }
 
   if (remote.version.extractionStatus === 'ready' && remote.extraction) {
     const result: ServerExtractionResult = {
