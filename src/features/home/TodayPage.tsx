@@ -48,6 +48,7 @@ export function TodayPage() {
   const noLocalLibrary = localSubjects.length === 0 && localResources.length === 0;
   const checkingRemoteLibrary = noLocalLibrary && remoteBootstrap.isPending;
   const remoteLibraryUnavailable = noLocalLibrary && remoteBootstrap.isError;
+  const remoteLibraryPartiallyUnavailable = !noLocalLibrary && remoteBootstrap.isError;
   const hasOnlyRemoteUploading = localResources.length === 0
     && remoteFinalizedResources.length === 0
     && remoteUploadingResources.length > 0;
@@ -111,6 +112,15 @@ export function TodayPage() {
   return (
     <div className="page page--home">
       <header className="page-header home-header"><div><p className="eyebrow">Sirāfiq</p><h1>Que faut-il travailler aujourd’hui&nbsp;?</h1><p className="lede">Retrouvez vos supports et reprenez là où vous vous êtes arrêté. Les activités guidées apparaîtront ici lorsqu’elles seront réellement disponibles.</p></div></header>
+      {remoteLibraryPartiallyUnavailable ? (
+        <div className="error-box error-box--wide" role="status">
+          <div>
+            <strong>Bibliothèque synchronisée non vérifiée.</strong>
+            <span>La vérification distante a échoué. Les compteurs affichés peuvent être incomplets ; vos données locales restent disponibles.</span>
+          </div>
+          <button className="button button--secondary" type="button" onClick={() => void remoteBootstrap.refetch()}>Réessayer</button>
+        </div>
+      ) : null}
       <section className="foundation-card">
         <div className="foundation-card__glow" aria-hidden="true" />
         <div className="foundation-card__content"><p className="eyebrow">Ma bibliothèque</p><h2>{cardTitle}</h2><p>{cardDescription}</p><Link className="button button--primary" to={nextAction.to}>{nextAction.label}</Link></div>
