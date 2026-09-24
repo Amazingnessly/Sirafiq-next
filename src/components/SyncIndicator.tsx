@@ -78,8 +78,8 @@ export function SyncIndicator() {
     );
   }
 
-  if (multipartErrors > 0 && pending > blockedErrors) {
-    const queued = pending - blockedErrors;
+  if (multipartErrors > 0 && pending > 0) {
+    const queued = pending;
     return (
       <button className="sync-pill sync-pill--error" onClick={syncNow} disabled={running}>
         {running
@@ -107,8 +107,8 @@ export function SyncIndicator() {
     );
   }
 
-  if (blockedErrors > 0 && pending > blockedErrors) {
-    const queued = pending - blockedErrors;
+  if (blockedErrors > 0 && pending > 0) {
+    const queued = pending;
     return (
       <button className="sync-pill sync-pill--error" onClick={syncNow} disabled={running}>
         {running
