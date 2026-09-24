@@ -114,7 +114,7 @@ export async function uploadMultipartResourceWithRecovery(
     if (!canRecoverFinalization) throw error;
 
     // complete() may have succeeded in R2 before the response disappeared.
-    if (await reconcileAlreadyStoredRemote(resourceId)) return;
+    if (await reconcileAlreadyStoredRemote(resourceId, true)) return;
 
     // Otherwise the old upload can no longer be trusted (for example an
     // expired R2 multipart id). Create exactly one fresh session and retry.
@@ -144,7 +144,7 @@ async function markMultipartRecoveryFailure(resourceId: string, error: unknown):
   });
 }
 
-async function reconcileAlreadyStoredRemote(resourceId: string): Promise<boolean> {
+async function reconcileAlreadyStoredRemote(resourceId: string, retryUploadingFinalization = false): Promise<boolean> {
   const resource = await db.resources.get(resourceId);
   if (!resource) throw new Error('Le support local est introuvable.');
   const version = await db.resourceVersions.get(resource.currentVersionId);
@@ -166,6 +166,7 @@ async function reconcileAlreadyStoredRemote(resourceId: string): Promise<boolean
   if (!sameObject) return false;
 
   if (remote.version.status === 'uploading') {
+    if (!retryUploadingFinalization) return false;
     const totalParts = session.partSize > 0 ? Math.ceil(version.size / session.partSize) : 0;
     const hasAllConfirmedParts = Boolean(
       session.uploadId
