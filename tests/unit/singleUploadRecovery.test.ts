@@ -109,4 +109,94 @@ describe('single upload R2 recovery', () => {
     expect(storedUpdates).toBe(1);
   });
 
+
+  it('requires storage repair when a finalized duplicate has lost its R2 object', async () => {
+    const subjectId = '21212121-1111-4111-8111-111111111111';
+    const localResourceId = '22222222-1111-4111-8111-111111111111';
+    const localVersionId = '23232323-1111-4111-8111-111111111111';
+    const remoteResourceId = '24242424-1111-4111-8111-111111111111';
+    const remoteVersionId = '25252525-1111-4111-8111-111111111111';
+    const sha256 = 'cd'.repeat(32);
+    let batchCalls = 0;
+    let headCalls = 0;
+
+    const env = {
+      FILES: {
+        head: async () => {
+          headCalls += 1;
+          return null;
+        },
+      },
+      DB: {
+        prepare: (sql: string) => ({
+          bind: () => {
+            if (sql.includes('SELECT id FROM subjects')) {
+              return { first: async () => ({ id: subjectId }) };
+            }
+            if (sql.includes('FROM resource_versions') && sql.includes('WHERE sha256 = ?')) {
+              return {
+                first: async () => ({
+                  id: remoteVersionId,
+                  resource_id: remoteResourceId,
+                  extraction_status: 'ready',
+                  status: 'ready',
+                  upload_mode: 'single',
+                  r2_key: `resources/${remoteResourceId}/${remoteVersionId}`,
+                  size: 42,
+                  sha256,
+                }),
+              };
+            }
+            throw new Error(`Unexpected SQL: ${sql}`);
+          },
+        }),
+        batch: async () => {
+          batchCalls += 1;
+          return [];
+        },
+      },
+    };
+
+    const request = new Request('https://example.test/api/resources/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        resource: {
+          id: localResourceId,
+          subjectId,
+          title: 'Doublon à réparer',
+          kind: 'text',
+          currentVersionId: localVersionId,
+          createdAt: '2026-09-25T00:00:00.000Z',
+          updatedAt: '2026-09-25T00:00:00.000Z',
+        },
+        version: {
+          id: localVersionId,
+          resourceId: localResourceId,
+          sha256,
+          fileName: 'repair.txt',
+          mimeType: 'text/plain',
+          size: 42,
+          createdAt: '2026-09-25T00:00:00.000Z',
+        },
+      }),
+    });
+
+    const response = await registerResource(request, env as never);
+    const payload = await response.json() as {
+      error: {
+        code: string;
+        retryable: boolean;
+        details?: { existingResourceId?: string };
+      };
+    };
+
+    expect(response.status).toBe(409);
+    expect(payload.error.code).toBe('DUPLICATE_SUPPORT_STORAGE_MISSING');
+    expect(payload.error.retryable).toBe(true);
+    expect(payload.error.details?.existingResourceId).toBe(remoteResourceId);
+    expect(headCalls).toBe(1);
+    expect(batchCalls).toBe(0);
+  });
+
 });
