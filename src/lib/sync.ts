@@ -120,6 +120,12 @@ export async function uploadMultipartResource(
         method: 'POST',
         body: JSON.stringify(payload),
       });
+    } else if (registration.remote?.version.extractionStatus === 'ready' && registration.remote.extraction) {
+      await applyServerExtractionResult(resource.id, version.id, {
+        status: 'ready',
+        pages: registration.remote.extraction.pages,
+        charCount: registration.remote.extraction.charCount,
+      });
     } else {
       await apiJson(`/api/resource-versions/${encodeURIComponent(registration.versionId)}/extraction-failure`, {
         method: 'POST',
@@ -501,13 +507,17 @@ async function registerOrResolveRemoteVersion(
       await ensureSubjectSynced(payload.resource.subjectId, { force: true });
       return registerOrResolveRemoteVersion(payload, true);
     }
-    if (!(error instanceof ApiRequestError) || error.code !== 'DUPLICATE_SUPPORT') throw error;
+    if (!(error instanceof ApiRequestError)
+      || (error.code !== 'DUPLICATE_SUPPORT' && error.code !== 'DUPLICATE_SUPPORT_STORAGE_MISSING')) {
+      throw error;
+    }
     const existingResourceId = readExistingResourceId(error.details);
     if (!existingResourceId) {
       throw new ApiRequestError('Le serveur a signalé un doublon sans fournir le support existant.', 409, 'DUPLICATE_RECONCILIATION_FAILED', true, error.details);
     }
     const remote = await apiJson<ResourceDetailPayload>(`/api/resources/${encodeURIComponent(existingResourceId)}`);
-    const finalized = remote.version.status !== 'uploading';
+    const storageRepairRequired = error.code === 'DUPLICATE_SUPPORT_STORAGE_MISSING';
+    const finalized = !storageRepairRequired && remote.version.status !== 'uploading';
     return {
       resourceId: remote.resource.id,
       versionId: remote.version.id,
