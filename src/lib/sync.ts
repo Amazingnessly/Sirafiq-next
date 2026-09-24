@@ -503,7 +503,14 @@ async function registerOrResolveRemoteVersion(
       throw new ApiRequestError('Le serveur a signalé un doublon sans fournir le support existant.', 409, 'DUPLICATE_RECONCILIATION_FAILED', true, error.details);
     }
     const remote = await apiJson<ResourceDetailPayload>(`/api/resources/${encodeURIComponent(existingResourceId)}`);
-    return { resourceId: remote.resource.id, versionId: remote.version.id, reusedExisting: true, alreadyStored: true, remote };
+    const finalized = remote.version.status !== 'uploading';
+    return {
+      resourceId: remote.resource.id,
+      versionId: remote.version.id,
+      reusedExisting: finalized,
+      alreadyStored: finalized,
+      remote,
+    };
   }
 }
 
