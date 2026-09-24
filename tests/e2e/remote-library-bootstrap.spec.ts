@@ -104,3 +104,39 @@ test('une panne du bootstrap distant ne devient jamais un faux état vide', asyn
   await expect(page.getByText('La bibliothèque est vide')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Réessayer', exact: true })).toBeVisible();
 });
+
+
+test('un filtre attend le bootstrap distant avant de conclure qu’il ne correspond à rien', async ({ page }) => {
+  let releaseBootstrap!: () => void;
+  const bootstrapGate = new Promise<void>((resolve) => {
+    releaseBootstrap = resolve;
+  });
+
+  await page.route('**/api/bootstrap', async (route) => {
+    await bootstrapGate;
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: {
+          code: 'FILTERED_BOOTSTRAP_E2E_DOWN',
+          message: 'D1 temporairement indisponible pendant une recherche.',
+          retryable: true,
+        },
+      }),
+    });
+  });
+
+  await page.goto('/bibliotheque?q=support-distant');
+
+  try {
+    await expect(page.getByRole('heading', { name: 'Vérification des supports synchronisés…' })).toBeVisible();
+    await expect(page.getByText('Aucun élément correspondant')).toHaveCount(0);
+  } finally {
+    releaseBootstrap();
+  }
+
+  await expect(page.getByRole('heading', { name: 'Impossible de vérifier les supports synchronisés' })).toBeVisible();
+  await expect(page.getByText('Aucun élément correspondant')).toHaveCount(0);
+  await expect(page.getByText('La bibliothèque est vide')).toHaveCount(0);
+});
