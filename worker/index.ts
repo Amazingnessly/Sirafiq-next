@@ -11,6 +11,7 @@ import {
   type ExtractedPage,
   type MultipartCreateResult,
   type ResourceDetailPayload,
+  type ResourceRegisterResult,
   type ServerExtractionResult,
   type UploadedPart,
 } from '../src/shared/contracts';
@@ -101,9 +102,9 @@ async function registerResource(request: Request, env: Env): Promise<Response> {
   const subject = await env.DB.prepare('SELECT id FROM subjects WHERE id = ?').bind(resource.subjectId).first<{ id: string }>();
   if (!subject) return errorResponse(409, 'SUBJECT_MISSING', 'La matière n’existe pas encore sur le serveur. Réessayez la synchronisation.', true);
 
-  const duplicate = await env.DB.prepare('SELECT id, resource_id FROM resource_versions WHERE sha256 = ?')
+  const duplicate = await env.DB.prepare('SELECT id, resource_id, extraction_status FROM resource_versions WHERE sha256 = ?')
     .bind(version.sha256)
-    .first<{ id: string; resource_id: string }>();
+    .first<{ id: string; resource_id: string; extraction_status: VersionUploadRow['extraction_status'] }>();
   if (duplicate && duplicate.id !== version.id) {
     return errorResponse(409, 'DUPLICATE_SUPPORT', 'Ce fichier existe déjà dans la bibliothèque synchronisée.', false, {
       existingResourceId: duplicate.resource_id,
@@ -149,7 +150,22 @@ async function registerResource(request: Request, env: Env): Promise<Response> {
       version.createdAt,
     ),
   ]);
-  return json({ ok: true, uploadMode });
+
+  let alreadyStored = false;
+  if (uploadMode === 'single' && duplicate?.id === version.id) {
+    // A retry of the same version can arrive after R2 durably accepted the
+    // object but before D1 recorded "stored". R2 HEAD is strongly consistent;
+    // only trust the object when both size and the persisted SHA-256 checksum
+    // match the version identity exactly.
+    const stored = await env.FILES.head(r2Key);
+    if (matchesStoredSingleObject(stored, version.size, version.sha256)) {
+      await markVersionStored(version.id, duplicate.extraction_status, env);
+      alreadyStored = true;
+    }
+  }
+
+  const result: ResourceRegisterResult = { ok: true, uploadMode, alreadyStored };
+  return json(result);
 }
 
 async function putBlob(versionId: string, request: Request, env: Env): Promise<Response> {
@@ -329,6 +345,24 @@ async function completeMultipart(versionId: string, request: Request, env: Env):
     }
     return errorResponse(409, 'MULTIPART_COMPLETE_FAILED', error instanceof Error ? error.message : 'L’assemblage final du fichier a échoué.', true);
   }
+}
+
+export function matchesStoredSingleObject(
+  object: { size: number; checksums?: { sha256?: ArrayBuffer } } | null,
+  expectedSize: number,
+  expectedSha256: string,
+): boolean {
+  const checksum = object?.checksums?.sha256;
+  return Boolean(
+    object
+    && object.size === expectedSize
+    && checksum
+    && arrayBufferToHex(checksum) === expectedSha256,
+  );
+}
+
+function arrayBufferToHex(value: ArrayBuffer): string {
+  return Array.from(new Uint8Array(value), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 export function matchesCompletedMultipartObject(
