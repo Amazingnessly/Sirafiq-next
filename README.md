@@ -52,9 +52,9 @@ La CI GitHub exécute les contrôles de qualité et le scénario E2E WebKit au f
 
 ## Cloudflare
 
-Le dépôt est préparé pour Cloudflare Workers + Static Assets, D1 et R2. D1 et R2 portent des noms explicites dans la configuration, mais leurs identifiants de compte ne sont pas codés en dur : Wrangler peut les provisionner et les lier.
+Le dépôt est préparé pour Cloudflare Workers + Static Assets, D1 et R2. D1 et R2 portent des noms explicites dans la configuration, mais leurs identifiants de compte ne sont pas codés en dur : le pipeline résout le binding D1 avant le build/deploy.
 
-L’intégration Git Cloudflare Workers Builds est actuellement active et tente des déploiements de production sur les commits/PR. Ces déploiements échouent encore même lorsque la CI GitHub applicative est verte ; ils ne constituent donc pas une validation du socle. Le dépôt prépare la résolution D1 côté script, mais l’état réel du déploiement Cloudflare doit être confirmé séparément avant validation.
+L’intégration Git Cloudflare Workers Builds est active et le pipeline build/deploy produit désormais des versions Worker avec succès. Ce signal confirme la chaîne de déploiement, mais ne remplace pas la validation fonctionnelle réelle : D1/R2, import/rechargement, reprise multipart et comportement sur l’iPad cible restent à vérifier avec des supports réels avant de considérer la V0.1 validée.
 
 Avant tout usage avec des données personnelles réelles, l'application devra être protégée par une couche d'authentification/contrôle d'accès adaptée.
 
