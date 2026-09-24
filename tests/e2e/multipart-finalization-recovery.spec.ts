@@ -156,6 +156,115 @@ test('une réponse de finalisation perdue est réconciliée sans renvoyer le fic
   }, RESOURCE_ID)).toBe(0);
 });
 
+test('une finalisation R2 déjà durable répare D1 sans renvoyer le gros fichier', async ({ page }) => {
+  const fileBytes = Buffer.alloc(11 * MIB, 7);
+  const sha256 = createHash('sha256').update(fileBytes).digest('hex');
+  let completeCalls = 0;
+  let partUploads = 0;
+  let restartCreates = 0;
+
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (request.method() === 'GET' && url.pathname === '/api/bootstrap') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ subjects: [], resources: [] }) });
+      return;
+    }
+    if (request.method() === 'GET' && url.pathname === `/api/resources/${RESOURCE_ID}`) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          resource: { id: RESOURCE_ID, subjectId: SUBJECT_ID, title: 'PDF finalisation incertaine', kind: 'pdf', currentVersionId: VERSION_ID, createdAt: '2026-08-23T00:00:00.000Z', updatedAt: '2026-08-23T00:00:00.000Z' },
+          version: { id: VERSION_ID, fileName: 'finalisation.pdf', mimeType: 'application/pdf', size: fileBytes.length, sha256, status: 'uploading', extractionStatus: 'pending', extractionError: null },
+          extraction: null,
+        }),
+      });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname === '/api/resources/register') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, uploadMode: 'multipart' }) });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname === `/api/resource-versions/${VERSION_ID}/multipart/create`) {
+      const body = request.postDataJSON() as { restart?: boolean };
+      if (body.restart) restartCreates += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          uploadId: body.restart ? 'upload-unexpected-restart' : 'upload-old',
+          partSize: 5 * MIB,
+          parts: body.restart ? [] : [
+            { partNumber: 1, etag: 'etag-1' },
+            { partNumber: 2, etag: 'etag-2' },
+            { partNumber: 3, etag: 'etag-3' },
+          ],
+        }),
+      });
+      return;
+    }
+    if (request.method() === 'PUT' && url.pathname === `/api/resource-versions/${VERSION_ID}/multipart/part`) {
+      partUploads += 1;
+      const partNumber = Number(url.searchParams.get('partNumber'));
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ partNumber, etag: `etag-${partNumber}` }) });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname === `/api/resource-versions/${VERSION_ID}/multipart/complete`) {
+      completeCalls += 1;
+      if (completeCalls === 1) {
+        await route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: {
+              code: 'MULTIPART_COMPLETE_FAILED',
+              message: 'R2 a finalisé l’objet, mais D1 n’a pas encore confirmé la finalisation.',
+              retryable: true,
+            },
+          }),
+        });
+      } else {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ ok: true, size: fileBytes.length, etag: 'recovered-etag', recovered: true }),
+        });
+      }
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname === `/api/resource-versions/${VERSION_ID}/extraction-failure`) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+      return;
+    }
+
+    await route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Route de test absente.', retryable: false } }) });
+  });
+
+  await seedInterruptedMultipart(page, fileBytes);
+  await page.goto(`/bibliotheque/${RESOURCE_ID}`);
+  await page.getByLabel('Fichier à reprendre').setInputFiles({ name: 'finalisation.pdf', mimeType: 'application/pdf', buffer: fileBytes });
+  await page.getByRole('button', { name: 'Reprendre l’envoi' }).click();
+
+  await expect.poll(async () => page.evaluate(async (versionId) => {
+    const { db } = await import('/src/data/db.ts');
+    return Boolean(await db.multipartUploads.get(versionId));
+  }, VERSION_ID), { timeout: 30_000 }).toBe(false);
+
+  expect(completeCalls).toBe(2);
+  expect(partUploads).toBe(0);
+  expect(restartCreates).toBe(0);
+  await expect.poll(async () => page.evaluate(async (resourceId) => {
+    const { db } = await import('/src/data/db.ts');
+    return (await db.resources.get(resourceId))?.syncState;
+  }, RESOURCE_ID)).toBe('synced');
+  await expect.poll(async () => page.evaluate(async (resourceId) => {
+    const { db } = await import('/src/data/db.ts');
+    return db.outbox.where('entityId').equals(resourceId).and((item) => item.type === 'resource.sync').count();
+  }, RESOURCE_ID)).toBe(0);
+});
+
 test('une session expirée pendant la finalisation redémarre une seule fois proprement', async ({ page }) => {
   const fileBytes = Buffer.alloc(11 * MIB, 5);
   let resourceReads = 0;
@@ -214,7 +323,7 @@ test('une session expirée pendant la finalisation redémarre une seule fois pro
     }
     if (request.method() === 'POST' && url.pathname === `/api/resource-versions/${VERSION_ID}/multipart/complete`) {
       completeCalls += 1;
-      if (completeCalls === 1) {
+      if (!freshSession) {
         await route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: { code: 'MULTIPART_COMPLETE_FAILED', message: 'La session R2 a expiré.', retryable: true } }) });
       } else {
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, size: fileBytes.length, etag: 'final-etag' }) });
@@ -240,7 +349,7 @@ test('une session expirée pendant la finalisation redémarre une seule fois pro
   }, VERSION_ID), { timeout: 30_000 }).toBe(false);
 
   expect(resourceReads).toBeGreaterThanOrEqual(2);
-  expect(completeCalls).toBe(2);
+  expect(completeCalls).toBe(3);
   expect(restartCreates).toBe(1);
   expect(uploadedParts).toEqual([1, 2, 3]);
   await expect.poll(async () => page.evaluate(async (resourceId) => {
