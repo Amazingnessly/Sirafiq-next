@@ -2,14 +2,12 @@
 
 La branche `feat/v0.1-foundation` est déployée vers le Worker Cloudflare isolé `sirafiq-next-preview`.
 
-Cet environnement possède ses propres ressources D1 et R2 et ne doit jamais être considéré comme la production.
+Cet environnement ne doit jamais utiliser les stockages de production. Il cible :
 
-Le déploiement attendu utilise `npm run deploy:preview`.
+- D1 : `sirafiq-next-preview-db` ;
+- R2 : `sirafiq-next-preview-files` ;
+- Workers AI via le binding `AI`.
 
-Dernier déclenchement contrôlé après activation de R2 et correction de la commande Cloudflare Builds.
+Le déploiement attendu utilise `npm run deploy:preview`. Le script de préparation résout ou crée les ressources de prévisualisation nécessaires avant le build, puis injecte leurs bindings dans l'environnement `preview`.
 
-Nouveau déclenchement demandé après configuration des builds non-production.
-
-Déclenchement manuel supplémentaire demandé le 22 août 2026 pour vérifier la chaîne GitHub → Cloudflare.
-
-Nouveau redéclenchement manuel demandé à 16:52 pour relancer Cloudflare Builds.
+Un build ou une URL de prévisualisation n'est pas une validation fonctionnelle de la V0.1 : le parcours réel D1/R2 et l'iPad cible restent à vérifier séparément.
