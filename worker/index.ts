@@ -94,7 +94,7 @@ async function upsertSubject(request: Request, env: Env): Promise<Response> {
   return json({ ok: true });
 }
 
-async function registerResource(request: Request, env: Env): Promise<Response> {
+export async function registerResource(request: Request, env: Env): Promise<Response> {
   const parsed = ResourceRegisterSchema.safeParse(await safeJson(request));
   if (!parsed.success) return validationError(parsed.error);
   const { resource, version } = parsed.data;
