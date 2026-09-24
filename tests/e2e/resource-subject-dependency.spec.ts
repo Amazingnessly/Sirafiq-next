@@ -191,8 +191,13 @@ test('un support standard attend la réussite de sa matière avant D1', async ({
   await expect.poll(() => order.includes('resource-register')).toBe(true);
   expect(prematureRegistration).toBe(false);
   expect(order.slice(0, 3)).toEqual(['subject-1', 'subject-2', 'resource-register']);
-  expect(order).toContain('blob');
-  expect(order).toContain('extraction');
+  await expect.poll(() => order.includes('blob')).toBe(true);
+  await expect.poll(() => order.includes('extraction')).toBe(true);
+  await expect.poll(async () => page.evaluate(async ({ subjectId: sid, resourceId: rid }) => {
+    const { db } = await import('/src/data/db.ts');
+    const remaining = await db.outbox.toArray();
+    return remaining.filter((item) => item.entityId === sid || item.entityId === rid).length;
+  }, { subjectId, resourceId })).toBe(0);
 
   const local = await page.evaluate(async ({ subjectId: sid, resourceId: rid }) => {
     const { db } = await import('/src/data/db.ts');
