@@ -15,7 +15,7 @@ import type {
   ServerExtractionResult,
   UploadedPart,
 } from '../shared/contracts';
-import { MULTIPART_PART_BYTES, shouldTryServerExtraction } from '../shared/importPolicy';
+import { canUseServerExtraction, MULTIPART_PART_BYTES, shouldTryServerExtraction } from '../shared/importPolicy';
 import { newId } from './ids';
 import { isRetryableOutboxAttempt } from './retryableSync';
 
@@ -213,8 +213,12 @@ export async function retryServerExtractionForResource(resourceId: string): Prom
   if (!resource) throw new Error('Le support local est introuvable.');
   const version = await db.resourceVersions.get(resource.currentVersionId);
   const extraction = await db.extractions.get(resource.currentVersionId);
-  if (!version || !extraction) throw new Error('Les données locales du support sont incomplètes.');
-  if (!shouldTryServerExtraction(resource.kind, version.size, extraction.status)) {
+  if (!version) throw new Error('Les données locales du support sont incomplètes.');
+  if (extraction) {
+    if (!shouldTryServerExtraction(resource.kind, version.size, extraction.status)) {
+      throw new Error('Ce support ne peut pas utiliser l’extraction serveur dans cette version.');
+    }
+  } else if (!canUseServerExtraction(resource.kind, version.size)) {
     throw new Error('Ce support ne peut pas utiliser l’extraction serveur dans cette version.');
   }
   if (resource.syncState !== 'synced') throw new Error('Synchronisez d’abord le fichier avant de relancer son extraction.');

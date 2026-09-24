@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { StatusPill } from '../../components/StatusPill';
-import { db, type ResourceRecord } from '../../data/db';
+import { db, type ExtractionRecord, type ResourceRecord } from '../../data/db';
 import { retrySyncForResource } from '../../data/repository';
 import { cacheRemoteTextResource } from '../../data/remoteResourceCache';
 import { useDexieQuery } from '../../data/useDexieQuery';
@@ -26,7 +26,11 @@ export function ResourcePage() {
   const backToLibrary = libraryReturnHref(searchParams.get('library'));
   const localResource = useDexieQuery<ResourceRecord | undefined | null>(() => db.resources.get(resourceId), [resourceId], null);
   const localVersion = useDexieQuery(() => localResource ? db.resourceVersions.get(localResource.currentVersionId) : Promise.resolve(undefined), [localResource?.currentVersionId], undefined);
-  const localExtraction = useDexieQuery(() => localResource ? db.extractions.get(localResource.currentVersionId) : Promise.resolve(undefined), [localResource?.currentVersionId], undefined);
+  const localExtraction = useDexieQuery<ExtractionRecord | undefined | null>(
+    () => localResource ? db.extractions.get(localResource.currentVersionId) : Promise.resolve(undefined),
+    [localResource?.currentVersionId],
+    null,
+  );
   const multipartSession = useDexieQuery(() => localResource ? db.multipartUploads.get(localResource.currentVersionId) : Promise.resolve(undefined), [localResource?.currentVersionId], undefined);
   const syncAttempt = useDexieQuery(() => localResource ? db.outbox.where('entityId').equals(localResource.id).and((item) => item.type === 'resource.sync').first() : Promise.resolve(undefined), [localResource?.id], undefined);
   const subject = useDexieQuery(() => localResource ? db.subjects.get(localResource.subjectId) : Promise.resolve(undefined), [localResource?.subjectId], undefined);
@@ -69,7 +73,18 @@ export function ResourcePage() {
   const remoteBlobAvailable = localResource ? localResource.syncState === 'synced' : remote.data?.version.status !== 'uploading';
   const pdfUrl = blobUrl ?? (remoteVersionId && remoteBlobAvailable ? `/api/resource-versions/${encodeURIComponent(remoteVersionId)}/blob` : null);
   const terminalSyncFailure = Boolean(syncAttempt?.lastError && isTerminalOutboxAttempt(syncAttempt.nextAttemptAt));
-  const canRetryServerExtraction = Boolean(localResource && localVersion && localExtraction && localResource.syncState === 'synced' && shouldTryServerExtraction(localResource.kind, localVersion.size, localExtraction.status));
+  const localExtractionMissing = Boolean(localResource && localVersion && localExtraction === undefined);
+  const canRetryServerExtraction = Boolean(
+    localResource
+    && localVersion
+    && localExtraction !== null
+    && localResource.syncState === 'synced'
+    && (
+      localExtraction === undefined
+        ? canUseServerExtraction(localResource.kind, localVersion.size)
+        : shouldTryServerExtraction(localResource.kind, localVersion.size, localExtraction.status)
+    )
+  );
   const remoteExtractionRecoverable = Boolean(
     !localResource
     && remote.data?.version.status !== 'uploading'
@@ -82,7 +97,7 @@ export function ResourcePage() {
     && canUseServerExtraction(kind, remote.data.version.size)
   );
   const canRetryExtraction = canRetryServerExtraction || canRetryRemoteServerExtraction;
-  const extractionNeedsRecovery = extractionFailed || remoteExtractionPending;
+  const extractionNeedsRecovery = extractionFailed || remoteExtractionPending || localExtractionMissing;
   const extractionRecoveryReason = getExtractionRecoveryReason({ kind, extractionNeedsRecovery, hasPages: pages.length > 0, syncState: localResource?.syncState, size: localVersion?.size ?? remote.data?.version.size, hasLocalResource: Boolean(localResource), hasLocalExtraction: Boolean(localExtraction), hasMultipartSession: Boolean(multipartSession), canRetry: canRetryExtraction });
 
   async function retrySync() { if (!localResource || terminalSyncFailure) return; setRetryError(null); try { await retrySyncForResource(localResource.id); await requestSync(); } catch (error) { setRetryError(error instanceof Error ? error.message : 'La synchronisation a échoué.'); } }
