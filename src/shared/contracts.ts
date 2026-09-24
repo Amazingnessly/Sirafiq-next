@@ -123,6 +123,13 @@ export type BootstrapPayload = {
 };
 
 export type ResourceDetailPayload = {
+  subject: {
+    id: string;
+    name: string;
+    parentId: string | null;
+    createdAt: string;
+    updatedAt: string;
+  };
   resource: {
     id: string;
     subjectId: string;
