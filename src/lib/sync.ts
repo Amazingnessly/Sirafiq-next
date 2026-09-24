@@ -11,6 +11,7 @@ import type {
   MultipartCreateResult,
   ResourceDetailPayload,
   ResourceRegisterInput,
+  ResourceRegisterResult,
   ServerExtractionResult,
   UploadedPart,
 } from '../shared/contracts';
@@ -27,6 +28,7 @@ type RemoteRegistration = {
   resourceId: string;
   versionId: string;
   reusedExisting: boolean;
+  alreadyStored: boolean;
   remote: ResourceDetailPayload | null;
 };
 
@@ -409,7 +411,7 @@ async function syncResource(item: OutboxRecord): Promise<void> {
 
   const registration = await registerOrResolveRemoteVersion(toResourcePayload(resource, version));
   await rememberRemoteIdentity(resource.id, version.id, registration);
-  if (!registration.reusedExisting) {
+  if (!registration.reusedExisting && !registration.alreadyStored) {
     const uploadBlob = new Blob([version.bytes], { type: version.mimeType });
     await apiPutBlob(`/api/resource-versions/${encodeURIComponent(registration.versionId)}/blob`, uploadBlob, version.mimeType, 120_000);
   }
@@ -482,8 +484,14 @@ async function registerOrResolveRemoteVersion(
   repairedMissingSubject = false,
 ): Promise<RemoteRegistration> {
   try {
-    await apiJson('/api/resources/register', { method: 'POST', body: JSON.stringify(payload) });
-    return { resourceId: payload.resource.id, versionId: payload.version.id, reusedExisting: false, remote: null };
+    const result = await apiJson<ResourceRegisterResult>('/api/resources/register', { method: 'POST', body: JSON.stringify(payload) });
+    return {
+      resourceId: payload.resource.id,
+      versionId: payload.version.id,
+      reusedExisting: false,
+      alreadyStored: result.alreadyStored,
+      remote: null,
+    };
   } catch (error) {
     if (error instanceof ApiRequestError && error.code === 'SUBJECT_MISSING' && !repairedMissingSubject) {
       await ensureSubjectSynced(payload.resource.subjectId, { force: true });
@@ -495,7 +503,7 @@ async function registerOrResolveRemoteVersion(
       throw new ApiRequestError('Le serveur a signalé un doublon sans fournir le support existant.', 409, 'DUPLICATE_RECONCILIATION_FAILED', true, error.details);
     }
     const remote = await apiJson<ResourceDetailPayload>(`/api/resources/${encodeURIComponent(existingResourceId)}`);
-    return { resourceId: remote.resource.id, versionId: remote.version.id, reusedExisting: true, remote };
+    return { resourceId: remote.resource.id, versionId: remote.version.id, reusedExisting: true, alreadyStored: true, remote };
   }
 }
 
