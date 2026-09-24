@@ -251,3 +251,80 @@ test('un multipart persisté comme actif devient reprenable après rechargement'
   await expect(page.getByText('L’envoi du gros fichier est interrompu.')).toBeVisible();
   await expect(page.getByLabel('Fichier à reprendre')).toBeVisible();
 });
+
+
+test('un support garé derrière une matière bloquée ne crée pas un bouton Synchroniser sans effet', async ({ page }) => {
+  await page.goto('/bibliotheque');
+
+  await page.evaluate(async () => {
+    const { db } = await import('/src/data/db.ts');
+    await db.open();
+    const now = new Date().toISOString();
+    const subjectId = 'e2e-blocked-dependency-subject';
+    const resourceId = 'e2e-blocked-dependency-resource';
+    const versionId = 'e2e-blocked-dependency-version';
+
+    await db.transaction('rw', db.subjects, db.resources, db.resourceVersions, db.outbox, async () => {
+      await db.outbox.clear();
+      await db.subjects.put({
+        id: subjectId,
+        name: 'Matière bloquée avec support',
+        parentId: null,
+        createdAt: now,
+        updatedAt: now,
+        syncState: 'error',
+        syncError: 'Erreur terminale E2E',
+      });
+      await db.resources.put({
+        id: resourceId,
+        subjectId,
+        title: 'Support dépendant valide',
+        kind: 'text',
+        currentVersionId: versionId,
+        status: 'ready',
+        extractionError: null,
+        createdAt: now,
+        updatedAt: now,
+        syncState: 'pending',
+        syncError: null,
+      });
+      await db.resourceVersions.put({
+        id: versionId,
+        resourceId,
+        sha256: 'b'.repeat(64),
+        fileName: 'dependant.txt',
+        mimeType: 'text/plain',
+        size: 8,
+        bytes: new TextEncoder().encode('dependant').buffer,
+        createdAt: now,
+        syncState: 'pending',
+        syncError: null,
+      });
+      await db.outbox.bulkPut([
+        {
+          id: 'e2e-blocked-dependency-subject-work',
+          type: 'subject.upsert',
+          entityId: subjectId,
+          attempts: 5,
+          lastError: 'Erreur terminale E2E',
+          nextAttemptAt: Number.MAX_SAFE_INTEGER,
+          createdAt: now,
+        },
+        {
+          id: 'e2e-blocked-dependency-resource-work',
+          type: 'resource.sync',
+          entityId: resourceId,
+          attempts: 0,
+          lastError: 'Erreur terminale E2E',
+          nextAttemptAt: Number.MAX_SAFE_INTEGER,
+          createdAt: now,
+        },
+      ]);
+    });
+  });
+
+  await page.reload();
+
+  await expect(page.getByRole('link', { name: /1 erreur bloquée · Vérifier/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /en attente · Synchroniser/ })).toHaveCount(0);
+});
