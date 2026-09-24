@@ -112,7 +112,7 @@ test('un texte récupéré depuis D1 reste lisible après un reload hors ligne',
   expect(detailRequests).toBe(1);
 
   await page.goto('/bibliotheque');
-  await expect(page.getByText('Matière D1 réhydratée')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Matière D1 réhydratée', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Texte D1 réhydraté' })).toBeVisible();
   await expect(page.getByText('Impossible de vérifier la bibliothèque synchronisée.')).toBeVisible();
 });
