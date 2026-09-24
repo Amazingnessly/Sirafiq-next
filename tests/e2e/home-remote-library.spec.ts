@@ -139,3 +139,55 @@ test('l’accueil ne présente pas un texte distant non extrait comme déjà lis
   await expect(metrics.locator('.metric').filter({ hasText: 'extraits' }).getByText('0', { exact: true })).toBeVisible();
 });
 
+
+
+test('une matière locale sans support attend encore la vérification distante', async ({ page }) => {
+  let releaseBootstrap!: () => void;
+  const bootstrapGate = new Promise<void>((resolve) => {
+    releaseBootstrap = resolve;
+  });
+
+  await page.route('**/api/bootstrap', async (route) => {
+    await bootstrapGate;
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: {
+          code: 'HOME_PARTIAL_LOCAL_E2E_DOWN',
+          message: 'Bootstrap indisponible avec une matière locale.',
+          retryable: true,
+        },
+      }),
+    });
+  });
+
+  await page.goto('/');
+
+  await page.evaluate(async () => {
+    const { db } = await import('/src/data/db.ts');
+    const now = new Date().toISOString();
+    await db.subjects.add({
+      id: 'abababab-1111-4111-8111-abababababab',
+      name: 'Matière locale sans support',
+      parentId: null,
+      createdAt: now,
+      updatedAt: now,
+      syncState: 'synced',
+      syncError: null,
+    });
+  });
+
+  try {
+    await expect(page.getByRole('heading', { name: 'Vérification de ma bibliothèque' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Vérifier ma bibliothèque' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Importer un support' })).toHaveCount(0);
+  } finally {
+    releaseBootstrap();
+  }
+
+  await expect(page.getByRole('heading', { name: 'Retrouver ma bibliothèque' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Vérifier ma bibliothèque' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Importer un support' })).toHaveCount(0);
+  await expect(page.getByText('Sirāfiq ne considère pas cette erreur réseau comme une bibliothèque vide.')).toBeVisible();
+});
