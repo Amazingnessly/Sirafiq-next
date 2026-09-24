@@ -4,6 +4,7 @@ import { db } from '../data/db';
 import { useDexieQuery } from '../data/useDexieQuery';
 import { requestSync } from '../lib/sync';
 import { retrySyncErrorsNow } from '../lib/retrySyncErrors';
+import { isRetryableOutboxAttempt } from '../lib/retryableSync';
 import { classifySyncRecoveryState } from '../lib/syncRecoveryState';
 
 export function SyncIndicator() {
@@ -13,7 +14,11 @@ export function SyncIndicator() {
       db.multipartUploads.toArray(),
     ]);
     const multipartResourceIds = new Set(multipartSessions.map((session) => session.resourceId));
-    return outbox.filter((item) => item.type !== 'resource.sync' || !multipartResourceIds.has(item.entityId)).length;
+    return outbox.filter(
+      (item) =>
+        isRetryableOutboxAttempt(item.nextAttemptAt)
+        && (item.type !== 'resource.sync' || !multipartResourceIds.has(item.entityId)),
+    ).length;
   }, [], 0);
   const activeMultipart = useDexieQuery(
     () => db.multipartUploads.filter((session) => session.status !== 'error').count(),
