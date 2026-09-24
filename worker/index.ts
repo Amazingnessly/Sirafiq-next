@@ -219,7 +219,7 @@ async function createMultipart(versionId: string, request: Request, env: Env): P
   return json(payload);
 }
 
-async function uploadMultipartPart(versionId: string, request: Request, env: Env): Promise<Response> {
+export async function uploadMultipartPart(versionId: string, request: Request, env: Env): Promise<Response> {
   const version = await getVersionUploadRow(versionId, env);
   if (!version) return errorResponse(404, 'VERSION_NOT_FOUND', 'La version du support est introuvable.', false);
   const url = new URL(request.url);
@@ -242,17 +242,36 @@ async function uploadMultipartPart(versionId: string, request: Request, env: Env
     return errorResponse(400, 'MULTIPART_PART_SIZE_MISMATCH', 'La taille du morceau ne correspond pas à la session.', true);
   }
 
+  let uploaded: UploadedPart;
   try {
     const upload = env.FILES.resumeMultipartUpload(version.r2_key, uploadId);
-    const uploaded = await upload.uploadPart(partNumber, request.body);
-    const parts = mergeUploadedPart(parseUploadedParts(version.multipart_parts_json), uploaded);
-    await env.DB.prepare('UPDATE resource_versions SET multipart_parts_json = ?, updated_at = ? WHERE id = ?')
-      .bind(JSON.stringify(parts), new Date().toISOString(), versionId)
-      .run();
-    return json(uploaded);
+    uploaded = await upload.uploadPart(partNumber, request.body);
   } catch (error) {
     return errorResponse(409, 'MULTIPART_SESSION_INVALID', error instanceof Error ? error.message : 'La session multipart n’est plus valide.', true);
   }
+
+  const parts = mergeUploadedPart(parseUploadedParts(version.multipart_parts_json), uploaded);
+  try {
+    await env.DB.prepare('UPDATE resource_versions SET multipart_parts_json = ?, updated_at = ? WHERE id = ?')
+      .bind(JSON.stringify(parts), new Date().toISOString(), versionId)
+      .run();
+  } catch (error) {
+    console.error(JSON.stringify({
+      level: 'error',
+      operation: 'multipart-part-state',
+      versionId,
+      partNumber,
+      message: error instanceof Error ? error.message : 'Unknown D1 multipart part persistence error',
+    }));
+    return errorResponse(
+      503,
+      'MULTIPART_PART_STATE_FAILED',
+      'Le morceau a été reçu par R2, mais son état n’a pas pu être confirmé. Réessayez ce morceau sans redémarrer la session.',
+      true,
+    );
+  }
+
+  return json(uploaded);
 }
 
 async function completeMultipart(versionId: string, request: Request, env: Env): Promise<Response> {
