@@ -9,6 +9,22 @@ test('un texte récupéré depuis D1 reste lisible après un reload hors ligne',
   let serverAvailable = true;
   const text = 'Texte synchronisé récupéré une fois puis conservé localement.';
 
+  await page.route('**/api/bootstrap', async (route) => {
+    if (!serverAvailable) {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { code: 'OFFLINE_E2E', message: 'Serveur indisponible', retryable: true } }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ subjects: [], resources: [] }),
+    });
+  });
+
   await page.route(`**/api/resources/${RESOURCE_ID}`, async (route) => {
     detailRequests += 1;
     if (!serverAvailable) {
@@ -24,6 +40,13 @@ test('un texte récupéré depuis D1 reste lisible après un reload hors ligne',
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
+        subject: {
+          id: SUBJECT_ID,
+          name: 'Matière D1 réhydratée',
+          parentId: null,
+          createdAt: '2026-09-22T23:59:00.000Z',
+          updatedAt: '2026-09-23T00:00:00.000Z',
+        },
         resource: {
           id: RESOURCE_ID,
           subjectId: SUBJECT_ID,
@@ -54,21 +77,26 @@ test('un texte récupéré depuis D1 reste lisible après un reload hors ligne',
   await page.goto(`/bibliotheque/${RESOURCE_ID}`);
   await expect(page.getByText(text)).toBeVisible();
 
-  await expect.poll(async () => page.evaluate(async ({ resourceId, versionId }) => {
+  await expect.poll(async () => page.evaluate(async ({ subjectId, resourceId, versionId }) => {
     const { db } = await import('/src/data/db.ts');
-    const [resource, version, extraction] = await Promise.all([
+    const [subject, resource, version, extraction] = await Promise.all([
+      db.subjects.get(subjectId),
       db.resources.get(resourceId),
       db.resourceVersions.get(versionId),
       db.extractions.get(versionId),
     ]);
     return {
+      subjectName: subject?.name ?? null,
+      subjectState: subject?.syncState ?? null,
       resourceState: resource?.syncState,
       versionState: version?.syncState,
       bytes: version ? version.bytes : 'missing',
       extractionStatus: extraction?.status,
       extractedText: extraction?.pages.map((entry) => entry.text).join('') ?? null,
     };
-  }, { resourceId: RESOURCE_ID, versionId: VERSION_ID })).toEqual({
+  }, { subjectId: SUBJECT_ID, resourceId: RESOURCE_ID, versionId: VERSION_ID })).toEqual({
+    subjectName: 'Matière D1 réhydratée',
+    subjectState: 'synced',
     resourceState: 'synced',
     versionState: 'synced',
     bytes: null,
@@ -80,5 +108,11 @@ test('un texte récupéré depuis D1 reste lisible après un reload hors ligne',
   await page.reload();
 
   await expect(page.getByText(text)).toBeVisible();
+  await expect(page.getByText('Matière D1 réhydratée')).toBeVisible();
   expect(detailRequests).toBe(1);
+
+  await page.goto('/bibliotheque');
+  await expect(page.getByRole('button', { name: 'Matière D1 réhydratée' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Texte D1 réhydraté' })).toBeVisible();
+  await expect(page.getByText('Impossible de vérifier la bibliothèque synchronisée.')).toBeVisible();
 });
