@@ -1,5 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import {
+  PREVIEW_STORAGE,
+  PRODUCTION_STORAGE,
+  selectCloudflareBuildStorage,
+} from '../../scripts/cloudflare-build-storage.mjs';
 
 type WranglerConfig = {
   ai?: { binding?: string };
@@ -34,5 +39,26 @@ describe('Cloudflare deployment bindings', () => {
     expect(productionFiles?.bucket_name).toBe('sirafiq-next-files');
     expect(previewFiles?.bucket_name).toBe('sirafiq-next-preview-files');
     expect(previewFiles?.bucket_name).not.toBe(productionFiles?.bucket_name);
+  });
+
+  it('routes non-production Workers Builds to isolated preview storage', () => {
+    expect(selectCloudflareBuildStorage({
+      WORKERS_CI: '1',
+      WORKERS_CI_BRANCH: 'main',
+    })).toBe(PRODUCTION_STORAGE);
+
+    expect(selectCloudflareBuildStorage({
+      WORKERS_CI: '1',
+      WORKERS_CI_BRANCH: 'fix/isolate-nonproduction-storage',
+    })).toBe(PREVIEW_STORAGE);
+
+    expect(PREVIEW_STORAGE.databaseName).not.toBe(PRODUCTION_STORAGE.databaseName);
+    expect(PREVIEW_STORAGE.bucketName).not.toBe(PRODUCTION_STORAGE.bucketName);
+  });
+
+  it('keeps local/manual deploys on production storage unless explicitly running Workers Builds', () => {
+    expect(selectCloudflareBuildStorage({
+      WORKERS_CI_BRANCH: 'feature-without-workers-ci',
+    })).toBe(PRODUCTION_STORAGE);
   });
 });
