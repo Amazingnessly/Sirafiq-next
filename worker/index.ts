@@ -596,18 +596,30 @@ async function getBootstrap(env: Env): Promise<Response> {
 async function getResource(resourceId: string, env: Env): Promise<Response> {
   const row = await env.DB.prepare(`
     SELECT r.id, r.subject_id, r.title, r.kind, r.current_version_id, r.created_at, r.updated_at,
+           s.name AS subject_name, s.parent_id AS subject_parent_id,
+           s.created_at AS subject_created_at, s.updated_at AS subject_updated_at,
            v.file_name, v.mime_type, COALESCE(v.size_bytes, v.size) AS size, v.sha256, v.status,
            v.extraction_status, v.extraction_error, e.content_json, e.char_count
-    FROM resources r JOIN resource_versions v ON v.id = r.current_version_id
+    FROM resources r
+    JOIN subjects s ON s.id = r.subject_id
+    JOIN resource_versions v ON v.id = r.current_version_id
     LEFT JOIN extractions e ON e.version_id = v.id WHERE r.id = ?
   `).bind(resourceId).first<{
     id: string; subject_id: string; title: string; kind: 'text' | 'pdf'; current_version_id: string;
-    created_at: string; updated_at: string; file_name: string; mime_type: string; size: number; sha256: string;
+    created_at: string; updated_at: string; subject_name: string; subject_parent_id: string | null;
+    subject_created_at: string; subject_updated_at: string; file_name: string; mime_type: string; size: number; sha256: string;
     status: 'uploading' | 'stored' | 'ready' | 'failed'; extraction_status: 'pending' | 'ready' | 'failed';
     extraction_error: string | null; content_json: string | null; char_count: number | null;
   }>();
   if (!row) return errorResponse(404, 'RESOURCE_NOT_FOUND', 'Ce support est introuvable.', false);
   const payload: ResourceDetailPayload = {
+    subject: {
+      id: row.subject_id,
+      name: row.subject_name,
+      parentId: row.subject_parent_id,
+      createdAt: row.subject_created_at,
+      updatedAt: row.subject_updated_at,
+    },
     resource: { id: row.id, subjectId: row.subject_id, title: row.title, kind: row.kind, currentVersionId: row.current_version_id, createdAt: row.created_at, updatedAt: row.updated_at },
     version: {
       id: row.current_version_id, fileName: row.file_name, mimeType: row.mime_type, size: row.size, sha256: row.sha256,
