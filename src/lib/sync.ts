@@ -454,8 +454,7 @@ async function releaseDeferredResourcesForSubject(subjectId: string): Promise<vo
     const pendingResourceIds = new Set(pendingResources.map((resource) => resource.id));
     const deferred = (await db.outbox.where('type').equals('resource.sync').toArray()).filter(
       (item) => pendingResourceIds.has(item.entityId)
-        && Boolean(item.lastError)
-        && isRetryableOutboxAttempt(item.nextAttemptAt),
+        && Boolean(item.lastError),
     );
     for (const item of deferred) {
       await db.outbox.update(item.id, { nextAttemptAt: now, lastError: null });
@@ -542,6 +541,19 @@ async function markOutboxFailure(item: OutboxRecord, error: unknown): Promise<vo
       scheduleRetry(Math.max(0, subjectRetryAt - Date.now()));
       return;
     }
+  }
+
+  // A resource is not terminal merely because its subject currently is.
+  // Park the resource behind the blocked dependency without consuming one of
+  // its own attempts or presenting the support itself as broken. If the
+  // subject is later repaired, releaseDeferredResourcesForSubject() makes this
+  // work immediately due again.
+  if (error instanceof ApiRequestError && error.code === 'SUBJECT_SYNC_BLOCKED') {
+    await db.outbox.update(item.id, {
+      lastError: message,
+      nextAttemptAt: Number.MAX_SAFE_INTEGER,
+    });
+    return;
   }
 
   const attempts = item.attempts + 1;
