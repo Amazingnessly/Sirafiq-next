@@ -102,10 +102,39 @@ export async function registerResource(request: Request, env: Env): Promise<Resp
   const subject = await env.DB.prepare('SELECT id FROM subjects WHERE id = ?').bind(resource.subjectId).first<{ id: string }>();
   if (!subject) return errorResponse(409, 'SUBJECT_MISSING', 'La matière n’existe pas encore sur le serveur. Réessayez la synchronisation.', true);
 
-  const duplicate = await env.DB.prepare('SELECT id, resource_id, extraction_status FROM resource_versions WHERE sha256 = ?')
+  const duplicate = await env.DB.prepare(`
+    SELECT id, resource_id, extraction_status, status, upload_mode, r2_key,
+           COALESCE(size_bytes, size) AS size, sha256
+    FROM resource_versions
+    WHERE sha256 = ?
+  `)
     .bind(version.sha256)
-    .first<{ id: string; resource_id: string; extraction_status: VersionUploadRow['extraction_status'] }>();
+    .first<{
+      id: string;
+      resource_id: string;
+      extraction_status: VersionUploadRow['extraction_status'];
+      status: 'uploading' | 'stored' | 'ready' | 'failed';
+      upload_mode: 'single' | 'multipart';
+      r2_key: string;
+      size: number;
+      sha256: string;
+    }>();
   if (duplicate && duplicate.id !== version.id) {
+    if (duplicate.status !== 'uploading') {
+      const stored = await env.FILES.head(duplicate.r2_key);
+      const storageMatches = duplicate.upload_mode === 'multipart'
+        ? matchesCompletedMultipartObject(stored, duplicate.size, duplicate.sha256)
+        : matchesStoredSingleObject(stored, duplicate.size, duplicate.sha256);
+      if (!storageMatches) {
+        return errorResponse(
+          409,
+          'DUPLICATE_SUPPORT_STORAGE_MISSING',
+          'Le support existe dans D1, mais son fichier R2 doit être réparé avant réutilisation.',
+          true,
+          { existingResourceId: duplicate.resource_id },
+        );
+      }
+    }
     return errorResponse(409, 'DUPLICATE_SUPPORT', 'Ce fichier existe déjà dans la bibliothèque synchronisée.', false, {
       existingResourceId: duplicate.resource_id,
     });
