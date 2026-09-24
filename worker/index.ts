@@ -406,6 +406,21 @@ export function matchesCompletedMultipartObject(
   );
 }
 
+export function matchesStoredResourceObject(
+  object: {
+    size: number;
+    checksums?: { sha256?: ArrayBuffer };
+    customMetadata?: Record<string, string>;
+  } | null,
+  uploadMode: 'single' | 'multipart',
+  expectedSize: number,
+  expectedSha256: string,
+): boolean {
+  return uploadMode === 'multipart'
+    ? matchesCompletedMultipartObject(object, expectedSize, expectedSha256)
+    : matchesStoredSingleObject(object, expectedSize, expectedSha256);
+}
+
 async function recoverCompletedMultipartObject(
   versionId: string,
   version: VersionUploadRow,
@@ -503,18 +518,41 @@ function detachR2Body(source: ReadableStream<Uint8Array>): ReadableStream<Uint8A
   });
 }
 
-async function getBlob(versionId: string, request: Request, env: Env): Promise<Response> {
-  const version = await env.DB.prepare('SELECT r2_key, mime_type, file_name, COALESCE(size_bytes, size) AS total_size FROM resource_versions WHERE id = ?')
+export async function getBlob(versionId: string, request: Request, env: Env): Promise<Response> {
+  const version = await env.DB.prepare(`
+    SELECT r2_key, mime_type, file_name, COALESCE(size_bytes, size) AS total_size,
+           sha256, upload_mode
+    FROM resource_versions
+    WHERE id = ?
+  `)
     .bind(versionId)
-    .first<{ r2_key: string; mime_type: string; file_name: string; total_size: number }>();
+    .first<{
+      r2_key: string;
+      mime_type: string;
+      file_name: string;
+      total_size: number;
+      sha256: string;
+      upload_mode: 'single' | 'multipart';
+    }>();
   if (!version) return errorResponse(404, 'VERSION_NOT_FOUND', 'La version du support est introuvable.', false);
 
   const rangeHeader = request.headers.get('range');
   let range: ByteRange | null = null;
   let totalSize: number | null = null;
+  let expectedEtag: string | null = null;
   if (rangeHeader) {
     const metadata = await env.FILES.head(version.r2_key);
     if (!metadata) return errorResponse(404, 'FILE_NOT_FOUND', 'Le fichier n’est pas présent dans le stockage.', true);
+    if (!matchesStoredResourceObject(metadata, version.upload_mode, version.total_size, version.sha256)) {
+      return errorResponse(
+        409,
+        'FILE_INTEGRITY_ERROR',
+        'Le fichier R2 ne correspond plus à la version enregistrée dans D1.',
+        false,
+      );
+    }
+    expectedEtag = metadata.etag;
+
     // D1 stores the expected full size and uploads are only marked stored after
     // R2 reports that exact size. The local R2 adapter can expose range-scoped
     // metadata after partial reads, so HTTP satisfiability must use this durable
@@ -529,6 +567,23 @@ async function getBlob(versionId: string, request: Request, env: Env): Promise<R
     ? await env.FILES.get(version.r2_key, { range })
     : await env.FILES.get(version.r2_key);
   if (!object) return errorResponse(404, 'FILE_NOT_FOUND', 'Le fichier n’est pas présent dans le stockage.', true);
+
+  if (!range && !matchesStoredResourceObject(object, version.upload_mode, version.total_size, version.sha256)) {
+    return errorResponse(
+      409,
+      'FILE_INTEGRITY_ERROR',
+      'Le fichier R2 ne correspond plus à la version enregistrée dans D1.',
+      false,
+    );
+  }
+  if (range && expectedEtag && object.etag !== expectedEtag) {
+    return errorResponse(
+      409,
+      'FILE_CHANGED_DURING_READ',
+      'Le fichier a changé pendant la lecture. Réessayez l’ouverture.',
+      true,
+    );
+  }
 
   const headers = new Headers();
   object.writeHttpMetadata(headers);
