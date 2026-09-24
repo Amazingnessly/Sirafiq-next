@@ -191,3 +191,61 @@ test('une matière locale sans support attend encore la vérification distante',
   await expect(page.getByRole('link', { name: 'Importer un support' })).toHaveCount(0);
   await expect(page.getByText('Sirāfiq ne considère pas cette erreur réseau comme une bibliothèque vide.')).toBeVisible();
 });
+
+
+test('une panne distante avec des supports locaux signale que les compteurs peuvent être incomplets', async ({ page }) => {
+  await page.route('**/api/bootstrap', async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: {
+          code: 'REMOTE_COUNTS_E2E_DOWN',
+          message: 'D1 temporairement indisponible.',
+          retryable: true,
+        },
+      }),
+    });
+  });
+
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Retrouver ma bibliothèque' })).toBeVisible();
+
+  await page.evaluate(async () => {
+    const { db } = await import('/src/data/db.ts');
+    const now = new Date().toISOString();
+    const subjectId = '31313131-3131-4131-8131-313131313131';
+    await db.subjects.add({
+      id: subjectId,
+      name: 'Matière locale disponible',
+      parentId: null,
+      createdAt: now,
+      updatedAt: now,
+      syncState: 'synced',
+      syncError: null,
+    });
+    await db.resources.add({
+      id: '32323232-3232-4232-8232-323232323232',
+      subjectId,
+      title: 'Support local disponible',
+      kind: 'text',
+      currentVersionId: '33333333-3333-4333-8333-333333333333',
+      status: 'ready',
+      extractionError: null,
+      createdAt: now,
+      updatedAt: now,
+      syncState: 'synced',
+      syncError: null,
+    });
+  });
+
+  await page.reload();
+
+  await expect(page.getByRole('heading', { name: 'Continuer à partir de mes supports' })).toBeVisible();
+  await expect(page.getByText('Bibliothèque synchronisée non vérifiée.')).toBeVisible();
+  await expect(page.getByText(/Les compteurs affichés peuvent être incomplets/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Réessayer', exact: true })).toBeVisible();
+
+  const metrics = page.getByLabel('État de la bibliothèque');
+  await expect(metrics.locator('.metric').filter({ hasText: 'supports' }).getByText('1', { exact: true })).toBeVisible();
+});
