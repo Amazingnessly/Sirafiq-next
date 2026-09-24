@@ -45,9 +45,9 @@ export function TodayPage() {
     + remoteOnlyResources.filter((resource) => resource.status === 'ready').length;
   const failed = localResources.filter((resource) => resource.status === 'failed').length
     + remoteOnlyResources.filter((resource) => resource.status === 'failed').length;
-  const noLocalLibrary = localSubjects.length === 0 && localResources.length === 0;
-  const checkingRemoteLibrary = noLocalLibrary && remoteBootstrap.isPending;
-  const remoteLibraryUnavailable = noLocalLibrary && remoteBootstrap.isError;
+  const noLocalResources = localResources.length === 0;
+  const checkingRemoteLibrary = noLocalResources && remoteBootstrap.isPending;
+  const remoteLibraryUnavailable = noLocalResources && remoteBootstrap.isError;
   const hasOnlyRemoteUploading = localResources.length === 0
     && remoteFinalizedResources.length === 0
     && remoteUploadingResources.length > 0;
