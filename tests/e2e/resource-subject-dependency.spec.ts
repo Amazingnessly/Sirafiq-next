@@ -742,3 +742,223 @@ test('la file standard et un multipart partagent une seule synchronisation de ma
   expect(subject?.syncError).toBeNull();
 });
 
+
+
+test('un support reste différé derrière une matière bloquée et repart après sa réparation', async ({ page }) => {
+  const subjectId = 'e2e-terminal-dependent-subject';
+  const resourceId = 'e2e-terminal-dependent-resource';
+  const versionId = 'e2e-terminal-dependent-version';
+  const order: string[] = [];
+
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (request.method() === 'GET' && url.pathname === '/api/bootstrap') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ subjects: [], resources: [] }),
+      });
+      return;
+    }
+
+    if (request.method() === 'POST' && url.pathname === '/api/subjects/upsert') {
+      order.push('subject');
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true }),
+      });
+      return;
+    }
+
+    if (request.method() === 'POST' && url.pathname === '/api/resources/register') {
+      order.push('resource-register');
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, uploadMode: 'single' }),
+      });
+      return;
+    }
+
+    if (request.method() === 'PUT' && url.pathname === `/api/resource-versions/${versionId}/blob`) {
+      order.push('blob');
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true }),
+      });
+      return;
+    }
+
+    if (request.method() === 'POST' && url.pathname === `/api/resource-versions/${versionId}/extraction`) {
+      order.push('extraction');
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true }),
+      });
+      return;
+    }
+
+    await route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Route E2E absente.', retryable: false } }),
+    });
+  });
+
+  await page.goto('/bibliotheque');
+
+  await page.evaluate(async ({ subjectId: sid, resourceId: rid, versionId: vid }) => {
+    const { db } = await import('/src/data/db.ts');
+    const now = new Date().toISOString();
+    const text = 'Support valide derrière une matière bloquée';
+    const bytes = new TextEncoder().encode(text).buffer;
+
+    await db.transaction('rw', db.subjects, db.resources, db.resourceVersions, db.extractions, db.outbox, async () => {
+      await db.subjects.put({
+        id: sid,
+        name: 'Matière bloquée',
+        parentId: null,
+        createdAt: now,
+        updatedAt: now,
+        syncState: 'error',
+        syncError: 'Matière invalide',
+      });
+      await db.resources.put({
+        id: rid,
+        subjectId: sid,
+        title: 'Support valide',
+        kind: 'text',
+        currentVersionId: vid,
+        status: 'ready',
+        extractionError: null,
+        createdAt: now,
+        updatedAt: now,
+        syncState: 'pending',
+        syncError: null,
+      });
+      await db.resourceVersions.put({
+        id: vid,
+        resourceId: rid,
+        sha256: 'a'.repeat(64),
+        fileName: 'blocked-subject.txt',
+        mimeType: 'text/plain',
+        size: bytes.byteLength,
+        bytes,
+        createdAt: now,
+        syncState: 'pending',
+        syncError: null,
+      });
+      await db.extractions.put({
+        versionId: vid,
+        status: 'ready',
+        pages: [{ pageNumber: 1, text }],
+        charCount: text.length,
+        errorCode: null,
+        errorMessage: null,
+        createdAt: now,
+      });
+      await db.outbox.bulkPut([
+        {
+          id: 'e2e-terminal-subject-work',
+          type: 'subject.upsert',
+          entityId: sid,
+          attempts: 1,
+          nextAttemptAt: Number.MAX_SAFE_INTEGER,
+          lastError: 'Matière invalide',
+          createdAt: new Date(Date.now() - 1000).toISOString(),
+        },
+        {
+          id: 'e2e-terminal-resource-work',
+          type: 'resource.sync',
+          entityId: rid,
+          attempts: 0,
+          nextAttemptAt: Date.now(),
+          lastError: null,
+          createdAt: now,
+        },
+      ]);
+    });
+
+    const { requestSync } = await import('/src/lib/sync.ts');
+    await requestSync();
+    await requestSync();
+  }, { subjectId, resourceId, versionId });
+
+  expect(order).toEqual([]);
+
+  const deferred = await page.evaluate(async ({ resourceId: rid }) => {
+    const { db } = await import('/src/data/db.ts');
+    const [resource, version, work] = await Promise.all([
+      db.resources.get(rid),
+      db.resourceVersions.where('resourceId').equals(rid).first(),
+      db.outbox.where('entityId').equals(rid).and((item) => item.type === 'resource.sync').first(),
+    ]);
+    return {
+      resourceState: resource?.syncState,
+      resourceError: resource?.syncError,
+      versionState: version?.syncState,
+      attempts: work?.attempts,
+      retryAt: work?.nextAttemptAt,
+      lastError: work?.lastError,
+    };
+  }, { resourceId });
+
+  expect(deferred).toEqual({
+    resourceState: 'pending',
+    resourceError: null,
+    versionState: 'pending',
+    attempts: 0,
+    retryAt: Number.MAX_SAFE_INTEGER,
+    lastError: 'Matière invalide',
+  });
+
+  await page.evaluate(async (sid) => {
+    const { db } = await import('/src/data/db.ts');
+    await db.transaction('rw', db.subjects, db.outbox, async () => {
+      await db.subjects.update(sid, { syncState: 'pending', syncError: null });
+      const work = await db.outbox
+        .where('entityId')
+        .equals(sid)
+        .and((item) => item.type === 'subject.upsert')
+        .first();
+      if (work) {
+        await db.outbox.update(work.id, {
+          nextAttemptAt: Date.now(),
+          lastError: null,
+        });
+      }
+    });
+
+    const { requestSync } = await import('/src/lib/sync.ts');
+    await requestSync();
+    await requestSync();
+  }, subjectId);
+
+  await expect.poll(() => order.includes('extraction')).toBe(true);
+  expect(order).toEqual(['subject', 'resource-register', 'blob', 'extraction']);
+
+  const repaired = await page.evaluate(async ({ subjectId: sid, resourceId: rid }) => {
+    const { db } = await import('/src/data/db.ts');
+    const [subject, resource, remaining] = await Promise.all([
+      db.subjects.get(sid),
+      db.resources.get(rid),
+      db.outbox.toArray(),
+    ]);
+    return {
+      subjectState: subject?.syncState,
+      resourceState: resource?.syncState,
+      remaining: remaining.filter((item) => item.entityId === sid || item.entityId === rid).length,
+    };
+  }, { subjectId, resourceId });
+
+  expect(repaired).toEqual({
+    subjectState: 'synced',
+    resourceState: 'synced',
+    remaining: 0,
+  });
+});
