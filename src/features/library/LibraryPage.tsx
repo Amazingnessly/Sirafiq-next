@@ -225,12 +225,12 @@ export function LibraryPage() {
                   </Link>
                 ))}
               </div>
-            ) : !hasVisibleResults && isFiltered ? (
-              <div className="empty-library"><div className="empty-library__symbol" aria-hidden="true">◇</div><h3>Aucun élément correspondant</h3><p>Modifiez vos filtres ou affichez à nouveau toute la bibliothèque.</p><button type="button" className="button button--secondary" onClick={resetFilters}>Afficher toute la bibliothèque</button></div>
             ) : !hasVisibleResults && remoteBootstrap.isPending ? (
-              <div className="empty-library"><div className="empty-library__symbol" aria-hidden="true">◇</div><h3>Vérification des supports synchronisés…</h3><p>Les données locales sont déjà chargées. Sirāfiq vérifie maintenant D1 avant de déclarer la bibliothèque vide.</p></div>
+              <div className="empty-library"><div className="empty-library__symbol" aria-hidden="true">◇</div><h3>Vérification des supports synchronisés…</h3><p>Les données locales sont déjà chargées. Sirāfiq vérifie maintenant D1 avant de conclure qu’aucun support ne correspond aux filtres actuels.</p></div>
             ) : !hasVisibleResults && remoteBootstrap.isError ? (
               <div className="empty-library"><div className="empty-library__symbol" aria-hidden="true">!</div><h3>Impossible de vérifier les supports synchronisés</h3><p>Le serveur n’a pas pu être joint. Aucun état vide distant n’est déduit de cette erreur.</p><button type="button" className="button button--secondary" onClick={() => void remoteBootstrap.refetch()}>Réessayer</button></div>
+            ) : !hasVisibleResults && isFiltered ? (
+              <div className="empty-library"><div className="empty-library__symbol" aria-hidden="true">◇</div><h3>Aucun élément correspondant</h3><p>Les données locales et synchronisées ont été vérifiées. Modifiez vos filtres ou affichez à nouveau toute la bibliothèque.</p><button type="button" className="button button--secondary" onClick={resetFilters}>Afficher toute la bibliothèque</button></div>
             ) : !hasVisibleResults ? (
               <div className="empty-library"><div className="empty-library__symbol" aria-hidden="true">◇</div><h3>La bibliothèque est vide</h3><p>Aucun support n’est présent localement ni dans la bibliothèque synchronisée.</p></div>
             ) : null}
