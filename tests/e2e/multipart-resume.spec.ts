@@ -451,3 +451,206 @@ test('un échec de vérification initial ne laisse pas un multipart faussement a
   });
 });
 
+
+
+test('une panne D1 après réception R2 reprend le même morceau sans recréer la session', async ({ page }) => {
+  const resourceId = '12121212-1212-4212-8212-121212121212';
+  const versionId = '13131313-1313-4313-8313-131313131313';
+  const subjectId = '14141414-1414-4414-8414-141414141414';
+  const size = 16;
+  const fileBytes = Buffer.alloc(size, 7);
+  const sha256 = createHash('sha256').update(fileBytes).digest('hex');
+  const partAttempts: number[] = [];
+  let failedPartStateOnce = false;
+  let restartCreates = 0;
+
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (request.method() === 'GET' && url.pathname === '/api/bootstrap') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ subjects: [], resources: [] }) });
+      return;
+    }
+    if (request.method() === 'GET' && url.pathname === `/api/resources/${resourceId}`) {
+      await route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { code: 'RESOURCE_NOT_FOUND', message: 'Absent', retryable: false } }),
+      });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname === '/api/resources/register') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, uploadMode: 'multipart' }) });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname === `/api/resource-versions/${versionId}/multipart/create`) {
+      const body = request.postDataJSON() as { restart?: boolean };
+      if (body.restart) restartCreates += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ uploadId: 'upload-existing', partSize: 8, parts: [] }),
+      });
+      return;
+    }
+    if (request.method() === 'PUT' && url.pathname === `/api/resource-versions/${versionId}/multipart/part`) {
+      const partNumber = Number(url.searchParams.get('partNumber'));
+      partAttempts.push(partNumber);
+      if (partNumber === 1 && !failedPartStateOnce) {
+        failedPartStateOnce = true;
+        await route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: {
+              code: 'MULTIPART_PART_STATE_FAILED',
+              message: 'Le morceau a été reçu par R2, mais D1 est temporairement indisponible.',
+              retryable: true,
+            },
+          }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ partNumber, etag: `etag-${partNumber}` }),
+      });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname === `/api/resource-versions/${versionId}/multipart/complete`) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, size, etag: 'final-etag' }) });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname === `/api/resource-versions/${versionId}/extraction-failure`) {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+      return;
+    }
+
+    await route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Route E2E absente.', retryable: false } }),
+    });
+  });
+
+  await page.goto('/bibliotheque');
+  await page.evaluate(async ({ rid, vid, sid, hash, fileSize }) => {
+    const { db } = await import('/src/data/db.ts');
+    const now = new Date().toISOString();
+    await db.subjects.add({
+      id: sid,
+      name: 'Multipart état D1',
+      parentId: null,
+      createdAt: now,
+      updatedAt: now,
+      syncState: 'synced',
+      syncError: null,
+    });
+    await db.resources.add({
+      id: rid,
+      subjectId: sid,
+      title: 'Multipart R2 reçu D1 incertain',
+      kind: 'pdf',
+      currentVersionId: vid,
+      status: 'failed',
+      extractionError: 'Extraction différée.',
+      createdAt: now,
+      updatedAt: now,
+      syncState: 'error',
+      syncError: 'État du morceau non confirmé.',
+    });
+    await db.resourceVersions.add({
+      id: vid,
+      resourceId: rid,
+      sha256: hash,
+      fileName: 'etat-d1.pdf',
+      mimeType: 'application/pdf',
+      size: fileSize,
+      bytes: null,
+      createdAt: now,
+      syncState: 'error',
+      syncError: 'État du morceau non confirmé.',
+    });
+    await db.extractions.add({
+      versionId: vid,
+      status: 'failed',
+      pages: [],
+      charCount: 0,
+      errorCode: 'LARGE_FILE_EXTRACTION_DEFERRED',
+      errorMessage: 'Extraction différée.',
+      createdAt: now,
+    });
+    await db.multipartUploads.add({
+      versionId: vid,
+      resourceId: rid,
+      fileName: 'etat-d1.pdf',
+      size: fileSize,
+      lastModified: 0,
+      sha256: hash,
+      uploadId: 'upload-existing',
+      partSize: 8,
+      parts: [],
+      status: 'error',
+      error: 'État du morceau non confirmé.',
+      updatedAt: now,
+    });
+  }, { rid: resourceId, vid: versionId, sid: subjectId, hash: sha256, fileSize: size });
+
+  const firstFailure = await page.evaluate(async ({ rid, fileSize }) => {
+    const { uploadMultipartResourceWithRecovery } = await import('/src/lib/multipartRecovery.ts');
+    const bytes = new Uint8Array(fileSize);
+    bytes.fill(7);
+    const file = new File([bytes], 'etat-d1.pdf', { type: 'application/pdf', lastModified: 0 });
+    try {
+      await uploadMultipartResourceWithRecovery(rid, file, undefined, { identityAlreadyVerified: true });
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }, { rid: resourceId, fileSize: size });
+
+  expect(firstFailure).toBe('Le morceau a été reçu par R2, mais D1 est temporairement indisponible.');
+  expect(restartCreates).toBe(0);
+  expect(partAttempts).toEqual([1]);
+
+  await expect.poll(async () => page.evaluate(async (vid) => {
+    const { db } = await import('/src/data/db.ts');
+    const session = await db.multipartUploads.get(vid);
+    return session ? { uploadId: session.uploadId, status: session.status, parts: session.parts } : null;
+  }, versionId)).toEqual({
+    uploadId: 'upload-existing',
+    status: 'error',
+    parts: [],
+  });
+
+  const secondFailure = await page.evaluate(async ({ rid, fileSize }) => {
+    const { uploadMultipartResourceWithRecovery } = await import('/src/lib/multipartRecovery.ts');
+    const bytes = new Uint8Array(fileSize);
+    bytes.fill(7);
+    const file = new File([bytes], 'etat-d1.pdf', { type: 'application/pdf', lastModified: 0 });
+    try {
+      await uploadMultipartResourceWithRecovery(rid, file);
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }, { rid: resourceId, fileSize: size });
+
+  expect(secondFailure).toBeNull();
+  expect(restartCreates).toBe(0);
+  expect(partAttempts).toEqual([1, 1, 2]);
+
+  await expect.poll(async () => page.evaluate(async ({ rid, vid }) => {
+    const { db } = await import('/src/data/db.ts');
+    const [resource, session] = await Promise.all([
+      db.resources.get(rid),
+      db.multipartUploads.get(vid),
+    ]);
+    return { syncState: resource?.syncState, hasSession: Boolean(session) };
+  }, { rid: resourceId, vid: versionId })).toEqual({
+    syncState: 'synced',
+    hasSession: false,
+  });
+});
