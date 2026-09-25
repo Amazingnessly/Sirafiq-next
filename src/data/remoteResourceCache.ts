@@ -1,4 +1,4 @@
-import { db } from './db';
+import { db, type ResourceRecord } from './db';
 import type { ResourceDetailPayload } from '../shared/contracts';
 
 /**
@@ -77,4 +77,105 @@ export async function cacheRemoteTextResource(detail: ResourceDetailPayload): Pr
   });
 
   return cached;
+}
+
+
+/**
+ * Repair a local resource whose metadata row survived but whose current
+ * resourceVersions row disappeared. The remote detail is used only as a
+ * fallback after IndexedDB has definitively reported the version missing.
+ *
+ * The local resource id/currentVersionId remain authoritative so existing
+ * routes and references do not change. When duplicate reconciliation had
+ * adopted a different server identity, that identity is restored through the
+ * remoteVersionId field instead.
+ */
+export async function repairMissingLocalResourceVersion(
+  resource: ResourceRecord,
+  detail: ResourceDetailPayload,
+): Promise<boolean> {
+  const expectedRemoteResourceId = resource.remoteResourceId ?? resource.id;
+  if (
+    detail.resource.id !== expectedRemoteResourceId
+    || detail.resource.kind !== resource.kind
+    || detail.version.status === 'uploading'
+  ) {
+    return false;
+  }
+
+  const existing = await db.resourceVersions.get(resource.currentVersionId);
+  if (existing) return true;
+
+  const duplicateSha = await db.resourceVersions.where('sha256').equals(detail.version.sha256).first();
+  if (duplicateSha && duplicateSha.id !== resource.currentVersionId) return false;
+
+  const now = new Date().toISOString();
+  let repaired = false;
+  await db.transaction('rw', db.resources, db.resourceVersions, db.extractions, async () => {
+    if (await db.resourceVersions.get(resource.currentVersionId)) {
+      repaired = true;
+      return;
+    }
+    const conflictingSha = await db.resourceVersions.where('sha256').equals(detail.version.sha256).first();
+    if (conflictingSha && conflictingSha.id !== resource.currentVersionId) return;
+
+    await db.resourceVersions.put({
+      id: resource.currentVersionId,
+      resourceId: resource.id,
+      sha256: detail.version.sha256,
+      fileName: detail.version.fileName,
+      mimeType: detail.version.mimeType,
+      size: detail.version.size,
+      bytes: null,
+      ...(detail.version.id !== resource.currentVersionId ? { remoteVersionId: detail.version.id } : {}),
+      createdAt: resource.createdAt,
+      syncState: 'synced',
+      syncError: null,
+    });
+
+    if (detail.version.extractionStatus === 'ready' && detail.extraction) {
+      await db.extractions.put({
+        versionId: resource.currentVersionId,
+        status: 'ready',
+        pages: detail.extraction.pages,
+        charCount: detail.extraction.charCount,
+        errorCode: null,
+        errorMessage: null,
+        createdAt: now,
+      });
+      await db.resources.update(resource.id, {
+        status: 'ready',
+        extractionError: null,
+        syncState: 'synced',
+        syncError: null,
+      });
+    } else if (detail.version.extractionStatus === 'failed') {
+      const message = detail.version.extractionError ?? 'L’extraction distante a échoué.';
+      await db.extractions.put({
+        versionId: resource.currentVersionId,
+        status: 'failed',
+        pages: [],
+        charCount: 0,
+        errorCode: 'REMOTE_EXTRACTION_FAILED',
+        errorMessage: message,
+        createdAt: now,
+      });
+      await db.resources.update(resource.id, {
+        status: 'failed',
+        extractionError: message,
+        syncState: 'synced',
+        syncError: null,
+      });
+    } else {
+      await db.resources.update(resource.id, {
+        status: 'failed',
+        extractionError: 'L’extraction synchronisée doit encore être récupérée.',
+        syncState: 'synced',
+        syncError: null,
+      });
+    }
+    repaired = true;
+  });
+
+  return repaired;
 }
