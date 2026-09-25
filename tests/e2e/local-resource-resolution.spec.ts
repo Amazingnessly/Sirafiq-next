@@ -140,7 +140,7 @@ test('une ressource locale dont la version a disparu est reconstruite depuis son
       versionId: version?.id ?? null,
       remoteVersionId: version?.remoteVersionId ?? null,
       versionResourceId: version?.resourceId ?? null,
-      bytes: version?.bytes ?? 'missing',
+      bytes: version ? version.bytes : 'missing',
       extractionStatus: extraction?.status ?? null,
       extractedText: extraction?.pages[0]?.text ?? null,
     };
