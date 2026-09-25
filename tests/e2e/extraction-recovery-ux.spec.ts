@@ -70,7 +70,11 @@ test('un PDF synchronisé expose la reprise serveur dans État réel puis appliq
       return;
     }
     if (request.method() === 'POST' && url.pathname === '/api/resources/register') {
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, uploadMode: 'single' }) });
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, uploadMode: 'single', alreadyStored: true }),
+      });
       return;
     }
     if (request.method() === 'POST' && url.pathname === `/api/resource-versions/${VERSION_ID}/server-extraction`) {
@@ -239,4 +243,124 @@ test('une extraction locale absente peut être reconstruite depuis le serveur', 
     extractionStatus: 'ready',
     extractedText,
   });
+});
+
+
+test('une relance d’extraction répare d’abord R2 avec les octets locaux quand le serveur les a perdus', async ({ page }) => {
+  const resourceId = '51515151-5151-4151-8151-515151515151';
+  const versionId = '52525252-5252-4252-8252-525252525252';
+  const subjectId = '53535353-5353-4353-8353-535353535353';
+  const content = 'Copie locale disponible pour réparer le stockage distant.';
+  const extractedText = 'Extraction serveur après réparation réelle du fichier distant.';
+  const hash = 'd'.repeat(64);
+  let blobUploads = 0;
+  let serverExtractionCalls = 0;
+
+  await page.route('**/api/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+
+    if (request.method() === 'GET' && url.pathname === '/api/bootstrap') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ subjects: [], resources: [] }) });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname === '/api/resources/register') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, uploadMode: 'single', alreadyStored: false }),
+      });
+      return;
+    }
+    if (request.method() === 'PUT' && url.pathname === `/api/resource-versions/${versionId}/blob`) {
+      blobUploads += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true }),
+      });
+      return;
+    }
+    if (request.method() === 'POST' && url.pathname === `/api/resource-versions/${versionId}/server-extraction`) {
+      serverExtractionCalls += 1;
+      expect(blobUploads).toBe(1);
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          status: 'ready',
+          pages: [{ pageNumber: 1, text: extractedText }],
+          charCount: extractedText.length,
+        }),
+      });
+      return;
+    }
+
+    await route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Route de test absente.', retryable: false } }),
+    });
+  });
+
+  await page.goto('/bibliotheque');
+  await page.evaluate(async ({ resourceId: rid, versionId: vid, subjectId: sid, content: value, sha256 }) => {
+    const { db } = await import('/src/data/db.ts');
+    const now = new Date().toISOString();
+    const bytes = new TextEncoder().encode(value).buffer;
+
+    await db.subjects.add({
+      id: sid,
+      name: 'Réparation stockage avant extraction',
+      parentId: null,
+      createdAt: now,
+      updatedAt: now,
+      syncState: 'synced',
+      syncError: null,
+    });
+    await db.resources.add({
+      id: rid,
+      subjectId: sid,
+      title: 'Texte stockage distant perdu',
+      kind: 'text',
+      currentVersionId: vid,
+      status: 'failed',
+      extractionError: 'Extraction à relancer.',
+      createdAt: now,
+      updatedAt: now,
+      syncState: 'synced',
+      syncError: null,
+    });
+    await db.resourceVersions.add({
+      id: vid,
+      resourceId: rid,
+      sha256,
+      fileName: 'repair-before-extract.txt',
+      mimeType: 'text/plain',
+      size: bytes.byteLength,
+      bytes,
+      createdAt: now,
+      syncState: 'synced',
+      syncError: null,
+    });
+    await db.extractions.add({
+      versionId: vid,
+      status: 'failed',
+      pages: [],
+      charCount: 0,
+      errorCode: 'REMOTE_STORAGE_LOST',
+      errorMessage: 'Extraction à relancer.',
+      createdAt: now,
+    });
+  }, { resourceId, versionId, subjectId, content, sha256: hash });
+
+  await page.goto(`/bibliotheque/${resourceId}`);
+  const retry = page.getByLabel('Récupération de l’extraction')
+    .getByRole('button', { name: 'Retenter l’extraction avec le serveur' });
+  await expect(retry).toBeVisible();
+  await retry.click();
+
+  await expect(page.getByText(extractedText)).toBeVisible();
+  expect(blobUploads).toBe(1);
+  expect(serverExtractionCalls).toBe(1);
 });
