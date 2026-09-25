@@ -198,15 +198,18 @@ async function reconcileAlreadyStoredRemote(resourceId: string, retryUploadingFi
   const session = await db.multipartUploads.get(resource.currentVersionId);
   if (!version || !extraction || !session) return false;
 
+  const remoteResourceId = resource.remoteResourceId ?? resource.id;
+  const remoteVersionId = version.remoteVersionId ?? version.id;
+
   let remote: ResourceDetailPayload;
   try {
-    remote = await apiJson<ResourceDetailPayload>(`/api/resources/${encodeURIComponent(resource.id)}`);
+    remote = await apiJson<ResourceDetailPayload>(`/api/resources/${encodeURIComponent(remoteResourceId)}`);
   } catch (error) {
     if (error instanceof ApiRequestError && error.status === 404) return false;
     throw error;
   }
 
-  const sameObject = remote.version.id === version.id
+  const sameObject = remote.version.id === remoteVersionId
     && remote.version.sha256 === version.sha256
     && remote.version.size === version.size;
   if (!sameObject) return false;
@@ -227,7 +230,7 @@ async function reconcileAlreadyStoredRemote(resourceId: string, retryUploadingFi
     // discarding a valid large-file session and sending every byte again.
     try {
       await apiJson(
-        `/api/resource-versions/${encodeURIComponent(version.id)}/multipart/complete`,
+        `/api/resource-versions/${encodeURIComponent(remoteVersionId)}/multipart/complete`,
         { method: 'POST', body: JSON.stringify({ uploadId: session.uploadId }) },
         120_000,
       );
@@ -250,12 +253,12 @@ async function reconcileAlreadyStoredRemote(resourceId: string, retryUploadingFi
       pages: extraction.pages,
       charCount: extraction.charCount,
     };
-    await apiJson(`/api/resource-versions/${encodeURIComponent(version.id)}/extraction`, {
+    await apiJson(`/api/resource-versions/${encodeURIComponent(remoteVersionId)}/extraction`, {
       method: 'POST',
       body: JSON.stringify(payload),
     });
   } else if (remote.version.extractionStatus !== 'failed') {
-    await apiJson(`/api/resource-versions/${encodeURIComponent(version.id)}/extraction-failure`, {
+    await apiJson(`/api/resource-versions/${encodeURIComponent(remoteVersionId)}/extraction-failure`, {
       method: 'POST',
       body: JSON.stringify({
         code: extraction.errorCode ?? 'LARGE_FILE_EXTRACTION_DEFERRED',
@@ -280,9 +283,10 @@ async function forceFreshMultipartSession(resourceId: string): Promise<void> {
   const session = await db.multipartUploads.get(resource.currentVersionId);
   if (!version || !session) throw new Error('La session multipart locale est introuvable.');
 
+  const remoteVersionId = version.remoteVersionId ?? version.id;
   const partSize = session.partSize || MULTIPART_PART_BYTES;
   const fresh = await apiJson<MultipartCreateResult>(
-    `/api/resource-versions/${encodeURIComponent(version.id)}/multipart/create`,
+    `/api/resource-versions/${encodeURIComponent(remoteVersionId)}/multipart/create`,
     { method: 'POST', body: JSON.stringify({ partSize, restart: true }) },
   );
   await db.multipartUploads.update(version.id, {
