@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { StatusPill } from '../../components/StatusPill';
-import { db, type ExtractionRecord, type ResourceRecord } from '../../data/db';
+import { db, type ExtractionRecord, type ResourceRecord, type ResourceVersionRecord } from '../../data/db';
 import { retrySyncForResource } from '../../data/repository';
-import { cacheRemoteTextResource } from '../../data/remoteResourceCache';
+import { cacheRemoteTextResource, repairMissingLocalResourceVersion } from '../../data/remoteResourceCache';
 import { useDexieQuery } from '../../data/useDexieQuery';
 import { ApiRequestError, apiJson } from '../../lib/api';
 import { sha256Hex } from '../../lib/hash';
@@ -25,7 +25,11 @@ export function ResourcePage() {
   const [searchParams] = useSearchParams();
   const backToLibrary = libraryReturnHref(searchParams.get('library'));
   const localResource = useDexieQuery<ResourceRecord | undefined | null>(() => db.resources.get(resourceId), [resourceId], null);
-  const localVersion = useDexieQuery(() => localResource ? db.resourceVersions.get(localResource.currentVersionId) : Promise.resolve(undefined), [localResource?.currentVersionId], undefined);
+  const localVersion = useDexieQuery<ResourceVersionRecord | undefined | null>(
+    () => localResource ? db.resourceVersions.get(localResource.currentVersionId) : Promise.resolve(undefined),
+    [localResource?.currentVersionId],
+    null,
+  );
   const localExtraction = useDexieQuery<ExtractionRecord | undefined | null>(
     () => localResource ? db.extractions.get(localResource.currentVersionId) : Promise.resolve(undefined),
     [localResource?.currentVersionId],
@@ -34,7 +38,18 @@ export function ResourcePage() {
   const multipartSession = useDexieQuery(() => localResource ? db.multipartUploads.get(localResource.currentVersionId) : Promise.resolve(undefined), [localResource?.currentVersionId], undefined);
   const syncAttempt = useDexieQuery(() => localResource ? db.outbox.where('entityId').equals(localResource.id).and((item) => item.type === 'resource.sync').first() : Promise.resolve(undefined), [localResource?.id], undefined);
   const subject = useDexieQuery(() => localResource ? db.subjects.get(localResource.subjectId) : Promise.resolve(undefined), [localResource?.subjectId], undefined);
-  const remote = useQuery({ queryKey: ['resource', resourceId], queryFn: () => apiJson<ResourceDetailPayload>(`/api/resources/${encodeURIComponent(resourceId)}`), enabled: Boolean(resourceId && localResource !== null && !localResource), retry: 1 });
+  const remoteLookupId = localResource?.remoteResourceId ?? resourceId;
+  const needsRemoteDetail = Boolean(
+    remoteLookupId
+    && localResource !== null
+    && (!localResource || localVersion === undefined)
+  );
+  const remote = useQuery({
+    queryKey: ['resource', remoteLookupId],
+    queryFn: () => apiJson<ResourceDetailPayload>(`/api/resources/${encodeURIComponent(remoteLookupId)}`),
+    enabled: needsRemoteDetail,
+    retry: 1,
+  });
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [extracting, setExtracting] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
@@ -51,26 +66,42 @@ export function ResourcePage() {
   }, [localVersion?.bytes, localVersion?.mimeType]);
 
   useEffect(() => {
-    if (localResource || !remote.data) return;
-    void cacheRemoteTextResource(remote.data).catch((error) => {
-      console.error('Remote text local cache failed', error);
-    });
-  }, [localResource, remote.data]);
+    if (!remote.data) return;
+    if (!localResource) {
+      void cacheRemoteTextResource(remote.data).catch((error) => {
+        console.error('Remote text local cache failed', error);
+      });
+      return;
+    }
+    if (localVersion === undefined) {
+      void repairMissingLocalResourceVersion(localResource, remote.data).catch((error) => {
+        console.error('Remote version metadata recovery failed', error);
+      });
+    }
+  }, [localResource, localVersion, remote.data]);
 
 
   const title = localResource?.title ?? remote.data?.resource.title;
   const kind = localResource?.kind ?? remote.data?.resource.kind;
   const versionId = localResource?.currentVersionId ?? remote.data?.version.id;
-  const remoteVersionId = localVersion?.remoteVersionId ?? versionId;
+  const remoteVersionId = localVersion?.remoteVersionId
+    ?? (localVersion ? localVersion.id : remote.data?.version.id)
+    ?? versionId;
   const pages: ExtractedPage[] = useMemo(() => {
     if (localExtraction) return localExtraction.status === 'ready' ? localExtraction.pages : [];
     if (remote.data?.version.extractionStatus === 'ready') return remote.data.extraction?.pages ?? [];
     return [];
   }, [localExtraction, remote.data?.extraction?.pages, remote.data?.version.extractionStatus]);
   const extractionFailed = localExtraction?.status === 'failed' || remote.data?.version.extractionStatus === 'failed';
-  const remoteExtractionPending = Boolean(!localResource && remote.data?.version.status !== 'uploading' && remote.data?.version.extractionStatus === 'pending');
+  const remoteExtractionPending = Boolean(
+    (!localResource || localVersion === undefined)
+    && remote.data?.version.status !== 'uploading'
+    && remote.data?.version.extractionStatus === 'pending'
+  );
   const extractionError = localExtraction?.errorMessage ?? remote.data?.version.extractionError;
-  const remoteBlobAvailable = localResource ? localResource.syncState === 'synced' : remote.data?.version.status !== 'uploading';
+  const remoteBlobAvailable = localVersion
+    ? localResource?.syncState === 'synced'
+    : remote.data?.version.status !== 'uploading';
   const pdfUrl = blobUrl ?? (remoteVersionId && remoteBlobAvailable ? `/api/resource-versions/${encodeURIComponent(remoteVersionId)}/blob` : null);
   const terminalSyncFailure = Boolean(syncAttempt?.lastError && isTerminalOutboxAttempt(syncAttempt.nextAttemptAt));
   const localExtractionMissing = Boolean(localResource && localVersion && localExtraction === undefined);
@@ -133,10 +164,17 @@ export function ResourcePage() {
     }
   }
 
-  if (localResource === null || (!localResource && remote.isPending)) return <div className="page"><div className="loading-card">Ouverture du support…</div></div>;
-  if (!localResource && remote.isError) {
+  if (
+    localResource === null
+    || (Boolean(localResource) && localVersion === null)
+    || (needsRemoteDetail && remote.isPending)
+  ) {
+    return <div className="page"><div className="loading-card">Ouverture du support…</div></div>;
+  }
+  if (needsRemoteDetail && remote.isError) {
     const missing = remote.error instanceof ApiRequestError && remote.error.status === 404;
-    return <div className="page"><Link className="back-link" to={backToLibrary}>← Bibliothèque</Link><div className="error-page"><h1>{missing ? 'Support introuvable' : 'Impossible de charger le support'}</h1><p>{missing ? 'Ce support n’est disponible ni dans le stockage local ni sur le serveur.' : 'Le serveur n’a pas pu être joint ou a rencontré une erreur. Le support n’est pas déclaré absent.'}</p>{!missing && <button className="button button--secondary" type="button" onClick={() => void remote.refetch()}>Réessayer</button>}</div></div>;
+    const localVersionMissing = Boolean(localResource && localVersion === undefined);
+    return <div className="page"><Link className="back-link" to={backToLibrary}>← Bibliothèque</Link><div className="error-page"><h1>{missing ? 'Support introuvable' : localVersionMissing ? 'Impossible de récupérer la version du support' : 'Impossible de charger le support'}</h1><p>{missing ? localVersionMissing ? 'La ressource locale existe, mais sa version n’est disponible ni dans IndexedDB ni sur le serveur synchronisé.' : 'Ce support n’est disponible ni dans le stockage local ni sur le serveur.' : localVersionMissing ? 'La version locale est incomplète et le serveur n’a pas pu être joint pour la reconstruire. Sirāfiq ne la déclare pas perdue.' : 'Le serveur n’a pas pu être joint ou a rencontré une erreur. Le support n’est pas déclaré absent.'}</p>{!missing && <button className="button button--secondary" type="button" onClick={() => void remote.refetch()}>Réessayer</button>}</div></div>;
   }
   if (!title) return <div className="page"><Link className="back-link" to={backToLibrary}>← Bibliothèque</Link><div className="error-page"><h1>Support introuvable</h1><p>Ce support n’est disponible ni dans le stockage local ni sur le serveur.</p></div></div>;
 
