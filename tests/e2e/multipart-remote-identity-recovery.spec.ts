@@ -255,9 +255,11 @@ test('une finalisation incertaine après déduplication se réconcilie avec les 
     size: fileBytes.length,
   });
 
-  const failure = await page.evaluate(async ({ resourceId, bytes }) => {
+  const failure = await page.evaluate(async ({ resourceId, size }) => {
     const { uploadMultipartResourceWithRecovery } = await import('/src/lib/multipartRecovery.ts');
-    const file = new File([new Uint8Array(bytes)], 'local.pdf', {
+    const bytes = new Uint8Array(size);
+    bytes.fill(9);
+    const file = new File([bytes], 'local.pdf', {
       type: 'application/pdf',
       lastModified: 0,
     });
@@ -269,7 +271,7 @@ test('une finalisation incertaine après déduplication se réconcilie avec les 
     }
   }, {
     resourceId: LOCAL_RESOURCE_ID,
-    bytes: fileBytes,
+    size: fileBytes.length,
   });
 
   expect(failure).toBeNull();
