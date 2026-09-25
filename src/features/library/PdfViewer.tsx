@@ -5,6 +5,7 @@ type PdfViewerProps = {
   src: string;
   title: string;
   storageId?: string;
+  onReadError?: () => void;
 };
 
 type PdfViewport = { width: number; height: number };
@@ -30,7 +31,7 @@ function savePage(identity: string, pageNumber: number) {
   try { window.localStorage.setItem(pageStorageKey(identity), String(pageNumber)); } catch { /* Reading remains usable if Safari blocks storage. */ }
 }
 
-export function PdfViewer({ src, title, storageId }: PdfViewerProps) {
+export function PdfViewer({ src, title, storageId, onReadError }: PdfViewerProps) {
   const storageIdentity = storageId ?? src;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -61,12 +62,17 @@ export function PdfViewer({ src, title, storageId }: PdfViewerProps) {
         const pdfDocument = await loadingTask.promise;
         if (cancelled) { await pdfDocument.destroy(); return; }
         documentRef.current = pdfDocument; setPageCount(pdfDocument.numPages); setPageNumber(readSavedPage(storageIdentity, pdfDocument.numPages));
-      } catch (cause) { if (!cancelled) setError(cause instanceof Error ? cause.message : 'Le PDF n’a pas pu être ouvert.'); }
+      } catch (cause) {
+        if (!cancelled) {
+          setError(cause instanceof Error ? cause.message : 'Le PDF n’a pas pu être ouvert.');
+          onReadError?.();
+        }
+      }
       finally { if (!cancelled) setLoadingDocument(false); }
     }
     void openDocument();
     return () => { cancelled = true; renderTaskRef.current?.cancel(); renderTaskRef.current = null; const currentDocument = documentRef.current; documentRef.current = null; if (currentDocument) void currentDocument.destroy(); else if (loadingTask) void loadingTask.destroy(); };
-  }, [src, storageIdentity]);
+  }, [onReadError, src, storageIdentity]);
 
   useEffect(() => { if (pageCount > 0) savePage(storageIdentity, pageNumber); }, [pageCount, pageNumber, storageIdentity]);
 
@@ -82,14 +88,19 @@ export function PdfViewer({ src, title, storageId }: PdfViewerProps) {
         const context = canvasElement.getContext('2d', { alpha: false }); if (!context) throw new Error('Le moteur de dessin du navigateur est indisponible.');
         canvasElement.width = Math.max(1, Math.floor(viewport.width * outputScale)); canvasElement.height = Math.max(1, Math.floor(viewport.height * outputScale)); canvasElement.style.width = `${Math.floor(viewport.width)}px`; canvasElement.style.height = `${Math.floor(viewport.height)}px`;
         const transform = outputScale === 1 ? undefined : [outputScale, 0, 0, outputScale, 0, 0] as [number, number, number, number, number, number]; const renderTask = page.render({ canvasContext: context, viewport, transform, canvas: canvasElement }); renderTaskRef.current = renderTask; await renderTask.promise;
-      } catch (cause) { if (!cancelled && !(cause instanceof Error && cause.name === 'RenderingCancelledException')) setError(cause instanceof Error ? cause.message : 'Cette page n’a pas pu être affichée.'); }
+      } catch (cause) {
+        if (!cancelled && !(cause instanceof Error && cause.name === 'RenderingCancelledException')) {
+          setError(cause instanceof Error ? cause.message : 'Cette page n’a pas pu être affichée.');
+          onReadError?.();
+        }
+      }
       finally {
         page?.cleanup();
         if (!cancelled) setRenderingPage(false);
       }
     }
     void renderPage(currentDocument, currentCanvas); return () => { cancelled = true; renderTaskRef.current?.cancel(); renderTaskRef.current = null; };
-  }, [pageCount, pageNumber, stageWidth]);
+  }, [onReadError, pageCount, pageNumber, stageWidth]);
 
   function goToPage(nextPage: number) { if (!Number.isFinite(nextPage)) return; setPageNumber(Math.min(Math.max(Math.trunc(nextPage), 1), pageCount || 1)); }
 
