@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { StatusPill } from '../../components/StatusPill';
@@ -8,7 +8,7 @@ import { cacheRemoteTextResource, repairMissingLocalResourceVersion } from '../.
 import { useDexieQuery } from '../../data/useDexieQuery';
 import { ApiRequestError, apiJson } from '../../lib/api';
 import { sha256Hex } from '../../lib/hash';
-import { uploadMultipartResourceWithRecovery } from '../../lib/multipartRecovery';
+import { repairFinalizedMultipartResource, uploadMultipartResourceWithRecovery } from '../../lib/multipartRecovery';
 import { isTerminalOutboxAttempt } from '../../lib/retryableSync';
 import { requestSync, retryServerExtractionForResource, type TransferProgress } from '../../lib/sync';
 import {
@@ -16,6 +16,7 @@ import {
   SERVER_TEXT_EXTRACTION_MAX_BYTES,
   canUseServerExtraction,
   shouldTryServerExtraction,
+  shouldUseMultipartUpload,
 } from '../../shared/importPolicy';
 import type { ExtractedPage, ResourceDetailPayload } from '../../shared/contracts';
 import { PdfViewer } from './PdfViewer';
@@ -57,6 +58,11 @@ export function ResourcePage() {
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [resuming, setResuming] = useState(false);
   const [transferProgress, setTransferProgress] = useState<TransferProgress | null>(null);
+  const [storageRepairNeeded, setStorageRepairNeeded] = useState(false);
+  const [storageRepairFile, setStorageRepairFile] = useState<File | null>(null);
+  const [repairingStorage, setRepairingStorage] = useState(false);
+  const [storageRepairError, setStorageRepairError] = useState<string | null>(null);
+  const [pdfRepairRevision, setPdfRepairRevision] = useState(0);
 
   useEffect(() => {
     if (!localVersion?.bytes) { setBlobUrl(null); return; }
@@ -131,6 +137,24 @@ export function ResourcePage() {
   const extractionNeedsRecovery = extractionFailed || remoteExtractionPending || localExtractionMissing;
   const extractionRecoveryReason = getExtractionRecoveryReason({ kind, extractionNeedsRecovery, hasPages: pages.length > 0, syncState: localResource?.syncState, size: localVersion?.size ?? remote.data?.version.size, hasLocalResource: Boolean(localResource), hasLocalExtraction: Boolean(localExtraction), hasMultipartSession: Boolean(multipartSession), canRetry: canRetryExtraction });
 
+  const inspectPdfReadFailure = useCallback(() => {
+    if (
+      !localResource
+      || !localVersion
+      || localVersion.bytes
+      || !remoteVersionId
+      || multipartSession
+      || localResource.syncState !== 'synced'
+      || !shouldUseMultipartUpload(localVersion.size)
+    ) {
+      return;
+    }
+
+    void probeRemoteBlobStorage(remoteVersionId).then((status) => {
+      if (status === 'repair-needed') setStorageRepairNeeded(true);
+    });
+  }, [localResource, localVersion, multipartSession, remoteVersionId]);
+
   async function retrySync() { if (!localResource || terminalSyncFailure) return; setRetryError(null); try { await retrySyncForResource(localResource.id); await requestSync(); } catch (error) { setRetryError(error instanceof Error ? error.message : 'La synchronisation a échoué.'); } }
   async function resumeMultipart() {
     if (!localResource || !localVersion || !multipartSession || !resumeFile || resuming) return;
@@ -142,6 +166,23 @@ export function ResourcePage() {
       await uploadMultipartResourceWithRecovery(localResource.id, resumeFile, setTransferProgress); setResumeFile(null);
     } catch (error) { setRetryError(error instanceof Error ? error.message : 'La reprise de l’envoi a échoué.'); } finally { setResuming(false); }
   }
+  async function repairRemoteStorage() {
+    if (!localResource || !storageRepairFile || repairingStorage) return;
+    setRepairingStorage(true);
+    setStorageRepairError(null);
+    setTransferProgress(null);
+    try {
+      await repairFinalizedMultipartResource(localResource.id, storageRepairFile, setTransferProgress);
+      setStorageRepairFile(null);
+      setStorageRepairNeeded(false);
+      setPdfRepairRevision((value) => value + 1);
+    } catch (error) {
+      setStorageRepairError(error instanceof Error ? error.message : 'La réparation du fichier distant a échoué.');
+    } finally {
+      setRepairingStorage(false);
+    }
+  }
+
   async function retryExtraction() {
     if (extracting) return;
     setExtracting(true); setExtractionRetryError(null);
@@ -182,9 +223,10 @@ export function ResourcePage() {
     <Link className="back-link" to={backToLibrary}>← Bibliothèque</Link>
     <header className="resource-header"><div><p className="eyebrow">{subject?.name ?? 'Support'}</p><h1>{title}</h1><p className="resource-meta">{kind === 'pdf' ? 'Document PDF' : 'Texte'}{localVersion ? ` · ${formatBytes(localVersion.size)}` : remote.data ? ` · ${formatBytes(remote.data.version.size)}` : ''}</p></div>{localResource && <StatusPill status={localResource.status} syncState={localResource.syncState} />}</header>
     {localResource?.syncState === 'error' && <div className="error-box error-box--wide" role="alert"><div><strong>{multipartSession ? 'L’envoi du gros fichier est interrompu.' : terminalSyncFailure ? 'La synchronisation de ce support est bloquée.' : 'Le support est enregistré localement, mais la synchronisation a échoué.'}</strong><span>{localResource.syncError}</span>{multipartSession && <small>Les morceaux déjà confirmés sont conservés. Resélectionnez le même fichier pour reprendre sans repartir de zéro.</small>}{terminalSyncFailure && !multipartSession && <small>Cette erreur ne peut pas être corrigée par une nouvelle tentative automatique. Vérifiez le support local avant de poursuivre.</small>}</div>{multipartSession ? <div className="multipart-resume"><input aria-label="Fichier à reprendre" type="file" accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown" disabled={resuming} onChange={(event) => setResumeFile(event.target.files?.[0] ?? null)} />{transferProgress && <span>{progressLabel(transferProgress)}</span>}<button className="button button--secondary" type="button" disabled={!resumeFile || resuming} onClick={resumeMultipart}>{resuming ? 'Reprise en cours…' : 'Reprendre l’envoi'}</button></div> : terminalSyncFailure ? null : <button className="button button--secondary" type="button" onClick={retrySync}>Retenter la synchronisation</button>}{retryError && <span className="field-error">{retryError}</span>}</div>}
-    {extractionFailed && <div className="extraction-warning" role="alert"><div className="extraction-warning__icon" aria-hidden="true">!</div><div><strong>Contenu non exploitable automatiquement</strong><p>{extractionError || 'Le texte n’a pas pu être extrait.'}</p><small>{multipartSession ? 'Le fichier n’est pas encore déclaré entièrement stocké. Sirāfiq n’utilisera pas ce contenu pour des activités.' : kind === 'pdf' ? 'Le fichier reste conservé et consultable. Sirāfiq ne prétendra pas créer des activités à partir de ce contenu.' : 'Le fichier reste conservé. Sirāfiq ne prétendra pas qu’il est lisible tant que son texte n’a pas été extrait.'}</small></div></div>}
+    {storageRepairNeeded && !multipartSession && <div className="error-box error-box--wide" role="alert" aria-label="Réparation du fichier distant"><div><strong>Le fichier distant doit être réparé.</strong><span>R2 ne contient plus exactement le PDF attendu. Resélectionnez le fichier original : Sirāfiq vérifiera son SHA-256 complet avant d’envoyer le moindre morceau.</span></div><div className="multipart-resume"><input aria-label="Fichier original à réparer" type="file" accept=".pdf,application/pdf" disabled={repairingStorage} onChange={(event) => setStorageRepairFile(event.target.files?.[0] ?? null)} />{transferProgress && <span>{progressLabel(transferProgress)}</span>}<button className="button button--secondary" type="button" disabled={!storageRepairFile || repairingStorage} onClick={repairRemoteStorage}>{repairingStorage ? 'Réparation en cours…' : 'Réparer le fichier distant'}</button></div>{storageRepairError && <span className="field-error">{storageRepairError}</span>}</div>}
+    {extractionFailed && <div className="extraction-warning" role="alert"><div className="extraction-warning__icon" aria-hidden="true">!</div><div><strong>Contenu non exploitable automatiquement</strong><p>{extractionError || 'Le texte n’a pas pu être extrait.'}</p><small>{multipartSession ? 'Le fichier n’est pas encore déclaré entièrement stocké. Sirāfiq n’utilisera pas ce contenu pour des activités.' : storageRepairNeeded ? 'Le fichier distant n’est pas déclaré consultable tant que sa réparation R2 n’est pas terminée.' : kind === 'pdf' ? 'Le fichier reste conservé et consultable. Sirāfiq ne prétendra pas créer des activités à partir de ce contenu.' : 'Le fichier reste conservé. Sirāfiq ne prétendra pas qu’il est lisible tant que son texte n’a pas été extrait.'}</small></div></div>}
     <div className={`viewer-layout${kind === 'pdf' ? ' viewer-layout--pdf' : ''}`}>
-      {kind === 'pdf' ? (pdfUrl ? <PdfViewer src={pdfUrl} title={title} storageId={versionId} /> : <div className="loading-card">{multipartSession ? 'Le PDF sera consultable après la finalisation de l’envoi.' : 'Le fichier PDF n’est pas disponible.'}</div>) : <section className="text-viewer">{pages.length ? pages.map((page) => <article key={page.pageNumber}>{pages.length > 1 && <span className="page-number">Bloc {page.pageNumber}</span>}<p>{page.text}</p></article>) : <p className="muted">Aucun texte extrait n’est disponible.</p>}</section>}
+      {kind === 'pdf' ? (pdfUrl ? <PdfViewer key={`${versionId ?? 'pdf'}:${pdfRepairRevision}`} src={pdfUrl} title={title} storageId={versionId} onReadError={inspectPdfReadFailure} /> : <div className="loading-card">{multipartSession ? 'Le PDF sera consultable après la finalisation de l’envoi.' : 'Le fichier PDF n’est pas disponible.'}</div>) : <section className="text-viewer">{pages.length ? pages.map((page) => <article key={page.pageNumber}>{pages.length > 1 && <span className="page-number">Bloc {page.pageNumber}</span>}<p>{page.text}</p></article>) : <p className="muted">Aucun texte extrait n’est disponible.</p>}</section>}
       <aside className="source-panel"><p className="eyebrow">État réel</p><h2>Extraction</h2>{pages.length ? <><strong className="large-stat">{pages.reduce((sum, page) => sum + page.text.length, 0).toLocaleString('fr-FR')}</strong><span>caractères extraits</span><div className="source-rule" /><p>{pages.length} bloc{pages.length > 1 ? 's' : ''} de texte disponible{pages.length > 1 ? 's' : ''} pour les prochaines activités.</p></> : <p>Aucune donnée textuelle n’est déclarée utilisable.</p>}{extractionNeedsRecovery && !pages.length && <div className="source-recovery" aria-label="Récupération de l’extraction"><strong>Récupération</strong>{canRetryExtraction ? <button className="button button--secondary" type="button" onClick={retryExtraction} disabled={extracting}>{extracting ? 'Extraction en cours…' : 'Retenter l’extraction avec le serveur'}</button> : extractionRecoveryReason ? <p>{extractionRecoveryReason}</p> : null}{extractionRetryError && <span className="source-recovery__error" role="alert">{extractionRetryError}</span>}</div>}<div className="source-note">Les activités pédagogiques ne sont pas encore activées dans cette version.</div></aside>
     </div>
   </div>;
@@ -213,6 +255,30 @@ function getExtractionRecoveryReason(input: { kind: 'text' | 'pdf' | undefined; 
   if (input.hasLocalResource && !input.hasLocalExtraction) return 'L’état local d’extraction est incomplet. Aucune relance ne sera proposée tant qu’il n’est pas cohérent.';
   return 'La reprise serveur n’est pas disponible pour cet état du support.';
 }
+async function probeRemoteBlobStorage(versionId: string): Promise<'available' | 'repair-needed' | 'unknown'> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch(`/api/resource-versions/${encodeURIComponent(versionId)}/blob`, {
+      headers: { Range: 'bytes=0-0', Accept: 'application/json' },
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    if (response.ok) return 'available';
+    try {
+      const payload = await response.json() as { error?: { code?: unknown } };
+      const code = typeof payload.error?.code === 'string' ? payload.error.code : null;
+      return code === 'FILE_NOT_FOUND' || code === 'FILE_INTEGRITY_ERROR' ? 'repair-needed' : 'unknown';
+    } catch {
+      return 'unknown';
+    }
+  } catch {
+    return 'unknown';
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
 function progressLabel(progress: TransferProgress): string { const percent = progress.totalBytes ? Math.round((progress.processedBytes / progress.totalBytes) * 100) : 0; if (progress.phase === 'hashing') return `Vérification · ${percent} %`; if (progress.phase === 'finalizing') return 'Assemblage final…'; return `Morceau ${progress.partNumber ?? 0}/${progress.partCount ?? 0} · ${percent} %`; }
 function formatBytes(bytes: number): string { if (bytes < 1024) return `${bytes} o`; if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} Ko`; return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`; }
 
