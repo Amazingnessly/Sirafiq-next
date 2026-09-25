@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
 import { StatusPill } from '../../components/StatusPill';
 import { SubjectSyncFailurePanel } from '../../components/SubjectSyncFailurePanel';
-import { db } from '../../data/db';
+import { db, type ResourceRecord, type SubjectRecord } from '../../data/db';
 import { useDexieQuery } from '../../data/useDexieQuery';
 import { apiJson } from '../../lib/api';
 import { isTerminalOutboxAttempt } from '../../lib/retryableSync';
@@ -18,9 +18,12 @@ function normalizeSearchText(value: string) {
 type StatusFilter = 'all' | 'ready' | 'failed' | 'sync-error';
 
 export function LibraryPage() {
-  const subjects = useDexieQuery(() => db.subjects.orderBy('name').toArray(), [], []);
-  const resources = useDexieQuery(() => db.resources.orderBy('updatedAt').reverse().toArray(), [], []);
+  const subjectRows = useDexieQuery<SubjectRecord[] | null>(() => db.subjects.orderBy('name').toArray(), [], null);
+  const resourceRows = useDexieQuery<ResourceRecord[] | null>(() => db.resources.orderBy('updatedAt').reverse().toArray(), [], null);
   const resourceOutbox = useDexieQuery(() => db.outbox.where('type').equals('resource.sync').toArray(), [], []);
+  const localDataPending = subjectRows === null || resourceRows === null;
+  const subjects = subjectRows ?? [];
+  const resources = resourceRows ?? [];
   const remoteBootstrap = useQuery({
     queryKey: ['library-bootstrap'],
     queryFn: () => apiJson<BootstrapPayload>('/api/bootstrap'),
@@ -128,6 +131,21 @@ export function LibraryPage() {
     ? `/bibliotheque/${resourceId}?library=${encodeURIComponent(libraryContext)}`
     : `/bibliotheque/${resourceId}`;
   const resetFilters = () => setSearchParams({}, { replace: true });
+
+  if (localDataPending) {
+    return (
+      <div className="page">
+        <header className="page-header library-header">
+          <div>
+            <p className="eyebrow">Bibliothèque de travail</p>
+            <h1>Vos supports, sans ambiguïté.</h1>
+            <p className="lede">Sirāfiq lit d’abord les données conservées sur cet appareil avant de conclure quoi que ce soit sur votre bibliothèque.</p>
+          </div>
+        </header>
+        <div className="loading-card" role="status">Chargement de la bibliothèque locale…</div>
+      </div>
+    );
+  }
 
   return (
     <div className="page">
