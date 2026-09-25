@@ -5,9 +5,9 @@ import type {
   ResourceDetailPayload,
   ServerExtractionResult,
 } from '../shared/contracts';
-import { MULTIPART_PART_BYTES } from '../shared/importPolicy';
+import { MULTIPART_PART_BYTES, shouldUseMultipartUpload } from '../shared/importPolicy';
 import { ApiRequestError, apiJson } from './api';
-import { verifyMultipartFileIdentity } from './multipartFileIdentity';
+import { verifyFileAgainstVersion, verifyMultipartFileIdentity } from './multipartFileIdentity';
 import { uploadMultipartResource, type TransferProgress } from './sync';
 
 const FINALIZATION_RECOVERY_CODES = new Set([
@@ -56,6 +56,52 @@ export async function recoverInterruptedMultipartSessionsAfterReload(): Promise<
   });
 
   return recovered;
+}
+
+export async function repairFinalizedMultipartResource(
+  resourceId: string,
+  file: File,
+  onProgress?: (progress: TransferProgress) => void,
+): Promise<void> {
+  const resource = await db.resources.get(resourceId);
+  if (!resource) throw new Error('Le support local est introuvable.');
+  const version = await db.resourceVersions.get(resource.currentVersionId);
+  if (!version) throw new Error('La version locale du support est introuvable.');
+  if (!shouldUseMultipartUpload(version.size)) {
+    throw new Error('Ce support n’utilise pas le stockage multipart.');
+  }
+  if (await db.multipartUploads.get(version.id)) {
+    throw new Error('Une session multipart existe déjà pour ce support.');
+  }
+
+  await verifyFileAgainstVersion(file, version, onProgress);
+
+  const now = new Date().toISOString();
+  await db.transaction('rw', db.resources, db.resourceVersions, db.multipartUploads, async () => {
+    await db.multipartUploads.put({
+      versionId: version.id,
+      resourceId: resource.id,
+      fileName: file.name || version.fileName,
+      size: version.size,
+      lastModified: file.lastModified,
+      sha256: version.sha256,
+      uploadId: null,
+      partSize: MULTIPART_PART_BYTES,
+      parts: [],
+      status: 'pending',
+      error: null,
+      updatedAt: now,
+    });
+    await db.resources.update(resource.id, { syncState: 'pending', syncError: null });
+    await db.resourceVersions.update(version.id, { syncState: 'pending', syncError: null });
+  });
+
+  await uploadMultipartResourceWithRecovery(
+    resource.id,
+    file,
+    onProgress,
+    { identityAlreadyVerified: true },
+  );
 }
 
 export async function uploadMultipartResourceWithRecovery(
