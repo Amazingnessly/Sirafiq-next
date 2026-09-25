@@ -1,13 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { db } from '../../data/db';
+import { db, type ResourceRecord, type SubjectRecord } from '../../data/db';
 import { useDexieQuery } from '../../data/useDexieQuery';
 import { apiJson } from '../../lib/api';
 import type { BootstrapPayload } from '../../shared/contracts';
 
 export function TodayPage() {
-  const localSubjects = useDexieQuery(() => db.subjects.toArray(), [], []);
-  const localResources = useDexieQuery(() => db.resources.toArray(), [], []);
+  const localSubjects = useDexieQuery<SubjectRecord[] | null>(() => db.subjects.toArray(), [], null);
+  const localResources = useDexieQuery<ResourceRecord[] | null>(() => db.resources.toArray(), [], null);
   const syncErrors = useDexieQuery(async () => {
     const [resourceErrors, subjectErrors] = await Promise.all([
       db.resources.where('syncState').equals('error').count(),
@@ -20,6 +20,21 @@ export function TodayPage() {
     queryFn: () => apiJson<BootstrapPayload>('/api/bootstrap'),
     retry: 1,
   });
+
+  if (localSubjects === null || localResources === null) {
+    return (
+      <div className="page page--home">
+        <header className="page-header home-header">
+          <div>
+            <p className="eyebrow">Sirāfiq</p>
+            <h1>Que faut-il travailler aujourd’hui&nbsp;?</h1>
+            <p className="lede">Sirāfiq vérifie d’abord les données conservées sur cet appareil.</p>
+          </div>
+        </header>
+        <div className="loading-card" role="status">Chargement de ma bibliothèque locale…</div>
+      </div>
+    );
+  }
 
   const localSubjectIds = new Set(localSubjects.map((subject) => subject.id));
   const subjects = localSubjects.length + (remoteBootstrap.data?.subjects ?? []).filter((subject) => !localSubjectIds.has(subject.id)).length;
