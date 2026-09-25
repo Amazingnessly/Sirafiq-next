@@ -231,6 +231,25 @@ export async function retryServerExtractionForResource(resourceId: string): Prom
 
   const registration = await registerOrResolveRemoteVersion(toResourcePayload(resource, version));
   await rememberRemoteIdentity(resource.id, version.id, registration);
+
+  if (!registration.reusedExisting && !registration.alreadyStored) {
+    if (!version.bytes) {
+      throw new ApiRequestError(
+        'Le fichier distant doit être réparé, mais aucune copie locale complète n’est disponible sur cet appareil.',
+        409,
+        'LOCAL_BYTES_REQUIRED_FOR_STORAGE_REPAIR',
+        false,
+      );
+    }
+    const uploadBlob = new Blob([version.bytes], { type: version.mimeType });
+    await apiPutBlob(
+      `/api/resource-versions/${encodeURIComponent(registration.versionId)}/blob`,
+      uploadBlob,
+      version.mimeType,
+      120_000,
+    );
+  }
+
   if (registration.remote?.version.extractionStatus === 'ready' && registration.remote.extraction) {
     const ready: ServerExtractionResult = {
       status: 'ready',
