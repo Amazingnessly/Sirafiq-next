@@ -274,7 +274,7 @@ test('une relance d’extraction répare d’abord R2 avec les octets locaux qua
     }
     if (request.method() === 'PUT' && url.pathname === `/api/resource-versions/${versionId}/blob`) {
       blobUploads += 1;
-      expect(await request.text()).toBe(content);
+      expect(request.postDataBuffer()?.toString('utf8')).toBe(content);
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
