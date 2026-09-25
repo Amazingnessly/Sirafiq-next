@@ -206,6 +206,9 @@ test('un multipart finalisé dont R2 est corrompu peut être réparé par resél
   });
   await repair.getByRole('button', { name: 'Réparer le fichier distant' }).click();
 
+  await expect.poll(() => completeCalls, { timeout: 30_000 }).toBe(1);
+  expect(uploadedParts).toEqual([1, 2, 3, 4]);
+
   await expect.poll(async () => page.evaluate(async ({ resourceId, versionId }) => {
     const { db } = await import('/src/data/db.ts');
     const [resource, version, session] = await Promise.all([
@@ -227,7 +230,5 @@ test('un multipart finalisé dont R2 est corrompu peut être réparé par resél
     session: false,
   });
 
-  expect(uploadedParts).toEqual([1, 2, 3, 4]);
-  expect(completeCalls).toBe(1);
   await expect(page.getByLabel('Réparation du fichier distant')).toHaveCount(0);
 });
