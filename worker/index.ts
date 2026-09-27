@@ -102,6 +102,29 @@ export async function registerResource(request: Request, env: Env): Promise<Resp
   const subject = await env.DB.prepare('SELECT id FROM subjects WHERE id = ?').bind(resource.subjectId).first<{ id: string }>();
   if (!subject) return errorResponse(409, 'SUBJECT_MISSING', 'La matière n’existe pas encore sur le serveur. Réessayez la synchronisation.', true);
 
+  const existingVersion = await env.DB.prepare(`
+    SELECT resource_id, sha256, COALESCE(size_bytes, size) AS size
+    FROM resource_versions
+    WHERE id = ?
+  `)
+    .bind(version.id)
+    .first<{ resource_id: string; sha256: string; size: number }>();
+  if (
+    existingVersion
+    && (
+      existingVersion.resource_id !== version.resourceId
+      || existingVersion.sha256 !== version.sha256
+      || existingVersion.size !== version.size
+    )
+  ) {
+    return errorResponse(
+      409,
+      'VERSION_IDENTITY_CONFLICT',
+      'Cet identifiant de version existe déjà avec une autre identité de fichier.',
+      false,
+    );
+  }
+
   const duplicate = await env.DB.prepare(`
     SELECT id, resource_id, extraction_status, status, upload_mode, r2_key,
            COALESCE(size_bytes, size) AS size, sha256
