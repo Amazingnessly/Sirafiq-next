@@ -72,4 +72,15 @@ describe('contrats API', () => {
     });
     expect(result.success).toBe(true);
   });
+
+  it('refuse les relations ressource/version incohérentes avant écriture D1', () => {
+    const wrongCurrentVersion = resourcePayload(1024);
+    wrongCurrentVersion.resource.currentVersionId = UUID_A;
+    expect(ResourceRegisterSchema.safeParse(wrongCurrentVersion).success).toBe(false);
+
+    const wrongResourceOwner = resourcePayload(1024);
+    wrongResourceOwner.version.resourceId = UUID_B;
+    expect(ResourceRegisterSchema.safeParse(wrongResourceOwner).success).toBe(false);
+  });
+
 });
