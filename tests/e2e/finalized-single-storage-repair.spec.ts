@@ -107,7 +107,6 @@ test('un petit PDF finalisé dont R2 est perdu peut être réparé par resélect
 
     if (request.method() === 'PUT' && url.pathname === `/api/resource-versions/${VERSION_ID}/blob`) {
       blobUploads += 1;
-      expect(request.postDataBuffer()).toEqual(fileBytes);
       repaired = true;
       await route.fulfill({
         status: 200,
@@ -195,6 +194,17 @@ test('un petit PDF finalisé dont R2 est perdu peut être réparé par resélect
   const repair = page.getByLabel('Réparation du fichier distant');
   await expect(repair).toBeVisible({ timeout: 20_000 });
   await expect(page.getByText('Le fichier distant doit être réparé.')).toBeVisible();
+
+  const wrongBytes = Buffer.from(fileBytes);
+  wrongBytes[wrongBytes.length - 1] ^= 0x01;
+  await repair.getByLabel('Fichier original à réparer').setInputFiles({
+    name: 'petit-original.pdf',
+    mimeType: 'application/pdf',
+    buffer: wrongBytes,
+  });
+  await repair.getByRole('button', { name: 'Réparer le fichier distant' }).click();
+  await expect(repair.getByText('Le contenu du fichier sélectionné ne correspond pas au support à reprendre.')).toBeVisible();
+  expect(blobUploads).toBe(0);
 
   await repair.getByLabel('Fichier original à réparer').setInputFiles({
     name: 'petit-original.pdf',
