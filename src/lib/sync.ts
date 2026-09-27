@@ -229,6 +229,12 @@ export async function retryServerExtractionForResource(resourceId: string): Prom
   }
   if (resource.syncState !== 'synced') throw new Error('Synchronisez d’abord le fichier avant de relancer son extraction.');
 
+  const existingRemoteExtraction = await readReadyRemoteExtraction(resource, version);
+  if (existingRemoteExtraction) {
+    await applyServerExtractionResult(resource.id, version.id, existingRemoteExtraction);
+    return existingRemoteExtraction;
+  }
+
   const registration = await registerOrResolveRemoteVersion(toResourcePayload(resource, version));
   await rememberRemoteIdentity(resource.id, version.id, registration);
 
@@ -506,6 +512,40 @@ async function rememberRemoteIdentity(
       await db.resourceVersions.update(localVersionId, { remoteVersionId: registration.versionId });
     }
   });
+}
+
+async function readReadyRemoteExtraction(
+  resource: ResourceRecord,
+  version: ResourceVersionRecord,
+): Promise<ServerExtractionResult | null> {
+  const remoteResourceId = resource.remoteResourceId ?? resource.id;
+  const remoteVersionId = version.remoteVersionId ?? version.id;
+
+  let remote: ResourceDetailPayload;
+  try {
+    remote = await apiJson<ResourceDetailPayload>(`/api/resources/${encodeURIComponent(remoteResourceId)}`);
+  } catch (error) {
+    if (error instanceof ApiRequestError && error.status === 404) return null;
+    throw error;
+  }
+
+  const sameVersion = remote.version.id === remoteVersionId
+    && remote.version.sha256 === version.sha256
+    && remote.version.size === version.size;
+  if (
+    !sameVersion
+    || remote.version.status === 'uploading'
+    || remote.version.extractionStatus !== 'ready'
+    || !remote.extraction
+  ) {
+    return null;
+  }
+
+  return {
+    status: 'ready',
+    pages: remote.extraction.pages,
+    charCount: remote.extraction.charCount,
+  };
 }
 
 async function registerOrResolveRemoteVersion(
