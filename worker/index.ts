@@ -607,11 +607,20 @@ export async function getBlob(versionId: string, request: Request, env: Env): Pr
 
 async function extractOnServer(versionId: string, env: WorkerEnv): Promise<Response> {
   const version = await env.DB.prepare(`
-    SELECT v.r2_key, v.mime_type, v.file_name, COALESCE(v.size_bytes, v.size) AS size, r.kind
+    SELECT v.r2_key, v.mime_type, v.file_name, COALESCE(v.size_bytes, v.size) AS size,
+           v.sha256, v.upload_mode, r.kind
     FROM resource_versions v
     JOIN resources r ON r.id = v.resource_id
     WHERE v.id = ?
-  `).bind(versionId).first<{ r2_key: string; mime_type: string; file_name: string; size: number; kind: string }>();
+  `).bind(versionId).first<{
+    r2_key: string;
+    mime_type: string;
+    file_name: string;
+    size: number;
+    sha256: string;
+    upload_mode: 'single' | 'multipart';
+    kind: string;
+  }>();
   if (!version) return errorResponse(404, 'VERSION_NOT_FOUND', 'La version du support est introuvable.', false);
 
   if (version.kind !== 'pdf' && version.kind !== 'text') {
@@ -632,6 +641,14 @@ async function extractOnServer(versionId: string, env: WorkerEnv): Promise<Respo
 
   const object = await env.FILES.get(version.r2_key);
   if (!object) return errorResponse(409, 'FILE_NOT_STORED', 'Le fichier doit d’abord être synchronisé avant une extraction serveur.', true);
+  if (!matchesStoredResourceObject(object, version.upload_mode, version.size, version.sha256)) {
+    return errorResponse(
+      409,
+      'FILE_INTEGRITY_ERROR',
+      'Le fichier R2 ne correspond plus à la version enregistrée dans D1.',
+      false,
+    );
+  }
 
   if (isText) {
     try {
