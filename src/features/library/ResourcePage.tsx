@@ -8,7 +8,7 @@ import { cacheRemoteTextResource, repairMissingLocalResourceVersion } from '../.
 import { useDexieQuery } from '../../data/useDexieQuery';
 import { ApiRequestError, apiJson } from '../../lib/api';
 import { sha256Hex } from '../../lib/hash';
-import { repairFinalizedMultipartResource, uploadMultipartResourceWithRecovery } from '../../lib/multipartRecovery';
+import { repairFinalizedResourceStorage, uploadMultipartResourceWithRecovery } from '../../lib/multipartRecovery';
 import { isTerminalOutboxAttempt } from '../../lib/retryableSync';
 import { requestSync, retryServerExtractionForResource, type TransferProgress } from '../../lib/sync';
 import {
@@ -16,7 +16,6 @@ import {
   SERVER_TEXT_EXTRACTION_MAX_BYTES,
   canUseServerExtraction,
   shouldTryServerExtraction,
-  shouldUseMultipartUpload,
 } from '../../shared/importPolicy';
 import type { ExtractedPage, ResourceDetailPayload } from '../../shared/contracts';
 import { PdfViewer } from './PdfViewer';
@@ -145,7 +144,6 @@ export function ResourcePage() {
       || !remoteVersionId
       || multipartSession
       || localResource.syncState !== 'synced'
-      || !shouldUseMultipartUpload(localVersion.size)
     ) {
       return;
     }
@@ -172,7 +170,7 @@ export function ResourcePage() {
     setStorageRepairError(null);
     setTransferProgress(null);
     try {
-      await repairFinalizedMultipartResource(localResource.id, storageRepairFile, setTransferProgress);
+      await repairFinalizedResourceStorage(localResource.id, storageRepairFile, setTransferProgress);
       setStorageRepairFile(null);
       setStorageRepairNeeded(false);
       setPdfRepairRevision((value) => value + 1);
@@ -223,7 +221,7 @@ export function ResourcePage() {
     <Link className="back-link" to={backToLibrary}>← Bibliothèque</Link>
     <header className="resource-header"><div><p className="eyebrow">{subject?.name ?? 'Support'}</p><h1>{title}</h1><p className="resource-meta">{kind === 'pdf' ? 'Document PDF' : 'Texte'}{localVersion ? ` · ${formatBytes(localVersion.size)}` : remote.data ? ` · ${formatBytes(remote.data.version.size)}` : ''}</p></div>{localResource && <StatusPill status={localResource.status} syncState={localResource.syncState} />}</header>
     {localResource?.syncState === 'error' && <div className="error-box error-box--wide" role="alert"><div><strong>{multipartSession ? 'L’envoi du gros fichier est interrompu.' : terminalSyncFailure ? 'La synchronisation de ce support est bloquée.' : 'Le support est enregistré localement, mais la synchronisation a échoué.'}</strong><span>{localResource.syncError}</span>{multipartSession && <small>Les morceaux déjà confirmés sont conservés. Resélectionnez le même fichier pour reprendre sans repartir de zéro.</small>}{terminalSyncFailure && !multipartSession && <small>Cette erreur ne peut pas être corrigée par une nouvelle tentative automatique. Vérifiez le support local avant de poursuivre.</small>}</div>{multipartSession ? <div className="multipart-resume"><input aria-label="Fichier à reprendre" type="file" accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown" disabled={resuming} onChange={(event) => setResumeFile(event.target.files?.[0] ?? null)} />{transferProgress && <span>{progressLabel(transferProgress)}</span>}<button className="button button--secondary" type="button" disabled={!resumeFile || resuming} onClick={resumeMultipart}>{resuming ? 'Reprise en cours…' : 'Reprendre l’envoi'}</button></div> : terminalSyncFailure ? null : <button className="button button--secondary" type="button" onClick={retrySync}>Retenter la synchronisation</button>}{retryError && <span className="field-error">{retryError}</span>}</div>}
-    {storageRepairNeeded && !multipartSession && <div className="error-box error-box--wide" role="alert" aria-label="Réparation du fichier distant"><div><strong>Le fichier distant doit être réparé.</strong><span>R2 ne contient plus exactement le PDF attendu. Resélectionnez le fichier original : Sirāfiq vérifiera son SHA-256 complet avant d’envoyer le moindre morceau.</span></div><div className="multipart-resume"><input aria-label="Fichier original à réparer" type="file" accept=".pdf,application/pdf" disabled={repairingStorage} onChange={(event) => setStorageRepairFile(event.target.files?.[0] ?? null)} />{transferProgress && <span>{progressLabel(transferProgress)}</span>}<button className="button button--secondary" type="button" disabled={!storageRepairFile || repairingStorage} onClick={repairRemoteStorage}>{repairingStorage ? 'Réparation en cours…' : 'Réparer le fichier distant'}</button></div>{storageRepairError && <span className="field-error">{storageRepairError}</span>}</div>}
+    {storageRepairNeeded && !multipartSession && <div className="error-box error-box--wide" role="alert" aria-label="Réparation du fichier distant"><div><strong>Le fichier distant doit être réparé.</strong><span>R2 ne contient plus exactement le PDF attendu. Resélectionnez le fichier original : Sirāfiq vérifiera son SHA-256 complet avant d’envoyer le moindre octet.</span></div><div className="multipart-resume"><input aria-label="Fichier original à réparer" type="file" accept=".pdf,application/pdf" disabled={repairingStorage} onChange={(event) => setStorageRepairFile(event.target.files?.[0] ?? null)} />{transferProgress && <span>{progressLabel(transferProgress)}</span>}<button className="button button--secondary" type="button" disabled={!storageRepairFile || repairingStorage} onClick={repairRemoteStorage}>{repairingStorage ? 'Réparation en cours…' : 'Réparer le fichier distant'}</button></div>{storageRepairError && <span className="field-error">{storageRepairError}</span>}</div>}
     {extractionFailed && <div className="extraction-warning" role="alert"><div className="extraction-warning__icon" aria-hidden="true">!</div><div><strong>Contenu non exploitable automatiquement</strong><p>{extractionError || 'Le texte n’a pas pu être extrait.'}</p><small>{multipartSession ? 'Le fichier n’est pas encore déclaré entièrement stocké. Sirāfiq n’utilisera pas ce contenu pour des activités.' : storageRepairNeeded ? 'Le fichier distant n’est pas déclaré consultable tant que sa réparation R2 n’est pas terminée.' : kind === 'pdf' ? 'Le fichier reste conservé et consultable. Sirāfiq ne prétendra pas créer des activités à partir de ce contenu.' : 'Le fichier reste conservé. Sirāfiq ne prétendra pas qu’il est lisible tant que son texte n’a pas été extrait.'}</small></div></div>}
     <div className={`viewer-layout${kind === 'pdf' ? ' viewer-layout--pdf' : ''}`}>
       {kind === 'pdf' ? (pdfUrl ? <PdfViewer key={`${versionId ?? 'pdf'}:${pdfRepairRevision}`} src={pdfUrl} title={title} storageId={versionId} onReadError={inspectPdfReadFailure} /> : <div className="loading-card">{multipartSession ? 'Le PDF sera consultable après la finalisation de l’envoi.' : 'Le fichier PDF n’est pas disponible.'}</div>) : <section className="text-viewer">{pages.length ? pages.map((page) => <article key={page.pageNumber}>{pages.length > 1 && <span className="page-number">Bloc {page.pageNumber}</span>}<p>{page.text}</p></article>) : <p className="muted">Aucun texte extrait n’est disponible.</p>}</section>}

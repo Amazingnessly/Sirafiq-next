@@ -6,7 +6,7 @@ import type {
   ServerExtractionResult,
 } from '../shared/contracts';
 import { MULTIPART_PART_BYTES, shouldUseMultipartUpload } from '../shared/importPolicy';
-import { ApiRequestError, apiJson } from './api';
+import { ApiRequestError, apiJson, apiPutBlob } from './api';
 import { verifyFileAgainstVersion, verifyMultipartFileIdentity } from './multipartFileIdentity';
 import { uploadMultipartResource, type TransferProgress } from './sync';
 
@@ -56,6 +56,36 @@ export async function recoverInterruptedMultipartSessionsAfterReload(): Promise<
   });
 
   return recovered;
+}
+
+export async function repairFinalizedResourceStorage(
+  resourceId: string,
+  file: File,
+  onProgress?: (progress: TransferProgress) => void,
+): Promise<void> {
+  const resource = await db.resources.get(resourceId);
+  if (!resource) throw new Error('Le support local est introuvable.');
+  const version = await db.resourceVersions.get(resource.currentVersionId);
+  if (!version) throw new Error('La version locale du support est introuvable.');
+
+  if (shouldUseMultipartUpload(version.size)) {
+    await repairFinalizedMultipartResource(resourceId, file, onProgress);
+    return;
+  }
+
+  await verifyFileAgainstVersion(file, version, onProgress);
+  const remoteVersionId = version.remoteVersionId ?? version.id;
+  await apiPutBlob(
+    `/api/resource-versions/${encodeURIComponent(remoteVersionId)}/blob`,
+    file,
+    version.mimeType,
+    120_000,
+  );
+
+  await db.transaction('rw', db.resources, db.resourceVersions, async () => {
+    await db.resources.update(resource.id, { syncState: 'synced', syncError: null });
+    await db.resourceVersions.update(version.id, { syncState: 'synced', syncError: null });
+  });
 }
 
 export async function repairFinalizedMultipartResource(
