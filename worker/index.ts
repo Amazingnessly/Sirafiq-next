@@ -716,8 +716,8 @@ async function extractOnServer(versionId: string, env: WorkerEnv): Promise<Respo
 async function storeExtraction(versionId: string, request: Request, env: Env): Promise<Response> {
   const parsed = ExtractionUploadSchema.safeParse(await safeJson(request));
   if (!parsed.success) return validationError(parsed.error);
-  const exists = await env.DB.prepare('SELECT id FROM resource_versions WHERE id = ?').bind(versionId).first<{ id: string }>();
-  if (!exists) return errorResponse(404, 'VERSION_NOT_FOUND', 'La version du support est introuvable.', false);
+  const integrityError = await verifyStoredVersionIntegrity(versionId, env);
+  if (integrityError) return integrityError;
   const computedCharCount = parsed.data.pages.reduce((sum, page) => sum + page.text.length, 0);
   if (computedCharCount !== parsed.data.charCount) return errorResponse(400, 'CHAR_COUNT_MISMATCH', 'Le contenu extrait est incohérent ; il n’a pas été enregistré.', true);
   await persistReadyExtraction(versionId, parsed.data.pages, computedCharCount, env);
@@ -727,9 +727,35 @@ async function storeExtraction(versionId: string, request: Request, env: Env): P
 async function storeExtractionFailure(versionId: string, request: Request, env: Env): Promise<Response> {
   const parsed = ExtractionFailureSchema.safeParse(await safeJson(request));
   if (!parsed.success) return validationError(parsed.error);
+  const integrityError = await verifyStoredVersionIntegrity(versionId, env);
+  if (integrityError) return integrityError;
   const changed = await persistExtractionFailure(versionId, parsed.data.code, parsed.data.message, env);
   if (!changed) return errorResponse(404, 'VERSION_NOT_FOUND', 'La version du support est introuvable.', false);
   return json({ ok: true });
+}
+
+async function verifyStoredVersionIntegrity(versionId: string, env: Env): Promise<Response | null> {
+  const version = await getVersionUploadRow(versionId, env);
+  if (!version) return errorResponse(404, 'VERSION_NOT_FOUND', 'La version du support est introuvable.', false);
+
+  const stored = await env.FILES.head(version.r2_key);
+  if (!stored) {
+    return errorResponse(
+      409,
+      'FILE_NOT_STORED',
+      'Le fichier doit d’abord être synchronisé avant de modifier son état d’extraction.',
+      true,
+    );
+  }
+  if (!matchesStoredResourceObject(stored, version.upload_mode, version.size, version.sha256)) {
+    return errorResponse(
+      409,
+      'FILE_INTEGRITY_ERROR',
+      'Le fichier R2 ne correspond plus à la version enregistrée dans D1.',
+      false,
+    );
+  }
+  return null;
 }
 
 async function persistReadyExtraction(versionId: string, pages: ExtractedPage[], charCount: number, env: Env): Promise<void> {
@@ -853,6 +879,7 @@ type VersionUploadRow = {
   size: number;
   sha256: string;
   extraction_status: 'pending' | 'ready' | 'failed';
+  upload_mode: 'single' | 'multipart';
   multipart_upload_id: string | null;
   multipart_part_size: number | null;
   multipart_parts_json: string | null;
@@ -861,7 +888,7 @@ type VersionUploadRow = {
 async function getVersionUploadRow(versionId: string, env: Env): Promise<VersionUploadRow | null> {
   return env.DB.prepare(`
     SELECT id, r2_key, mime_type, COALESCE(size_bytes, size) AS size, sha256, extraction_status,
-           multipart_upload_id, multipart_part_size, multipart_parts_json
+           upload_mode, multipart_upload_id, multipart_part_size, multipart_parts_json
     FROM resource_versions WHERE id = ?
   `).bind(versionId).first<VersionUploadRow>();
 }
