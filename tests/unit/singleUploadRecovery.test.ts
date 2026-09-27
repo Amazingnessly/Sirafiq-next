@@ -47,6 +47,15 @@ describe('single upload R2 recovery', () => {
             if (sql.includes('SELECT id FROM subjects')) {
               return { first: async () => ({ id: subjectId }) };
             }
+            if (sql.includes('WHERE id = ?') && sql.includes('COALESCE(size_bytes, size) AS size')) {
+              return {
+                first: async () => ({
+                  resource_id: resourceId,
+                  sha256,
+                  size: 42,
+                }),
+              };
+            }
             if (sql.includes('SELECT id, resource_id, extraction_status')) {
               return {
                 first: async () => ({
@@ -133,6 +142,9 @@ describe('single upload R2 recovery', () => {
             if (sql.includes('SELECT id FROM subjects')) {
               return { first: async () => ({ id: subjectId }) };
             }
+            if (sql.includes('WHERE id = ?') && sql.includes('COALESCE(size_bytes, size) AS size')) {
+              return { first: async () => null };
+            }
             if (sql.includes('FROM resource_versions') && sql.includes('WHERE sha256 = ?')) {
               return {
                 first: async () => ({
@@ -197,6 +209,88 @@ describe('single upload R2 recovery', () => {
     expect(payload.error.details?.existingResourceId).toBe(remoteResourceId);
     expect(headCalls).toBe(1);
     expect(batchCalls).toBe(0);
+  });
+
+
+  it('rejects a reused version id when its persisted file identity differs', async () => {
+    const subjectId = '26262626-2626-4626-8626-262626262626';
+    const resourceId = '27272727-2727-4727-8727-272727272727';
+    const versionId = '28282828-2828-4828-8828-282828282828';
+    const incomingSha = 'ef'.repeat(32);
+    let duplicateLookupCalls = 0;
+    let batchCalls = 0;
+    let r2Calls = 0;
+
+    const env = {
+      FILES: {
+        head: async () => {
+          r2Calls += 1;
+          return null;
+        },
+      },
+      DB: {
+        prepare: (sql: string) => ({
+          bind: () => {
+            if (sql.includes('SELECT id FROM subjects')) {
+              return { first: async () => ({ id: subjectId }) };
+            }
+            if (sql.includes('WHERE id = ?') && sql.includes('COALESCE(size_bytes, size) AS size')) {
+              return {
+                first: async () => ({
+                  resource_id: resourceId,
+                  sha256: 'ab'.repeat(32),
+                  size: 42,
+                }),
+              };
+            }
+            if (sql.includes('WHERE sha256 = ?')) {
+              duplicateLookupCalls += 1;
+              return { first: async () => null };
+            }
+            throw new Error(`Unexpected SQL: ${sql}`);
+          },
+        }),
+        batch: async () => {
+          batchCalls += 1;
+          return [];
+        },
+      },
+    };
+
+    const request = new Request('https://example.test/api/resources/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        resource: {
+          id: resourceId,
+          subjectId,
+          title: 'Identité de version incohérente',
+          kind: 'text',
+          currentVersionId: versionId,
+          createdAt: '2026-09-27T00:00:00.000Z',
+          updatedAt: '2026-09-27T00:00:00.000Z',
+        },
+        version: {
+          id: versionId,
+          resourceId,
+          sha256: incomingSha,
+          fileName: 'changed.txt',
+          mimeType: 'text/plain',
+          size: 42,
+          createdAt: '2026-09-27T00:00:00.000Z',
+        },
+      }),
+    });
+
+    const response = await registerResource(request, env as never);
+    const payload = await response.json() as { error: { code: string; retryable: boolean } };
+
+    expect(response.status).toBe(409);
+    expect(payload.error.code).toBe('VERSION_IDENTITY_CONFLICT');
+    expect(payload.error.retryable).toBe(false);
+    expect(duplicateLookupCalls).toBe(0);
+    expect(batchCalls).toBe(0);
+    expect(r2Calls).toBe(0);
   });
 
 });
