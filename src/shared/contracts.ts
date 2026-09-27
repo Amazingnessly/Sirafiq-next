@@ -32,6 +32,21 @@ export const ResourceRegisterSchema = z.object({
     size: z.number().int().nonnegative().max(MAX_RESOURCE_FILE_BYTES),
     createdAt: z.string().datetime(),
   }),
+}).superRefine((value, context) => {
+  if (value.resource.currentVersionId !== value.version.id) {
+    context.addIssue({
+      code: 'custom',
+      path: ['resource', 'currentVersionId'],
+      message: 'La version courante doit être la version enregistrée avec le support.',
+    });
+  }
+  if (value.version.resourceId !== value.resource.id) {
+    context.addIssue({
+      code: 'custom',
+      path: ['version', 'resourceId'],
+      message: 'La version doit appartenir au support enregistré.',
+    });
+  }
 });
 export type ResourceRegisterInput = z.infer<typeof ResourceRegisterSchema>;
 
