@@ -220,7 +220,7 @@ export function LibraryPage() {
                 ) : (
                   <Link to={resourceHref(resource.id)} className="resource-card" key={resource.id}>
                     <div className={`resource-icon resource-icon--${resource.kind}`} aria-hidden="true">{resource.kind === 'pdf' ? 'PDF' : 'TXT'}</div>
-                    <div className="resource-card__body"><span className="resource-subject">{subjectNames.get(resource.subjectId) ?? 'Matière'}</span><h3>{resource.title}</h3><p>{resource.status === 'ready' ? 'Synchronisé sur le serveur et consultable.' : resource.status === 'failed' ? 'Fichier synchronisé · extraction à revoir.' : 'Fichier synchronisé · extraction en attente.'}</p></div>
+                    <div className="resource-card__body"><span className="resource-subject">{subjectNames.get(resource.subjectId) ?? 'Matière'}</span><h3>{resource.title}</h3><p>{resource.status === 'ready' ? 'État serveur finalisé · ouvrez le support pour vérifier la lecture du fichier sur cet appareil.' : resource.status === 'failed' ? 'État serveur finalisé · extraction à revoir et fichier à vérifier à l’ouverture.' : 'État serveur finalisé · extraction en attente et fichier à vérifier à l’ouverture.'}</p></div>
                     <div className="resource-card__footer"><span className={resource.status === 'failed' ? 'status status--danger' : 'status status--success'}>{resource.status === 'failed' ? 'Extraction à revoir' : 'Synchronisé'}</span><span aria-hidden="true">→</span></div>
                   </Link>
                 ))}
