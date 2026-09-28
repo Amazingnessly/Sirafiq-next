@@ -47,6 +47,15 @@ describe('single upload R2 recovery', () => {
             if (sql.includes('SELECT id FROM subjects')) {
               return { first: async () => ({ id: subjectId }) };
             }
+            if (sql.includes('SELECT resource_id, sha256') && sql.includes('WHERE id = ?')) {
+              return {
+                first: async () => ({
+                  resource_id: resourceId,
+                  sha256,
+                  size: 42,
+                }),
+              };
+            }
             if (sql.includes('SELECT id, resource_id, extraction_status')) {
               return {
                 first: async () => ({
@@ -110,6 +119,85 @@ describe('single upload R2 recovery', () => {
   });
 
 
+  it('rejects a reused version UUID when its persisted owner or file identity differs', async () => {
+    const subjectId = '26262626-1111-4111-8111-111111111111';
+    const resourceId = '27272727-1111-4111-8111-111111111111';
+    const otherResourceId = '28282828-1111-4111-8111-111111111111';
+    const versionId = '29292929-1111-4111-8111-111111111111';
+    const requestedSha = 'cd'.repeat(32);
+    const conflicts = [
+      { resource_id: otherResourceId, sha256: requestedSha, size: 42 },
+      { resource_id: resourceId, sha256: 'ab'.repeat(32), size: 42 },
+    ];
+
+    for (const persisted of conflicts) {
+      let batchCalls = 0;
+      let duplicateLookups = 0;
+      const env = {
+        FILES: {
+          head: async () => {
+            throw new Error('R2 must not be inspected for an identity conflict.');
+          },
+        },
+        DB: {
+          prepare: (sql: string) => ({
+            bind: () => {
+              if (sql.includes('SELECT id FROM subjects')) {
+                return { first: async () => ({ id: subjectId }) };
+              }
+              if (sql.includes('SELECT resource_id, sha256') && sql.includes('WHERE id = ?')) {
+                return { first: async () => persisted };
+              }
+              if (sql.includes('WHERE sha256 = ?')) {
+                duplicateLookups += 1;
+                return { first: async () => null };
+              }
+              throw new Error(`Unexpected SQL: ${sql}`);
+            },
+          }),
+          batch: async () => {
+            batchCalls += 1;
+            return [];
+          },
+        },
+      };
+
+      const response = await registerResource(new Request('https://example.test/api/resources/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          resource: {
+            id: resourceId,
+            subjectId,
+            title: 'Collision UUID',
+            kind: 'text',
+            currentVersionId: versionId,
+            createdAt: '2026-09-28T00:00:00.000Z',
+            updatedAt: '2026-09-28T00:00:00.000Z',
+          },
+          version: {
+            id: versionId,
+            resourceId,
+            sha256: requestedSha,
+            fileName: 'collision.txt',
+            mimeType: 'text/plain',
+            size: 42,
+            createdAt: '2026-09-28T00:00:00.000Z',
+          },
+        }),
+      }), env as never);
+      const payload = await response.json() as {
+        error: { code: string; retryable: boolean };
+      };
+
+      expect(response.status).toBe(409);
+      expect(payload.error.code).toBe('VERSION_IDENTITY_CONFLICT');
+      expect(payload.error.retryable).toBe(false);
+      expect(batchCalls).toBe(0);
+      expect(duplicateLookups).toBe(0);
+    }
+  });
+
   it('requires storage repair when a finalized duplicate has lost its R2 object', async () => {
     const subjectId = '21212121-1111-4111-8111-111111111111';
     const localResourceId = '22222222-1111-4111-8111-111111111111';
@@ -132,6 +220,9 @@ describe('single upload R2 recovery', () => {
           bind: () => {
             if (sql.includes('SELECT id FROM subjects')) {
               return { first: async () => ({ id: subjectId }) };
+            }
+            if (sql.includes('SELECT resource_id, sha256') && sql.includes('WHERE id = ?')) {
+              return { first: async () => null };
             }
             if (sql.includes('FROM resource_versions') && sql.includes('WHERE sha256 = ?')) {
               return {
