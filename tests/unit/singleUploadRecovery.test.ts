@@ -65,6 +65,17 @@ describe('single upload R2 recovery', () => {
                 }),
               };
             }
+            if (sql.includes('SELECT subject_id, title, kind, current_version_id, created_at')) {
+              return {
+                first: async () => ({
+                  subject_id: subjectId,
+                  title: 'Objet R2 déjà durable',
+                  kind: 'text',
+                  current_version_id: versionId,
+                  created_at: '2026-09-24T00:00:00.000Z',
+                }),
+              };
+            }
             if (sql.includes('UPDATE resource_versions SET status = ?')) {
               return {
                 run: async () => {
@@ -195,6 +206,99 @@ describe('single upload R2 recovery', () => {
       expect(payload.error.retryable).toBe(false);
       expect(batchCalls).toBe(0);
       expect(duplicateLookups).toBe(0);
+    }
+  });
+
+  it('rejects a reused resource UUID when its persisted V0.1 identity differs', async () => {
+    const subjectId = '31313131-1111-4111-8111-111111111111';
+    const otherSubjectId = '32323232-1111-4111-8111-111111111111';
+    const resourceId = '33333333-1111-4111-8111-111111111111';
+    const versionId = '34343434-1111-4111-8111-111111111111';
+    const otherVersionId = '35353535-1111-4111-8111-111111111111';
+    const sha256 = 'ef'.repeat(32);
+    const basePersisted = {
+      subject_id: subjectId,
+      title: 'Support stable',
+      kind: 'text' as const,
+      current_version_id: versionId,
+      created_at: '2026-09-28T00:00:00.000Z',
+    };
+    const conflicts = [
+      { ...basePersisted, subject_id: otherSubjectId },
+      { ...basePersisted, title: 'Autre support' },
+      { ...basePersisted, kind: 'pdf' as const },
+      { ...basePersisted, current_version_id: otherVersionId },
+      { ...basePersisted, created_at: '2026-09-27T00:00:00.000Z' },
+    ];
+
+    for (const persisted of conflicts) {
+      let batchCalls = 0;
+      let resourceIdentityLookups = 0;
+      const env = {
+        FILES: {
+          head: async () => {
+            throw new Error('R2 must not be inspected for a resource identity conflict.');
+          },
+        },
+        DB: {
+          prepare: (sql: string) => ({
+            bind: () => {
+              if (sql.includes('SELECT id FROM subjects')) {
+                return { first: async () => ({ id: subjectId }) };
+              }
+              if (sql.includes('SELECT resource_id, sha256') && sql.includes('WHERE id = ?')) {
+                return { first: async () => null };
+              }
+              if (sql.includes('WHERE sha256 = ?')) {
+                return { first: async () => null };
+              }
+              if (sql.includes('SELECT subject_id, title, kind, current_version_id, created_at')) {
+                resourceIdentityLookups += 1;
+                return { first: async () => persisted };
+              }
+              throw new Error(`Unexpected SQL: ${sql}`);
+            },
+          }),
+          batch: async () => {
+            batchCalls += 1;
+            return [];
+          },
+        },
+      };
+
+      const response = await registerResource(new Request('https://example.test/api/resources/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          resource: {
+            id: resourceId,
+            subjectId,
+            title: 'Support stable',
+            kind: 'text',
+            currentVersionId: versionId,
+            createdAt: '2026-09-28T00:00:00.000Z',
+            updatedAt: '2026-09-28T00:00:00.000Z',
+          },
+          version: {
+            id: versionId,
+            resourceId,
+            sha256,
+            fileName: 'stable.txt',
+            mimeType: 'text/plain',
+            size: 42,
+            createdAt: '2026-09-28T00:00:00.000Z',
+          },
+        }),
+      }), env as never);
+      const payload = await response.json() as {
+        error: { code: string; retryable: boolean };
+      };
+
+      expect(response.status).toBe(409);
+      expect(payload.error.code).toBe('RESOURCE_IDENTITY_CONFLICT');
+      expect(payload.error.retryable).toBe(false);
+      expect(resourceIdentityLookups).toBe(1);
+      expect(batchCalls).toBe(0);
     }
   });
 
