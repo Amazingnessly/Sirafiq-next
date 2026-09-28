@@ -505,11 +505,23 @@ async function rememberRemoteIdentity(
   registration: RemoteRegistration,
 ): Promise<void> {
   await db.transaction('rw', db.resources, db.resourceVersions, async () => {
-    if (registration.resourceId !== localResourceId) {
-      await db.resources.update(localResourceId, { remoteResourceId: registration.resourceId });
+    const [resource, version] = await Promise.all([
+      db.resources.get(localResourceId),
+      db.resourceVersions.get(localVersionId),
+    ]);
+
+    if (resource) {
+      const next = { ...resource };
+      if (registration.resourceId === localResourceId) delete next.remoteResourceId;
+      else next.remoteResourceId = registration.resourceId;
+      await db.resources.put(next);
     }
-    if (registration.versionId !== localVersionId) {
-      await db.resourceVersions.update(localVersionId, { remoteVersionId: registration.versionId });
+
+    if (version) {
+      const next = { ...version };
+      if (registration.versionId === localVersionId) delete next.remoteVersionId;
+      else next.remoteVersionId = registration.versionId;
+      await db.resourceVersions.put(next);
     }
   });
 }
