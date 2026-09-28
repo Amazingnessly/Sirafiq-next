@@ -83,6 +83,25 @@ async function upsertSubject(request: Request, env: Env): Promise<Response> {
   const parsed = SubjectUpsertSchema.safeParse(await safeJson(request));
   if (!parsed.success) return validationError(parsed.error);
   const subject = parsed.data;
+
+  const existingSubject = await env.DB.prepare(`
+    SELECT name, parent_id, created_at
+    FROM subjects
+    WHERE id = ?
+  `).bind(subject.id).first<{ name: string; parent_id: string | null; created_at: string }>();
+  if (existingSubject && (
+    existingSubject.name !== subject.name
+    || existingSubject.parent_id !== subject.parentId
+    || existingSubject.created_at !== subject.createdAt
+  )) {
+    return errorResponse(
+      409,
+      'SUBJECT_IDENTITY_CONFLICT',
+      'Cet identifiant de matière est déjà associé à une autre matière.',
+      false,
+    );
+  }
+
   await env.DB.prepare(`
     INSERT INTO subjects (id, name, parent_id, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?)
