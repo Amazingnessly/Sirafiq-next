@@ -270,3 +270,31 @@ test('un détail distant incompatible n’est jamais affiché pour une ressource
   expect(localVersion).toBeUndefined();
 });
 
+test('une incohérence terminale du détail distant n’est pas présentée comme une panne réessayable', async ({ page }) => {
+  const resourceId = '81818181-8181-4181-8181-818181818181';
+  const message = 'Ce support synchronisé existe, mais sa version courante est absente de D1.';
+  let detailRequests = 0;
+
+  await page.route(`**/api/resources/${resourceId}`, async (route) => {
+    detailRequests += 1;
+    await route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: {
+          code: 'RESOURCE_VERSION_MISSING',
+          message,
+          retryable: false,
+        },
+      }),
+    });
+  });
+
+  await page.goto(`/bibliotheque/${resourceId}`);
+
+  await expect(page.getByRole('heading', { name: 'Impossible de charger le support' })).toBeVisible();
+  await expect(page.getByText(message)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Réessayer', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Support introuvable' })).toHaveCount(0);
+  await expect.poll(() => detailRequests).toBe(1);
+});
