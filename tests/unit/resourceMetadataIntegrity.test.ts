@@ -88,6 +88,8 @@ describe('remote resource metadata integrity', () => {
               version_id: VERSION_ID,
               version_resource_id: OTHER_RESOURCE_ID,
               status: 'ready',
+              extraction_status: 'ready',
+              extraction_version_id: VERSION_ID,
               char_count: 12,
             }] };
             throw new Error(`Unexpected SQL: ${sql}`);
