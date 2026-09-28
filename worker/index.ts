@@ -158,6 +158,32 @@ export async function registerResource(request: Request, env: Env): Promise<Resp
     });
   }
 
+  const existingResource = await env.DB.prepare(`
+    SELECT subject_id, title, kind, current_version_id, created_at
+    FROM resources
+    WHERE id = ?
+  `).bind(resource.id).first<{
+    subject_id: string;
+    title: string;
+    kind: 'text' | 'pdf';
+    current_version_id: string;
+    created_at: string;
+  }>();
+  if (existingResource && (
+    existingResource.subject_id !== resource.subjectId
+    || existingResource.title !== resource.title
+    || existingResource.kind !== resource.kind
+    || existingResource.current_version_id !== resource.currentVersionId
+    || existingResource.created_at !== resource.createdAt
+  )) {
+    return errorResponse(
+      409,
+      'RESOURCE_IDENTITY_CONFLICT',
+      'Cet identifiant de support est déjà associé à une autre ressource.',
+      false,
+    );
+  }
+
   const r2Key = `resources/${resource.id}/${version.id}`;
   const legacySize = Math.min(version.size, LEGACY_D1_SIZE_LIMIT);
   const uploadMode = version.size > MULTIPART_UPLOAD_THRESHOLD_BYTES ? 'multipart' : 'single';
