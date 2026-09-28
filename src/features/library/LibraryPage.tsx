@@ -5,7 +5,7 @@ import { StatusPill } from '../../components/StatusPill';
 import { SubjectSyncFailurePanel } from '../../components/SubjectSyncFailurePanel';
 import { db } from '../../data/db';
 import { useDexieQuery } from '../../data/useDexieQuery';
-import { apiJson } from '../../lib/api';
+import { ApiRequestError, apiJson } from '../../lib/api';
 import { isTerminalOutboxAttempt } from '../../lib/retryableSync';
 import type { BootstrapPayload } from '../../shared/contracts';
 import { ImportPanel } from '../import/ImportPanel';
@@ -24,7 +24,7 @@ export function LibraryPage() {
   const remoteBootstrap = useQuery({
     queryKey: ['library-bootstrap'],
     queryFn: () => apiJson<BootstrapPayload>('/api/bootstrap'),
-    retry: 1,
+    retry: (failureCount, error) => failureCount < 1 && (!(error instanceof ApiRequestError) || error.retryable),
   });
 
   useEffect(() => {
@@ -128,6 +128,11 @@ export function LibraryPage() {
     ? `/bibliotheque/${resourceId}?library=${encodeURIComponent(libraryContext)}`
     : `/bibliotheque/${resourceId}`;
   const resetFilters = () => setSearchParams({}, { replace: true });
+  const remoteBootstrapRequestError = remoteBootstrap.error instanceof ApiRequestError ? remoteBootstrap.error : null;
+  const remoteBootstrapRetryable = !remoteBootstrapRequestError || remoteBootstrapRequestError.retryable;
+  const remoteBootstrapMessage = remoteBootstrapRequestError && !remoteBootstrapRequestError.retryable
+    ? remoteBootstrapRequestError.message
+    : 'Le serveur n’a pas pu être joint. Aucun état vide distant n’est déduit de cette erreur.';
 
   return (
     <div className="page">
@@ -142,8 +147,8 @@ export function LibraryPage() {
 
       {remoteBootstrap.isError && (resources.length > 0 || subjects.length > 0) ? (
         <div className="error-box error-box--wide" role="status">
-          <div><strong>Impossible de vérifier la bibliothèque synchronisée.</strong><span>Les données locales restent disponibles et ne sont pas remplacées par un faux état vide.</span></div>
-          <button className="button button--secondary" type="button" onClick={() => void remoteBootstrap.refetch()}>Réessayer</button>
+          <div><strong>Impossible de vérifier la bibliothèque synchronisée.</strong><span>{remoteBootstrapRequestError && !remoteBootstrapRequestError.retryable ? `${remoteBootstrapRequestError.message} Les données locales restent disponibles.` : 'Les données locales restent disponibles et ne sont pas remplacées par un faux état vide.'}</span></div>
+          {remoteBootstrapRetryable ? <button className="button button--secondary" type="button" onClick={() => void remoteBootstrap.refetch()}>Réessayer</button> : null}
         </div>
       ) : null}
 
@@ -228,7 +233,7 @@ export function LibraryPage() {
             ) : !hasVisibleResults && remoteBootstrap.isPending ? (
               <div className="empty-library"><div className="empty-library__symbol" aria-hidden="true">◇</div><h3>Vérification des supports synchronisés…</h3><p>Les données locales sont déjà chargées. Sirāfiq vérifie maintenant D1 avant de conclure qu’aucun support ne correspond aux filtres actuels.</p></div>
             ) : !hasVisibleResults && remoteBootstrap.isError ? (
-              <div className="empty-library"><div className="empty-library__symbol" aria-hidden="true">!</div><h3>Impossible de vérifier les supports synchronisés</h3><p>Le serveur n’a pas pu être joint. Aucun état vide distant n’est déduit de cette erreur.</p><button type="button" className="button button--secondary" onClick={() => void remoteBootstrap.refetch()}>Réessayer</button></div>
+              <div className="empty-library"><div className="empty-library__symbol" aria-hidden="true">!</div><h3>Impossible de vérifier les supports synchronisés</h3><p>{remoteBootstrapMessage}</p>{remoteBootstrapRetryable ? <button type="button" className="button button--secondary" onClick={() => void remoteBootstrap.refetch()}>Réessayer</button> : null}</div>
             ) : !hasVisibleResults && isFiltered ? (
               <div className="empty-library"><div className="empty-library__symbol" aria-hidden="true">◇</div><h3>Aucun élément correspondant</h3><p>Les données locales et synchronisées ont été vérifiées. Modifiez vos filtres ou affichez à nouveau toute la bibliothèque.</p><button type="button" className="button button--secondary" onClick={resetFilters}>Afficher toute la bibliothèque</button></div>
             ) : !hasVisibleResults ? (

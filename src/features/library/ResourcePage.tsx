@@ -48,7 +48,7 @@ export function ResourcePage() {
     queryKey: ['resource', remoteLookupId],
     queryFn: () => apiJson<ResourceDetailPayload>(`/api/resources/${encodeURIComponent(remoteLookupId)}`),
     enabled: needsRemoteDetail,
-    retry: 1,
+    retry: (failureCount, error) => failureCount < 1 && (!(error instanceof ApiRequestError) || error.retryable),
   });
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [extracting, setExtracting] = useState(false);
@@ -239,9 +239,20 @@ export function ResourcePage() {
     return <div className="page"><div className="loading-card">Ouverture du support…</div></div>;
   }
   if (needsRemoteDetail && remote.isError) {
-    const missing = remote.error instanceof ApiRequestError && remote.error.status === 404;
+    const requestError = remote.error instanceof ApiRequestError ? remote.error : null;
+    const missing = requestError?.status === 404;
+    const retryable = !requestError || requestError.retryable;
     const localVersionMissing = Boolean(localResource && localVersion === undefined);
-    return <div className="page"><Link className="back-link" to={backToLibrary}>← Bibliothèque</Link><div className="error-page"><h1>{missing ? 'Support introuvable' : localVersionMissing ? 'Impossible de récupérer la version du support' : 'Impossible de charger le support'}</h1><p>{missing ? localVersionMissing ? 'La ressource locale existe, mais sa version n’est disponible ni dans IndexedDB ni sur le serveur synchronisé.' : 'Ce support n’est disponible ni dans le stockage local ni sur le serveur.' : localVersionMissing ? 'La version locale est incomplète et le serveur n’a pas pu être joint pour la reconstruire. Sirāfiq ne la déclare pas perdue.' : 'Le serveur n’a pas pu être joint ou a rencontré une erreur. Le support n’est pas déclaré absent.'}</p>{!missing && <button className="button button--secondary" type="button" onClick={() => void remote.refetch()}>Réessayer</button>}</div></div>;
+    const message = missing
+      ? localVersionMissing
+        ? 'La ressource locale existe, mais sa version n’est disponible ni dans IndexedDB ni sur le serveur synchronisé.'
+        : 'Ce support n’est disponible ni dans le stockage local ni sur le serveur.'
+      : requestError && !requestError.retryable
+        ? requestError.message
+        : localVersionMissing
+          ? 'La version locale est incomplète et le serveur n’a pas pu être joint pour la reconstruire. Sirāfiq ne la déclare pas perdue.'
+          : 'Le serveur n’a pas pu être joint ou a rencontré une erreur. Le support n’est pas déclaré absent.';
+    return <div className="page"><Link className="back-link" to={backToLibrary}>← Bibliothèque</Link><div className="error-page"><h1>{missing ? 'Support introuvable' : localVersionMissing ? 'Impossible de récupérer la version du support' : 'Impossible de charger le support'}</h1><p>{message}</p>{!missing && retryable ? <button className="button button--secondary" type="button" onClick={() => void remote.refetch()}>Réessayer</button> : null}</div></div>;
   }
   if (localResource && localVersion === undefined && missingVersionRecoveryError) {
     return <div className="page"><Link className="back-link" to={backToLibrary}>← Bibliothèque</Link><div className="error-page"><h1>Impossible de reconstruire la version du support</h1><p>{missingVersionRecoveryError.message}</p>{missingVersionRecoveryError.retryable && <button className="button button--secondary" type="button" onClick={retryMissingVersionRecovery}>Réessayer</button>}</div></div>;

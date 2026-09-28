@@ -877,20 +877,56 @@ async function getBootstrap(env: Env): Promise<Response> {
       id: string; name: string; parent_id: string | null; created_at: string; updated_at: string;
     }>(),
     env.DB.prepare(`
-      SELECT r.id, r.subject_id, r.title, r.kind, r.current_version_id, r.created_at, r.updated_at, v.status,
+      SELECT r.id, r.subject_id, r.title, r.kind, r.current_version_id, r.created_at, r.updated_at,
+             v.id AS version_id, v.resource_id AS version_resource_id, v.status,
              CASE WHEN v.extraction_status = 'ready' THEN e.char_count ELSE NULL END AS char_count
-      FROM resources r JOIN resource_versions v ON v.id = r.current_version_id
-      LEFT JOIN extractions e ON e.version_id = v.id ORDER BY r.updated_at DESC
+      FROM resources r
+      LEFT JOIN resource_versions v ON v.id = r.current_version_id
+      LEFT JOIN extractions e ON e.version_id = v.id
+      ORDER BY r.updated_at DESC
     `).all<{
       id: string; subject_id: string; title: string; kind: 'text' | 'pdf'; current_version_id: string;
-      created_at: string; updated_at: string; status: 'uploading' | 'stored' | 'ready' | 'failed'; char_count: number | null;
+      created_at: string; updated_at: string; version_id: string | null; version_resource_id: string | null;
+      status: 'uploading' | 'stored' | 'ready' | 'failed' | null; char_count: number | null;
     }>(),
   ]);
+
+  const subjectIds = new Set(subjectsResult.results.map((row) => row.id));
+  for (const row of resourcesResult.results) {
+    if (!subjectIds.has(row.subject_id)) {
+      return errorResponse(
+        409,
+        'RESOURCE_SUBJECT_MISSING',
+        'Un support synchronisé référence une matière absente de D1. Il n’est pas déclaré absent.',
+        false,
+        { resourceId: row.id, subjectId: row.subject_id },
+      );
+    }
+    if (!row.version_id || !row.status) {
+      return errorResponse(
+        409,
+        'RESOURCE_VERSION_MISSING',
+        'Un support synchronisé existe, mais sa version courante est absente de D1.',
+        false,
+        { resourceId: row.id, versionId: row.current_version_id },
+      );
+    }
+    if (row.version_resource_id !== row.id) {
+      return errorResponse(
+        409,
+        'RESOURCE_VERSION_IDENTITY_CONFLICT',
+        'La version courante synchronisée appartient à un autre support.',
+        false,
+        { resourceId: row.id, versionId: row.version_id, versionResourceId: row.version_resource_id },
+      );
+    }
+  }
+
   const payload: BootstrapPayload = {
     subjects: subjectsResult.results.map((row) => ({ id: row.id, name: row.name, parentId: row.parent_id, createdAt: row.created_at, updatedAt: row.updated_at })),
     resources: resourcesResult.results.map((row) => ({
       id: row.id, subjectId: row.subject_id, title: row.title, kind: row.kind, currentVersionId: row.current_version_id,
-      status: row.status, extractionCharCount: row.char_count, createdAt: row.created_at, updatedAt: row.updated_at,
+      status: row.status!, extractionCharCount: row.char_count, createdAt: row.created_at, updatedAt: row.updated_at,
     })),
   };
   return json(payload);
@@ -899,25 +935,65 @@ async function getBootstrap(env: Env): Promise<Response> {
 async function getResource(resourceId: string, env: Env): Promise<Response> {
   const row = await env.DB.prepare(`
     SELECT r.id, r.subject_id, r.title, r.kind, r.current_version_id, r.created_at, r.updated_at,
-           s.name AS subject_name, s.parent_id AS subject_parent_id,
+           s.id AS subject_row_id, s.name AS subject_name, s.parent_id AS subject_parent_id,
            s.created_at AS subject_created_at, s.updated_at AS subject_updated_at,
+           v.id AS version_id, v.resource_id AS version_resource_id,
            v.file_name, v.mime_type, COALESCE(v.size_bytes, v.size) AS size, v.sha256, v.status,
            v.extraction_status, v.extraction_error, e.content_json, e.char_count
     FROM resources r
-    JOIN subjects s ON s.id = r.subject_id
-    JOIN resource_versions v ON v.id = r.current_version_id
-    LEFT JOIN extractions e ON e.version_id = v.id WHERE r.id = ?
+    LEFT JOIN subjects s ON s.id = r.subject_id
+    LEFT JOIN resource_versions v ON v.id = r.current_version_id
+    LEFT JOIN extractions e ON e.version_id = v.id
+    WHERE r.id = ?
   `).bind(resourceId).first<{
     id: string; subject_id: string; title: string; kind: 'text' | 'pdf'; current_version_id: string;
-    created_at: string; updated_at: string; subject_name: string; subject_parent_id: string | null;
-    subject_created_at: string; subject_updated_at: string; file_name: string; mime_type: string; size: number; sha256: string;
-    status: 'uploading' | 'stored' | 'ready' | 'failed'; extraction_status: 'pending' | 'ready' | 'failed';
-    extraction_error: string | null; content_json: string | null; char_count: number | null;
+    created_at: string; updated_at: string; subject_row_id: string | null; subject_name: string | null;
+    subject_parent_id: string | null; subject_created_at: string | null; subject_updated_at: string | null;
+    version_id: string | null; version_resource_id: string | null; file_name: string | null; mime_type: string | null;
+    size: number | null; sha256: string | null; status: 'uploading' | 'stored' | 'ready' | 'failed' | null;
+    extraction_status: 'pending' | 'ready' | 'failed' | null; extraction_error: string | null;
+    content_json: string | null; char_count: number | null;
   }>();
   if (!row) return errorResponse(404, 'RESOURCE_NOT_FOUND', 'Ce support est introuvable.', false);
+  if (!row.subject_row_id || row.subject_name === null || row.subject_created_at === null || row.subject_updated_at === null) {
+    return errorResponse(
+      409,
+      'RESOURCE_SUBJECT_MISSING',
+      'Ce support synchronisé référence une matière absente de D1. Il n’est pas déclaré absent.',
+      false,
+      { resourceId: row.id, subjectId: row.subject_id },
+    );
+  }
+  if (
+    !row.version_id
+    || row.file_name === null
+    || row.mime_type === null
+    || row.size === null
+    || row.sha256 === null
+    || row.status === null
+    || row.extraction_status === null
+  ) {
+    return errorResponse(
+      409,
+      'RESOURCE_VERSION_MISSING',
+      'Ce support synchronisé existe, mais sa version courante est absente de D1.',
+      false,
+      { resourceId: row.id, versionId: row.current_version_id },
+    );
+  }
+  if (row.version_resource_id !== row.id) {
+    return errorResponse(
+      409,
+      'RESOURCE_VERSION_IDENTITY_CONFLICT',
+      'La version courante synchronisée appartient à un autre support.',
+      false,
+      { resourceId: row.id, versionId: row.version_id, versionResourceId: row.version_resource_id },
+    );
+  }
+
   const payload: ResourceDetailPayload = {
     subject: {
-      id: row.subject_id,
+      id: row.subject_row_id,
       name: row.subject_name,
       parentId: row.subject_parent_id,
       createdAt: row.subject_created_at,
@@ -925,7 +1001,7 @@ async function getResource(resourceId: string, env: Env): Promise<Response> {
     },
     resource: { id: row.id, subjectId: row.subject_id, title: row.title, kind: row.kind, currentVersionId: row.current_version_id, createdAt: row.created_at, updatedAt: row.updated_at },
     version: {
-      id: row.current_version_id, fileName: row.file_name, mimeType: row.mime_type, size: row.size, sha256: row.sha256,
+      id: row.version_id, fileName: row.file_name, mimeType: row.mime_type, size: row.size, sha256: row.sha256,
       status: row.status, extractionStatus: row.extraction_status, extractionError: row.extraction_error,
     },
     extraction: row.extraction_status === 'ready' && row.content_json && row.char_count !== null

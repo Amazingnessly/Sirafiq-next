@@ -142,3 +142,31 @@ test('un filtre attend le bootstrap distant avant de conclure qu’il ne corresp
   await expect(page.getByText('Aucun élément correspondant')).toHaveCount(0);
   await expect(page.getByText('La bibliothèque est vide')).toHaveCount(0);
 });
+
+test('une incohérence terminale du bootstrap ne devient ni un faux état vide ni un faux retry', async ({ page }) => {
+  let bootstrapRequests = 0;
+  const message = 'Un support synchronisé existe, mais sa version courante est absente de D1.';
+
+  await page.route('**/api/bootstrap', async (route) => {
+    bootstrapRequests += 1;
+    await route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: {
+          code: 'RESOURCE_VERSION_MISSING',
+          message,
+          retryable: false,
+        },
+      }),
+    });
+  });
+
+  await page.goto('/bibliotheque');
+
+  await expect(page.getByRole('heading', { name: 'Impossible de vérifier les supports synchronisés' })).toBeVisible();
+  await expect(page.getByText(message)).toBeVisible();
+  await expect(page.getByText('La bibliothèque est vide')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Réessayer', exact: true })).toHaveCount(0);
+  await expect.poll(() => bootstrapRequests).toBe(1);
+});

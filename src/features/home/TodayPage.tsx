@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { db } from '../../data/db';
 import { useDexieQuery } from '../../data/useDexieQuery';
-import { apiJson } from '../../lib/api';
+import { ApiRequestError, apiJson } from '../../lib/api';
 import type { BootstrapPayload } from '../../shared/contracts';
 
 export function TodayPage() {
@@ -18,7 +18,7 @@ export function TodayPage() {
   const remoteBootstrap = useQuery({
     queryKey: ['library-bootstrap'],
     queryFn: () => apiJson<BootstrapPayload>('/api/bootstrap'),
-    retry: 1,
+    retry: (failureCount, error) => failureCount < 1 && (!(error instanceof ApiRequestError) || error.retryable),
   });
 
   const localSubjectIds = new Set(localSubjects.map((subject) => subject.id));
