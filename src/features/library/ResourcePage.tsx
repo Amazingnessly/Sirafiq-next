@@ -62,6 +62,8 @@ export function ResourcePage() {
   const [repairingStorage, setRepairingStorage] = useState(false);
   const [storageRepairError, setStorageRepairError] = useState<string | null>(null);
   const [pdfRepairRevision, setPdfRepairRevision] = useState(0);
+  const [missingVersionRecoveryError, setMissingVersionRecoveryError] = useState<{ message: string; retryable: boolean } | null>(null);
+  const [missingVersionRecoveryAttempt, setMissingVersionRecoveryAttempt] = useState(0);
 
   useEffect(() => {
     if (!localVersion?.bytes) { setBlobUrl(null); return; }
@@ -71,19 +73,39 @@ export function ResourcePage() {
   }, [localVersion?.bytes, localVersion?.mimeType]);
 
   useEffect(() => {
-    if (!remote.data) return;
+    let cancelled = false;
+    if (!remote.data) return () => { cancelled = true; };
     if (!localResource) {
       void cacheRemoteTextResource(remote.data).catch((error) => {
         console.error('Remote text local cache failed', error);
       });
-      return;
+      return () => { cancelled = true; };
     }
-    if (localVersion === undefined) {
-      void repairMissingLocalResourceVersion(localResource, remote.data).catch((error) => {
+    if (localVersion !== undefined) {
+      setMissingVersionRecoveryError(null);
+      return () => { cancelled = true; };
+    }
+
+    setMissingVersionRecoveryError(null);
+    void repairMissingLocalResourceVersion(localResource, remote.data)
+      .then((repaired) => {
+        if (cancelled || repaired) return;
+        setMissingVersionRecoveryError({
+          message: 'Le détail synchronisé ne correspond pas à l’identité locale conservée. Sirāfiq refuse de l’associer automatiquement à ce support.',
+          retryable: false,
+        });
+      })
+      .catch((error) => {
         console.error('Remote version metadata recovery failed', error);
+        if (cancelled) return;
+        setMissingVersionRecoveryError({
+          message: 'La reconstruction des métadonnées locales a échoué. Le contenu distant n’est pas utilisé tant que cette récupération n’a pas abouti.',
+          retryable: true,
+        });
       });
-    }
-  }, [localResource, localVersion, remote.data]);
+
+    return () => { cancelled = true; };
+  }, [localResource, localVersion, missingVersionRecoveryAttempt, remote.data]);
 
 
   const title = localResource?.title ?? remote.data?.resource.title;
@@ -153,6 +175,11 @@ export function ResourcePage() {
     });
   }, [localResource, localVersion, multipartSession, remoteVersionId]);
 
+  function retryMissingVersionRecovery() {
+    setMissingVersionRecoveryError(null);
+    setMissingVersionRecoveryAttempt((attempt) => attempt + 1);
+  }
+
   async function retrySync() { if (!localResource || terminalSyncFailure) return; setRetryError(null); try { await retrySyncForResource(localResource.id); await requestSync(); } catch (error) { setRetryError(error instanceof Error ? error.message : 'La synchronisation a échoué.'); } }
   async function resumeMultipart() {
     if (!localResource || !localVersion || !multipartSession || !resumeFile || resuming) return;
@@ -207,6 +234,7 @@ export function ResourcePage() {
     localResource === null
     || (Boolean(localResource) && localVersion === null)
     || (needsRemoteDetail && remote.isPending)
+    || (Boolean(localResource) && localVersion === undefined && Boolean(remote.data) && !missingVersionRecoveryError)
   ) {
     return <div className="page"><div className="loading-card">Ouverture du support…</div></div>;
   }
@@ -214,6 +242,9 @@ export function ResourcePage() {
     const missing = remote.error instanceof ApiRequestError && remote.error.status === 404;
     const localVersionMissing = Boolean(localResource && localVersion === undefined);
     return <div className="page"><Link className="back-link" to={backToLibrary}>← Bibliothèque</Link><div className="error-page"><h1>{missing ? 'Support introuvable' : localVersionMissing ? 'Impossible de récupérer la version du support' : 'Impossible de charger le support'}</h1><p>{missing ? localVersionMissing ? 'La ressource locale existe, mais sa version n’est disponible ni dans IndexedDB ni sur le serveur synchronisé.' : 'Ce support n’est disponible ni dans le stockage local ni sur le serveur.' : localVersionMissing ? 'La version locale est incomplète et le serveur n’a pas pu être joint pour la reconstruire. Sirāfiq ne la déclare pas perdue.' : 'Le serveur n’a pas pu être joint ou a rencontré une erreur. Le support n’est pas déclaré absent.'}</p>{!missing && <button className="button button--secondary" type="button" onClick={() => void remote.refetch()}>Réessayer</button>}</div></div>;
+  }
+  if (localResource && localVersion === undefined && missingVersionRecoveryError) {
+    return <div className="page"><Link className="back-link" to={backToLibrary}>← Bibliothèque</Link><div className="error-page"><h1>Impossible de reconstruire la version du support</h1><p>{missingVersionRecoveryError.message}</p>{missingVersionRecoveryError.retryable && <button className="button button--secondary" type="button" onClick={retryMissingVersionRecovery}>Réessayer</button>}</div></div>;
   }
   if (!title) return <div className="page"><Link className="back-link" to={backToLibrary}>← Bibliothèque</Link><div className="error-page"><h1>Support introuvable</h1><p>Ce support n’est disponible ni dans le stockage local ni sur le serveur.</p></div></div>;
 
