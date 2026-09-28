@@ -165,3 +165,108 @@ test('une ressource locale dont la version a disparu est reconstruite depuis son
   await expect(page.getByText('Matière locale conservée')).toBeVisible();
   expect(detailRequests).toBe(1);
 });
+
+test('un détail distant incompatible n’est jamais affiché pour une ressource locale dont la version a disparu', async ({ page }) => {
+  const localSubjectId = '71717171-7171-4171-8171-717171717171';
+  const localResourceId = '72727272-7272-4272-8272-727272727272';
+  const localVersionId = '73737373-7373-4373-8373-737373737373';
+  const remoteResourceId = '74747474-7474-4474-8474-747474747474';
+  const remoteVersionId = '75757575-7575-4575-8575-757575757575';
+  const remoteSubjectId = '76767676-7676-4676-8676-767676767676';
+  const incompatibleText = 'Ce contenu distant incompatible ne doit jamais être associé au support local.';
+
+  await page.route('**/api/bootstrap', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ subjects: [], resources: [] }),
+    });
+  });
+
+  await page.route(`**/api/resources/${remoteResourceId}`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        subject: {
+          id: remoteSubjectId,
+          name: 'Matière distante incompatible',
+          parentId: null,
+          createdAt: '2026-09-28T00:00:00.000Z',
+          updatedAt: '2026-09-28T00:00:00.000Z',
+        },
+        resource: {
+          id: remoteResourceId,
+          subjectId: remoteSubjectId,
+          title: 'PDF distant incompatible',
+          kind: 'pdf',
+          currentVersionId: remoteVersionId,
+          createdAt: '2026-09-28T00:00:00.000Z',
+          updatedAt: '2026-09-28T00:00:00.000Z',
+        },
+        version: {
+          id: remoteVersionId,
+          fileName: 'incompatible.pdf',
+          mimeType: 'application/pdf',
+          size: 1024,
+          sha256: 'f'.repeat(64),
+          status: 'ready',
+          extractionStatus: 'ready',
+          extractionError: null,
+        },
+        extraction: {
+          pages: [{ pageNumber: 1, text: incompatibleText }],
+          charCount: incompatibleText.length,
+        },
+      }),
+    });
+  });
+
+  await page.goto('/bibliotheque');
+  await page.evaluate(async ({ subjectId, resourceId, versionId, remoteId }) => {
+    const { db } = await import('/src/data/db.ts');
+    const now = new Date().toISOString();
+    await db.subjects.add({
+      id: subjectId,
+      name: 'Matière locale intacte',
+      parentId: null,
+      createdAt: now,
+      updatedAt: now,
+      syncState: 'synced',
+      syncError: null,
+    });
+    await db.resources.add({
+      id: resourceId,
+      subjectId,
+      title: 'Texte local sans version',
+      kind: 'text',
+      currentVersionId: versionId,
+      remoteResourceId: remoteId,
+      status: 'ready',
+      extractionError: null,
+      createdAt: now,
+      updatedAt: now,
+      syncState: 'synced',
+      syncError: null,
+    });
+  }, {
+    subjectId: localSubjectId,
+    resourceId: localResourceId,
+    versionId: localVersionId,
+    remoteId: remoteResourceId,
+  });
+
+  await page.goto(`/bibliotheque/${localResourceId}`);
+
+  await expect(page.getByRole('heading', { name: 'Impossible de reconstruire la version du support' })).toBeVisible();
+  await expect(page.getByText(/Le détail synchronisé ne correspond pas à l’identité locale conservée/)).toBeVisible();
+  await expect(page.getByText(incompatibleText)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Réessayer' })).toHaveCount(0);
+
+  const localVersion = await page.evaluate(async (versionId) => {
+    const { db } = await import('/src/data/db.ts');
+    return db.resourceVersions.get(versionId);
+  }, localVersionId);
+  expect(localVersion).toBeUndefined();
+});
+
