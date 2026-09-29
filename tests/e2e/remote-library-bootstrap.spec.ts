@@ -1,0 +1,256 @@
+import { expect, test } from '@playwright/test';
+
+const SUBJECT_ID = 'abababab-abab-4bab-8bab-abababababab';
+const RESOURCE_ID = 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
+const VERSION_ID = 'efefefef-efef-4fef-8fef-efefefefefef';
+
+test('une bibliothèque locale vide retrouve les supports synchronisés sans écraser le local-first', async ({ page }) => {
+  const remoteText = 'Texte synchronisé retrouvé depuis D1 après perte du stockage local.';
+
+  await page.route('**/api/bootstrap', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        subjects: [{
+          id: SUBJECT_ID,
+          name: 'Matière distante E2E',
+          parentId: null,
+          createdAt: '2026-09-23T00:00:00.000Z',
+          updatedAt: '2026-09-23T00:00:00.000Z',
+        }],
+        resources: [{
+          id: RESOURCE_ID,
+          subjectId: SUBJECT_ID,
+          title: 'Support distant E2E',
+          kind: 'text',
+          currentVersionId: VERSION_ID,
+          status: 'ready',
+          extractionCharCount: remoteText.length,
+          createdAt: '2026-09-23T00:00:00.000Z',
+          updatedAt: '2026-09-23T00:00:00.000Z',
+        }],
+      }),
+    });
+  });
+
+  await page.route(`**/api/resources/${RESOURCE_ID}`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        resource: {
+          id: RESOURCE_ID,
+          subjectId: SUBJECT_ID,
+          title: 'Support distant E2E',
+          kind: 'text',
+          currentVersionId: VERSION_ID,
+          createdAt: '2026-09-23T00:00:00.000Z',
+          updatedAt: '2026-09-23T00:00:00.000Z',
+        },
+        version: {
+          id: VERSION_ID,
+          fileName: 'distant.txt',
+          mimeType: 'text/plain',
+          size: remoteText.length,
+          sha256: 'remote-e2e-sha',
+          status: 'ready',
+          extractionStatus: 'ready',
+          extractionError: null,
+        },
+        extraction: {
+          pages: [{ pageNumber: 1, text: remoteText }],
+          charCount: remoteText.length,
+        },
+      }),
+    });
+  });
+
+  await page.goto('/bibliotheque');
+
+  await expect(page.getByRole('heading', { name: 'Support distant E2E' })).toBeVisible();
+  await expect(page.getByText('La bibliothèque est vide')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Matière distante E2E/ })).toBeVisible();
+  await expect(page.getByText('État serveur finalisé · ouvrez le support pour vérifier la lecture du fichier sur cet appareil.')).toBeVisible();
+  await expect(page.getByText('Synchronisé sur le serveur et consultable.')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Extraits', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Support distant E2E' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Aucun élément correspondant' })).toBeVisible();
+  await page.getByRole('button', { name: 'Tous', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Support distant E2E' })).toBeVisible();
+
+  await expect.poll(async () => page.evaluate(async (subjectId) => {
+    const { db } = await import('/src/data/db.ts');
+    return (await db.subjects.get(subjectId))?.syncState ?? null;
+  }, SUBJECT_ID)).toBe('synced');
+
+  await page.getByRole('link', { name: /Support distant E2E/ }).click();
+  await expect(page.getByText(remoteText)).toBeVisible();
+  await page.reload();
+  await expect(page.getByText(remoteText)).toBeVisible();
+});
+
+test('un PDF uniquement distant affiche le vrai nom de sa matière', async ({ page }) => {
+  const subjectId = '12121212-abab-4121-8121-121212121212';
+  const resourceId = '34343434-cdcd-4343-8343-343434343434';
+  const versionId = '56565656-efef-4565-8565-565656565656';
+  const now = '2026-09-29T00:00:00.000Z';
+
+  await page.route('**/api/bootstrap', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        subjects: [{ id: subjectId, name: 'Matière PDF distante', parentId: null, createdAt: now, updatedAt: now }],
+        resources: [{
+          id: resourceId,
+          subjectId,
+          title: 'PDF distant',
+          kind: 'pdf',
+          currentVersionId: versionId,
+          status: 'failed',
+          extractionCharCount: null,
+          createdAt: now,
+          updatedAt: now,
+        }],
+      }),
+    });
+  });
+
+  await page.route(`**/api/resources/${resourceId}`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        subject: { id: subjectId, name: 'Matière PDF distante', parentId: null, createdAt: now, updatedAt: now },
+        resource: {
+          id: resourceId,
+          subjectId,
+          title: 'PDF distant',
+          kind: 'pdf',
+          currentVersionId: versionId,
+          createdAt: now,
+          updatedAt: now,
+        },
+        version: {
+          id: versionId,
+          fileName: 'distant.pdf',
+          mimeType: 'application/pdf',
+          size: 128,
+          sha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          status: 'failed',
+          extractionStatus: 'failed',
+          extractionError: 'Aucun texte exploitable.',
+        },
+        extraction: null,
+      }),
+    });
+  });
+
+  await page.route(`**/api/resource-versions/${versionId}/blob`, async (route) => {
+    await route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: {
+          code: 'FILE_INTEGRITY_ERROR',
+          message: 'Fichier indisponible pour ce test.',
+          retryable: false,
+        },
+      }),
+    });
+  });
+
+  await page.goto('/bibliotheque');
+  await page.getByRole('link', { name: /PDF distant/ }).click();
+
+  await expect(page.locator('.resource-header .eyebrow')).toHaveText('Matière PDF distante');
+  await expect(page.getByRole('heading', { name: 'PDF distant' })).toBeVisible();
+});
+
+test('une panne du bootstrap distant ne devient jamais un faux état vide', async ({ page }) => {
+  await page.route('**/api/bootstrap', async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: {
+          code: 'BOOTSTRAP_E2E_DOWN',
+          message: 'D1 temporairement indisponible.',
+          retryable: true,
+        },
+      }),
+    });
+  });
+
+  await page.goto('/bibliotheque');
+
+  await expect(page.getByRole('heading', { name: 'Impossible de vérifier les supports synchronisés' })).toBeVisible();
+  await expect(page.getByText('La bibliothèque est vide')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Réessayer', exact: true })).toBeVisible();
+});
+
+
+test('un filtre attend le bootstrap distant avant de conclure qu’il ne correspond à rien', async ({ page }) => {
+  let releaseBootstrap!: () => void;
+  const bootstrapGate = new Promise<void>((resolve) => {
+    releaseBootstrap = resolve;
+  });
+
+  await page.route('**/api/bootstrap', async (route) => {
+    await bootstrapGate;
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: {
+          code: 'FILTERED_BOOTSTRAP_E2E_DOWN',
+          message: 'D1 temporairement indisponible pendant une recherche.',
+          retryable: true,
+        },
+      }),
+    });
+  });
+
+  await page.goto('/bibliotheque?q=support-distant');
+
+  try {
+    await expect(page.getByRole('heading', { name: 'Vérification des supports synchronisés…' })).toBeVisible();
+    await expect(page.getByText('Aucun élément correspondant')).toHaveCount(0);
+  } finally {
+    releaseBootstrap();
+  }
+
+  await expect(page.getByRole('heading', { name: 'Impossible de vérifier les supports synchronisés' })).toBeVisible();
+  await expect(page.getByText('Aucun élément correspondant')).toHaveCount(0);
+  await expect(page.getByText('La bibliothèque est vide')).toHaveCount(0);
+});
+
+test('une incohérence terminale du bootstrap ne devient ni un faux état vide ni un faux retry', async ({ page }) => {
+  let bootstrapRequests = 0;
+  const message = 'Un support synchronisé existe, mais sa version courante est absente de D1.';
+
+  await page.route('**/api/bootstrap', async (route) => {
+    bootstrapRequests += 1;
+    await route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: {
+          code: 'RESOURCE_VERSION_MISSING',
+          message,
+          retryable: false,
+        },
+      }),
+    });
+  });
+
+  await page.goto('/bibliotheque');
+
+  await expect(page.getByRole('heading', { name: 'Impossible de vérifier les supports synchronisés' })).toBeVisible();
+  await expect(page.getByText(message)).toBeVisible();
+  await expect(page.getByText('La bibliothèque est vide')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Réessayer', exact: true })).toHaveCount(0);
+  await expect.poll(() => bootstrapRequests).toBe(1);
+});

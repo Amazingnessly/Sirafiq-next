@@ -1,19 +1,16 @@
-## Résumé
+## Parcours modifié
 
-Décrire précisément le changement et ce qui est réellement pris en charge.
+Décrire le parcours utilisateur complet concerné.
 
-## Validation obligatoire
+## Vérifications
 
-- [ ] `npm ci`
-- [ ] `npm run build`
-- [ ] CI GitHub verte
-- [ ] aucun support existant perdu
-- [ ] import d’un nouveau support vérifié
-- [ ] persistance après rechargement vérifiée
-- [ ] ouverture/lecture vérifiée
-- [ ] suppression vérifiée
-- [ ] test Safari iOS réel si le changement touche fichiers, IndexedDB, PDF, DOCX ou lecture
+- [ ] aucun bouton/action mort ajouté
+- [ ] états d'erreur et retry vérifiés lorsque pertinent
+- [ ] persistance après rechargement vérifiée lorsque pertinent
+- [ ] `npm run check`
+- [ ] `npm run test:e2e` lorsque pertinent
+- [ ] aucune validation iPad revendiquée sans test sur appareil réel
 
-## Limites connues
+## Risques / limites connues
 
-Documenter explicitement les formats ou cas non pris en charge.
+Indiquer explicitement ce qui reste à valider.

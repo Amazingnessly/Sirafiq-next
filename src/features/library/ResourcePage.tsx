@@ -1,0 +1,338 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { StatusPill } from '../../components/StatusPill';
+import { db, type ExtractionRecord, type ResourceRecord, type ResourceVersionRecord } from '../../data/db';
+import { retrySyncForResource } from '../../data/repository';
+import { cacheRemoteTextResource, repairMissingLocalResourceVersion } from '../../data/remoteResourceCache';
+import { useDexieQuery } from '../../data/useDexieQuery';
+import { ApiRequestError, apiJson } from '../../lib/api';
+import { sha256Hex } from '../../lib/hash';
+import { repairFinalizedResourceStorage, uploadMultipartResourceWithRecovery } from '../../lib/multipartRecovery';
+import { isTerminalOutboxAttempt } from '../../lib/retryableSync';
+import { requestSync, retryServerExtractionForResource, type TransferProgress } from '../../lib/sync';
+import {
+  SERVER_PDF_EXTRACTION_MAX_BYTES,
+  SERVER_TEXT_EXTRACTION_MAX_BYTES,
+  canUseServerExtraction,
+  shouldTryServerExtraction,
+} from '../../shared/importPolicy';
+import type { ExtractedPage, ResourceDetailPayload } from '../../shared/contracts';
+import { PdfViewer } from './PdfViewer';
+
+export function ResourcePage() {
+  const { resourceId = '' } = useParams();
+  const [searchParams] = useSearchParams();
+  const backToLibrary = libraryReturnHref(searchParams.get('library'));
+  const localResource = useDexieQuery<ResourceRecord | undefined | null>(() => db.resources.get(resourceId), [resourceId], null);
+  const localVersion = useDexieQuery<ResourceVersionRecord | undefined | null>(
+    () => localResource ? db.resourceVersions.get(localResource.currentVersionId) : Promise.resolve(undefined),
+    [localResource?.currentVersionId],
+    null,
+  );
+  const localExtraction = useDexieQuery<ExtractionRecord | undefined | null>(
+    () => localResource ? db.extractions.get(localResource.currentVersionId) : Promise.resolve(undefined),
+    [localResource?.currentVersionId],
+    null,
+  );
+  const multipartSession = useDexieQuery(() => localResource ? db.multipartUploads.get(localResource.currentVersionId) : Promise.resolve(undefined), [localResource?.currentVersionId], undefined);
+  const syncAttempt = useDexieQuery(() => localResource ? db.outbox.where('entityId').equals(localResource.id).and((item) => item.type === 'resource.sync').first() : Promise.resolve(undefined), [localResource?.id], undefined);
+  const subject = useDexieQuery(() => localResource ? db.subjects.get(localResource.subjectId) : Promise.resolve(undefined), [localResource?.subjectId], undefined);
+  const remoteLookupId = localResource?.remoteResourceId ?? resourceId;
+  const needsRemoteDetail = Boolean(
+    remoteLookupId
+    && localResource !== null
+    && (!localResource || localVersion === undefined)
+  );
+  const remote = useQuery({
+    queryKey: ['resource', remoteLookupId],
+    queryFn: () => apiJson<ResourceDetailPayload>(`/api/resources/${encodeURIComponent(remoteLookupId)}`),
+    enabled: needsRemoteDetail,
+    retry: (failureCount, error) => failureCount < 1 && (!(error instanceof ApiRequestError) || error.retryable),
+  });
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [extracting, setExtracting] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+  const [extractionRetryError, setExtractionRetryError] = useState<string | null>(null);
+  const [resumeFile, setResumeFile] = useState<File | null>(null);
+  const [resuming, setResuming] = useState(false);
+  const [transferProgress, setTransferProgress] = useState<TransferProgress | null>(null);
+  const [storageRepairNeeded, setStorageRepairNeeded] = useState(false);
+  const [storageRepairFile, setStorageRepairFile] = useState<File | null>(null);
+  const [repairingStorage, setRepairingStorage] = useState(false);
+  const [storageRepairError, setStorageRepairError] = useState<string | null>(null);
+  const [pdfRepairRevision, setPdfRepairRevision] = useState(0);
+  const [missingVersionRecoveryError, setMissingVersionRecoveryError] = useState<{ message: string; retryable: boolean } | null>(null);
+  const [missingVersionRecoveryAttempt, setMissingVersionRecoveryAttempt] = useState(0);
+
+  useEffect(() => {
+    if (!localVersion?.bytes) { setBlobUrl(null); return; }
+    const blob = new Blob([localVersion.bytes], { type: localVersion.mimeType });
+    const url = URL.createObjectURL(blob); setBlobUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [localVersion?.bytes, localVersion?.mimeType]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!remote.data) return () => { cancelled = true; };
+    if (!localResource) {
+      void cacheRemoteTextResource(remote.data).catch((error) => {
+        console.error('Remote text local cache failed', error);
+      });
+      return () => { cancelled = true; };
+    }
+    if (localVersion !== undefined) {
+      setMissingVersionRecoveryError(null);
+      return () => { cancelled = true; };
+    }
+
+    setMissingVersionRecoveryError(null);
+    void repairMissingLocalResourceVersion(localResource, remote.data)
+      .then((repaired) => {
+        if (cancelled || repaired) return;
+        setMissingVersionRecoveryError({
+          message: 'Le détail synchronisé ne correspond pas à l’identité locale conservée. Sirāfiq refuse de l’associer automatiquement à ce support.',
+          retryable: false,
+        });
+      })
+      .catch((error) => {
+        console.error('Remote version metadata recovery failed', error);
+        if (cancelled) return;
+        setMissingVersionRecoveryError({
+          message: 'La reconstruction des métadonnées locales a échoué. Le contenu distant n’est pas utilisé tant que cette récupération n’a pas abouti.',
+          retryable: true,
+        });
+      });
+
+    return () => { cancelled = true; };
+  }, [localResource, localVersion, missingVersionRecoveryAttempt, remote.data]);
+
+
+  const title = localResource?.title ?? remote.data?.resource.title;
+  const subjectName = subject?.name ?? remote.data?.subject?.name ?? 'Support';
+  const kind = localResource?.kind ?? remote.data?.resource.kind;
+  const versionId = localResource?.currentVersionId ?? remote.data?.version.id;
+  const remoteVersionId = localVersion?.remoteVersionId
+    ?? (localVersion ? localVersion.id : remote.data?.version.id)
+    ?? versionId;
+  const pages: ExtractedPage[] = useMemo(() => {
+    if (localExtraction) return localExtraction.status === 'ready' ? localExtraction.pages : [];
+    if (remote.data?.version.extractionStatus === 'ready') return remote.data.extraction?.pages ?? [];
+    return [];
+  }, [localExtraction, remote.data?.extraction?.pages, remote.data?.version.extractionStatus]);
+  const extractionFailed = localExtraction?.status === 'failed' || remote.data?.version.extractionStatus === 'failed';
+  const remoteExtractionPending = Boolean(
+    (!localResource || localVersion === undefined)
+    && remote.data?.version.status !== 'uploading'
+    && remote.data?.version.extractionStatus === 'pending'
+  );
+  const extractionError = localExtraction?.errorMessage ?? remote.data?.version.extractionError;
+  const remoteBlobAvailable = localVersion
+    ? localResource?.syncState === 'synced'
+    : remote.data?.version.status !== 'uploading';
+  const pdfUrl = blobUrl ?? (remoteVersionId && remoteBlobAvailable ? `/api/resource-versions/${encodeURIComponent(remoteVersionId)}/blob` : null);
+  const terminalSyncFailure = Boolean(syncAttempt?.lastError && isTerminalOutboxAttempt(syncAttempt.nextAttemptAt));
+  const localExtractionMissing = Boolean(localResource && localVersion && localExtraction === undefined);
+  const canRetryServerExtraction = Boolean(
+    localResource
+    && localVersion
+    && localExtraction !== null
+    && localResource.syncState === 'synced'
+    && (
+      localExtraction === undefined
+        ? canUseServerExtraction(localResource.kind, localVersion.size)
+        : shouldTryServerExtraction(localResource.kind, localVersion.size, localExtraction.status)
+    )
+  );
+  const remoteExtractionRecoverable = Boolean(
+    !localResource
+    && remote.data?.version.status !== 'uploading'
+    && (remote.data?.version.extractionStatus === 'pending' || remote.data?.version.extractionStatus === 'failed')
+  );
+  const canRetryRemoteServerExtraction = Boolean(
+    remoteExtractionRecoverable
+    && (kind === 'pdf' || kind === 'text')
+    && remote.data
+    && canUseServerExtraction(kind, remote.data.version.size)
+  );
+  const canRetryExtraction = canRetryServerExtraction || canRetryRemoteServerExtraction;
+  const extractionNeedsRecovery = extractionFailed || remoteExtractionPending || localExtractionMissing;
+  const extractionRecoveryReason = getExtractionRecoveryReason({ kind, extractionNeedsRecovery, hasPages: pages.length > 0, syncState: localResource?.syncState, size: localVersion?.size ?? remote.data?.version.size, hasLocalResource: Boolean(localResource), hasLocalExtraction: Boolean(localExtraction), hasMultipartSession: Boolean(multipartSession), canRetry: canRetryExtraction });
+
+  const inspectPdfReadFailure = useCallback(() => {
+    if (
+      !localResource
+      || !localVersion
+      || localVersion.bytes
+      || !remoteVersionId
+      || multipartSession
+      || localResource.syncState !== 'synced'
+    ) {
+      return;
+    }
+
+    void probeRemoteBlobStorage(remoteVersionId).then((status) => {
+      if (status === 'repair-needed') setStorageRepairNeeded(true);
+    });
+  }, [localResource, localVersion, multipartSession, remoteVersionId]);
+
+  function retryMissingVersionRecovery() {
+    setMissingVersionRecoveryError(null);
+    setMissingVersionRecoveryAttempt((attempt) => attempt + 1);
+  }
+
+  async function retrySync() { if (!localResource || terminalSyncFailure) return; setRetryError(null); try { await retrySyncForResource(localResource.id); await requestSync(); } catch (error) { setRetryError(error instanceof Error ? error.message : 'La synchronisation a échoué.'); } }
+  async function resumeMultipart() {
+    if (!localResource || !localVersion || !multipartSession || !resumeFile || resuming) return;
+    setResuming(true); setRetryError(null); setTransferProgress(null);
+    try {
+      if (resumeFile.size !== multipartSession.size) throw new Error('Ce n’est pas le même fichier : la taille ne correspond pas.');
+      const sha256 = await sha256Hex(resumeFile, (processedBytes, totalBytes) => setTransferProgress({ phase: 'hashing', processedBytes, totalBytes }));
+      if (sha256 !== multipartSession.sha256) throw new Error('Ce n’est pas le même fichier : son empreinte SHA-256 ne correspond pas.');
+      await uploadMultipartResourceWithRecovery(localResource.id, resumeFile, setTransferProgress); setResumeFile(null);
+    } catch (error) { setRetryError(error instanceof Error ? error.message : 'La reprise de l’envoi a échoué.'); } finally { setResuming(false); }
+  }
+  async function repairRemoteStorage() {
+    if (!localResource || !storageRepairFile || repairingStorage) return;
+    setRepairingStorage(true);
+    setStorageRepairError(null);
+    setTransferProgress(null);
+    try {
+      await repairFinalizedResourceStorage(localResource.id, storageRepairFile, setTransferProgress);
+      setStorageRepairFile(null);
+      setStorageRepairNeeded(false);
+      setPdfRepairRevision((value) => value + 1);
+    } catch (error) {
+      setStorageRepairError(error instanceof Error ? error.message : 'La réparation du fichier distant a échoué.');
+    } finally {
+      setRepairingStorage(false);
+    }
+  }
+
+  async function retryExtraction() {
+    if (extracting) return;
+    setExtracting(true); setExtractionRetryError(null);
+    try {
+      if (localResource) {
+        await retryServerExtractionForResource(localResource.id);
+      } else if (canRetryRemoteServerExtraction && remote.data) {
+        await apiJson(
+          `/api/resource-versions/${encodeURIComponent(remote.data.version.id)}/server-extraction`,
+          { method: 'POST' },
+          120_000,
+        );
+        const refreshed = await remote.refetch();
+        if (refreshed.isError) throw refreshed.error;
+      }
+    } catch (error) {
+      setExtractionRetryError(error instanceof Error ? error.message : 'L’extraction serveur a échoué.');
+    } finally {
+      setExtracting(false);
+    }
+  }
+
+  if (
+    localResource === null
+    || (Boolean(localResource) && localVersion === null)
+    || (needsRemoteDetail && remote.isPending)
+    || (Boolean(localResource) && localVersion === undefined && Boolean(remote.data) && !missingVersionRecoveryError)
+  ) {
+    return <div className="page"><div className="loading-card">Ouverture du support…</div></div>;
+  }
+  if (needsRemoteDetail && remote.isError) {
+    const requestError = remote.error instanceof ApiRequestError ? remote.error : null;
+    const missing = requestError?.status === 404;
+    const retryable = !requestError || requestError.retryable;
+    const localVersionMissing = Boolean(localResource && localVersion === undefined);
+    const message = missing
+      ? localVersionMissing
+        ? 'La ressource locale existe, mais sa version n’est disponible ni dans IndexedDB ni sur le serveur synchronisé.'
+        : 'Ce support n’est disponible ni dans le stockage local ni sur le serveur.'
+      : requestError && !requestError.retryable
+        ? requestError.message
+        : localVersionMissing
+          ? 'La version locale est incomplète et le serveur n’a pas pu être joint pour la reconstruire. Sirāfiq ne la déclare pas perdue.'
+          : 'Le serveur n’a pas pu être joint ou a rencontré une erreur. Le support n’est pas déclaré absent.';
+    return <div className="page"><Link className="back-link" to={backToLibrary}>← Bibliothèque</Link><div className="error-page"><h1>{missing ? 'Support introuvable' : localVersionMissing ? 'Impossible de récupérer la version du support' : 'Impossible de charger le support'}</h1><p>{message}</p>{!missing && retryable ? <button className="button button--secondary" type="button" onClick={() => void remote.refetch()}>Réessayer</button> : null}</div></div>;
+  }
+  if (localResource && localVersion === undefined && missingVersionRecoveryError) {
+    return <div className="page"><Link className="back-link" to={backToLibrary}>← Bibliothèque</Link><div className="error-page"><h1>Impossible de reconstruire la version du support</h1><p>{missingVersionRecoveryError.message}</p>{missingVersionRecoveryError.retryable && <button className="button button--secondary" type="button" onClick={retryMissingVersionRecovery}>Réessayer</button>}</div></div>;
+  }
+  if (!title) return <div className="page"><Link className="back-link" to={backToLibrary}>← Bibliothèque</Link><div className="error-page"><h1>Support introuvable</h1><p>Ce support n’est disponible ni dans le stockage local ni sur le serveur.</p></div></div>;
+
+  return <div className="page resource-page">
+    <Link className="back-link" to={backToLibrary}>← Bibliothèque</Link>
+    <header className="resource-header"><div><p className="eyebrow">{subjectName}</p><h1>{title}</h1><p className="resource-meta">{kind === 'pdf' ? 'Document PDF' : 'Texte'}{localVersion ? ` · ${formatBytes(localVersion.size)}` : remote.data ? ` · ${formatBytes(remote.data.version.size)}` : ''}</p></div>{localResource && <StatusPill status={localResource.status} syncState={localResource.syncState} />}</header>
+    {localResource?.syncState === 'error' && <div className="error-box error-box--wide" role="alert"><div><strong>{multipartSession ? 'L’envoi du gros fichier est interrompu.' : terminalSyncFailure ? 'La synchronisation de ce support est bloquée.' : 'Le support est enregistré localement, mais la synchronisation a échoué.'}</strong><span>{localResource.syncError}</span>{multipartSession && <small>Les morceaux déjà confirmés sont conservés. Resélectionnez le même fichier pour reprendre sans repartir de zéro.</small>}{terminalSyncFailure && !multipartSession && <small>Cette erreur ne peut pas être corrigée par une nouvelle tentative automatique. Vérifiez le support local avant de poursuivre.</small>}</div>{multipartSession ? <div className="multipart-resume"><input aria-label="Fichier à reprendre" type="file" accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown" disabled={resuming} onChange={(event) => setResumeFile(event.target.files?.[0] ?? null)} />{transferProgress && <span>{progressLabel(transferProgress)}</span>}<button className="button button--secondary" type="button" disabled={!resumeFile || resuming} onClick={resumeMultipart}>{resuming ? 'Reprise en cours…' : 'Reprendre l’envoi'}</button></div> : terminalSyncFailure ? null : <button className="button button--secondary" type="button" onClick={retrySync}>Retenter la synchronisation</button>}{retryError && <span className="field-error">{retryError}</span>}</div>}
+    {storageRepairNeeded && !multipartSession && <div className="error-box error-box--wide" role="alert" aria-label="Réparation du fichier distant"><div><strong>Le fichier distant doit être réparé.</strong><span>R2 ne contient plus exactement le PDF attendu. Resélectionnez le fichier original : Sirāfiq vérifiera son SHA-256 complet avant d’envoyer le moindre octet.</span></div><div className="multipart-resume"><input aria-label="Fichier original à réparer" type="file" accept=".pdf,application/pdf" disabled={repairingStorage} onChange={(event) => setStorageRepairFile(event.target.files?.[0] ?? null)} />{transferProgress && <span>{progressLabel(transferProgress)}</span>}<button className="button button--secondary" type="button" disabled={!storageRepairFile || repairingStorage} onClick={repairRemoteStorage}>{repairingStorage ? 'Réparation en cours…' : 'Réparer le fichier distant'}</button></div>{storageRepairError && <span className="field-error">{storageRepairError}</span>}</div>}
+    {extractionFailed && <div className="extraction-warning" role="alert"><div className="extraction-warning__icon" aria-hidden="true">!</div><div><strong>Contenu non exploitable automatiquement</strong><p>{extractionError || 'Le texte n’a pas pu être extrait.'}</p><small>{multipartSession ? 'Le fichier n’est pas encore déclaré entièrement stocké. Sirāfiq n’utilisera pas ce contenu pour des activités.' : storageRepairNeeded ? 'Le fichier distant n’est pas déclaré consultable tant que sa réparation R2 n’est pas terminée.' : kind === 'pdf' ? 'Le fichier reste conservé et consultable. Sirāfiq ne prétendra pas créer des activités à partir de ce contenu.' : 'Le fichier reste conservé. Sirāfiq ne prétendra pas qu’il est lisible tant que son texte n’a pas été extrait.'}</small></div></div>}
+    <div className={`viewer-layout${kind === 'pdf' ? ' viewer-layout--pdf' : ''}`}>
+      {kind === 'pdf' ? (pdfUrl ? <PdfViewer key={`${versionId ?? 'pdf'}:${pdfRepairRevision}`} src={pdfUrl} title={title} storageId={versionId} onReadError={inspectPdfReadFailure} /> : <div className="loading-card">{multipartSession ? 'Le PDF sera consultable après la finalisation de l’envoi.' : 'Le fichier PDF n’est pas disponible.'}</div>) : <section className="text-viewer">{pages.length ? pages.map((page) => <article key={page.pageNumber}>{pages.length > 1 && <span className="page-number">Bloc {page.pageNumber}</span>}<p>{page.text}</p></article>) : <p className="muted">Aucun texte extrait n’est disponible.</p>}</section>}
+      <aside className="source-panel"><p className="eyebrow">État réel</p><h2>Extraction</h2>{pages.length ? <><strong className="large-stat">{pages.reduce((sum, page) => sum + page.text.length, 0).toLocaleString('fr-FR')}</strong><span>caractères extraits</span><div className="source-rule" /><p>{pages.length} bloc{pages.length > 1 ? 's' : ''} de texte disponible{pages.length > 1 ? 's' : ''} pour les prochaines activités.</p></> : <p>Aucune donnée textuelle n’est déclarée utilisable.</p>}{extractionNeedsRecovery && !pages.length && <div className="source-recovery" aria-label="Récupération de l’extraction"><strong>Récupération</strong>{canRetryExtraction ? <button className="button button--secondary" type="button" onClick={retryExtraction} disabled={extracting}>{extracting ? 'Extraction en cours…' : 'Retenter l’extraction avec le serveur'}</button> : extractionRecoveryReason ? <p>{extractionRecoveryReason}</p> : null}{extractionRetryError && <span className="source-recovery__error" role="alert">{extractionRetryError}</span>}</div>}<div className="source-note">Les activités pédagogiques ne sont pas encore activées dans cette version.</div></aside>
+    </div>
+  </div>;
+}
+
+function getExtractionRecoveryReason(input: { kind: 'text' | 'pdf' | undefined; extractionNeedsRecovery: boolean; hasPages: boolean; syncState: 'pending' | 'synced' | 'error' | undefined; size: number | undefined; hasLocalResource: boolean; hasLocalExtraction: boolean; hasMultipartSession: boolean; canRetry: boolean }): string | null {
+  if (!input.kind || !input.extractionNeedsRecovery || input.hasPages || input.canRetry) return null;
+  if (input.hasMultipartSession) {
+    return input.kind === 'pdf'
+      ? 'Terminez d’abord l’envoi du fichier. L’extraction ne sera jamais lancée sur un PDF partiellement stocké.'
+      : 'Terminez d’abord l’envoi du fichier. L’extraction ne sera jamais lancée sur un texte partiellement stocké.';
+  }
+  const maxBytes = input.kind === 'pdf' ? SERVER_PDF_EXTRACTION_MAX_BYTES : SERVER_TEXT_EXTRACTION_MAX_BYTES;
+  if (input.size !== undefined && input.size > maxBytes) {
+    const label = input.kind === 'pdf' ? 'PDF' : 'textes';
+    const availability = input.kind === 'pdf'
+      ? 'Le fichier reste consultable, mais aucune extraction automatique n’est prétendue pour ce volume.'
+      : 'Le fichier reste conservé, mais Sirāfiq ne prétend pas pouvoir le lire automatiquement pour ce volume.';
+    return `La reprise serveur actuelle est limitée aux ${label} de ${formatBytes(maxBytes)} maximum. ${availability}`;
+  }
+  if (input.hasLocalResource && input.syncState !== 'synced') {
+    return input.kind === 'pdf'
+      ? 'Le PDF doit d’abord être entièrement synchronisé avant qu’une extraction serveur puisse être relancée.'
+      : 'Le texte doit d’abord être entièrement synchronisé avant qu’une extraction serveur puisse être relancée.';
+  }
+  if (input.hasLocalResource && !input.hasLocalExtraction) return 'L’état local d’extraction est incomplet. Aucune relance ne sera proposée tant qu’il n’est pas cohérent.';
+  return 'La reprise serveur n’est pas disponible pour cet état du support.';
+}
+async function probeRemoteBlobStorage(versionId: string): Promise<'available' | 'repair-needed' | 'unknown'> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch(`/api/resource-versions/${encodeURIComponent(versionId)}/blob`, {
+      headers: { Range: 'bytes=0-0', Accept: 'application/json' },
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    if (response.ok) return 'available';
+    try {
+      const payload = await response.json() as { error?: { code?: unknown } };
+      const code = typeof payload.error?.code === 'string' ? payload.error.code : null;
+      return code === 'FILE_NOT_FOUND' || code === 'FILE_INTEGRITY_ERROR' ? 'repair-needed' : 'unknown';
+    } catch {
+      return 'unknown';
+    }
+  } catch {
+    return 'unknown';
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+function progressLabel(progress: TransferProgress): string { const percent = progress.totalBytes ? Math.round((progress.processedBytes / progress.totalBytes) * 100) : 0; if (progress.phase === 'hashing') return `Vérification · ${percent} %`; if (progress.phase === 'finalizing') return 'Assemblage final…'; return `Morceau ${progress.partNumber ?? 0}/${progress.partCount ?? 0} · ${percent} %`; }
+function formatBytes(bytes: number): string { if (bytes < 1024) return `${bytes} o`; if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} Ko`; return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`; }
+
+function libraryReturnHref(raw: string | null): string {
+  if (!raw) return '/bibliotheque';
+  const source = new URLSearchParams(raw);
+  const safe = new URLSearchParams();
+  const status = source.get('status');
+  if (status === 'ready' || status === 'failed' || status === 'sync-error') safe.set('status', status);
+  const subject = source.get('subject')?.trim();
+  if (subject) safe.set('subject', subject.slice(0, 128));
+  const query = source.get('q')?.trim();
+  if (query) safe.set('q', query.slice(0, 240));
+  const serialized = safe.toString();
+  return serialized ? `/bibliotheque?${serialized}` : '/bibliotheque';
+}
