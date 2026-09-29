@@ -878,7 +878,8 @@ async function getBootstrap(env: Env): Promise<Response> {
     }>(),
     env.DB.prepare(`
       SELECT r.id, r.subject_id, r.title, r.kind, r.current_version_id, r.created_at, r.updated_at,
-             v.id AS version_id, v.resource_id AS version_resource_id, v.status,
+             v.id AS version_id, v.resource_id AS version_resource_id, v.status, v.extraction_status,
+             e.version_id AS extraction_version_id,
              CASE WHEN v.extraction_status = 'ready' THEN e.char_count ELSE NULL END AS char_count
       FROM resources r
       LEFT JOIN resource_versions v ON v.id = r.current_version_id
@@ -887,7 +888,9 @@ async function getBootstrap(env: Env): Promise<Response> {
     `).all<{
       id: string; subject_id: string; title: string; kind: 'text' | 'pdf'; current_version_id: string;
       created_at: string; updated_at: string; version_id: string | null; version_resource_id: string | null;
-      status: 'uploading' | 'stored' | 'ready' | 'failed' | null; char_count: number | null;
+      status: 'uploading' | 'stored' | 'ready' | 'failed' | null;
+      extraction_status: 'pending' | 'ready' | 'failed' | null;
+      extraction_version_id: string | null; char_count: number | null;
     }>(),
   ]);
 
@@ -902,7 +905,7 @@ async function getBootstrap(env: Env): Promise<Response> {
         { resourceId: row.id, subjectId: row.subject_id },
       );
     }
-    if (!row.version_id || !row.status) {
+    if (!row.version_id || !row.status || !row.extraction_status) {
       return errorResponse(
         409,
         'RESOURCE_VERSION_MISSING',
@@ -919,6 +922,12 @@ async function getBootstrap(env: Env): Promise<Response> {
         false,
         { resourceId: row.id, versionId: row.version_id, versionResourceId: row.version_resource_id },
       );
+    }
+    if (!hasConsistentVersionExtractionState(row.status, row.extraction_status)) {
+      return resourceExtractionIntegrityError(row.id, row.version_id);
+    }
+    if (row.extraction_status === 'ready' && (!row.extraction_version_id || row.char_count === null)) {
+      return resourceExtractionIntegrityError(row.id, row.version_id);
     }
   }
 
@@ -990,6 +999,36 @@ async function getResource(resourceId: string, env: Env): Promise<Response> {
       { resourceId: row.id, versionId: row.version_id, versionResourceId: row.version_resource_id },
     );
   }
+  if (!hasConsistentVersionExtractionState(row.status, row.extraction_status)) {
+    return resourceExtractionIntegrityError(row.id, row.version_id);
+  }
+
+  let extraction: ResourceDetailPayload['extraction'] = null;
+  if (row.extraction_status === 'ready') {
+    if (row.content_json === null || row.char_count === null) {
+      return resourceExtractionIntegrityError(row.id, row.version_id);
+    }
+
+    let parsedContent: unknown;
+    try {
+      parsedContent = JSON.parse(row.content_json);
+    } catch {
+      return resourceExtractionIntegrityError(row.id, row.version_id);
+    }
+    const parsedExtraction = ExtractionUploadSchema.safeParse({
+      status: 'ready',
+      pages: parsedContent,
+      charCount: row.char_count,
+    });
+    if (!parsedExtraction.success) {
+      return resourceExtractionIntegrityError(row.id, row.version_id);
+    }
+    const computedCharCount = parsedExtraction.data.pages.reduce((sum, page) => sum + page.text.length, 0);
+    if (computedCharCount !== row.char_count) {
+      return resourceExtractionIntegrityError(row.id, row.version_id);
+    }
+    extraction = { pages: parsedExtraction.data.pages, charCount: row.char_count };
+  }
 
   const payload: ResourceDetailPayload = {
     subject: {
@@ -1004,11 +1043,28 @@ async function getResource(resourceId: string, env: Env): Promise<Response> {
       id: row.version_id, fileName: row.file_name, mimeType: row.mime_type, size: row.size, sha256: row.sha256,
       status: row.status, extractionStatus: row.extraction_status, extractionError: row.extraction_error,
     },
-    extraction: row.extraction_status === 'ready' && row.content_json && row.char_count !== null
-      ? { pages: JSON.parse(row.content_json), charCount: row.char_count }
-      : null,
+    extraction,
   };
   return json(payload);
+}
+
+function hasConsistentVersionExtractionState(
+  status: 'uploading' | 'stored' | 'ready' | 'failed',
+  extractionStatus: 'pending' | 'ready' | 'failed',
+): boolean {
+  if (status === 'ready') return extractionStatus === 'ready';
+  if (status === 'failed') return extractionStatus === 'failed';
+  return extractionStatus === 'pending';
+}
+
+function resourceExtractionIntegrityError(resourceId: string, versionId: string): Response {
+  return errorResponse(
+    409,
+    'RESOURCE_EXTRACTION_INTEGRITY_ERROR',
+    'Ce support possède un état d’extraction synchronisé incohérent. Il n’est pas déclaré exploitable.',
+    false,
+    { resourceId, versionId },
+  );
 }
 
 type VersionUploadRow = {
