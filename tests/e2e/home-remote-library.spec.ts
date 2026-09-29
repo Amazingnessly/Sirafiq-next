@@ -57,6 +57,66 @@ test('une panne du bootstrap ne transforme pas l’accueil en faux état vide', 
   await expect(page.getByText('Sirāfiq ne considère pas cette erreur réseau comme une bibliothèque vide.')).toBeVisible();
 });
 
+test('une incohérence terminale du bootstrap reste visible sans faux retry', async ({ page }) => {
+  let bootstrapRequests = 0;
+  const message = 'Un support synchronisé possède un état d’extraction incohérent.';
+
+  await page.route('**/api/bootstrap', async (route) => {
+    bootstrapRequests += 1;
+    await route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: {
+          code: 'RESOURCE_EXTRACTION_INTEGRITY_ERROR',
+          message,
+          retryable: false,
+        },
+      }),
+    });
+  });
+
+  await page.goto('/');
+
+  await expect(page.getByRole('heading', { name: 'Vérifier ma bibliothèque synchronisée' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Vérifier ma bibliothèque' })).toBeVisible();
+  await expect(page.getByText(message, { exact: false })).toBeVisible();
+  await expect(page.getByText(/erreur réseau/)).toHaveCount(0);
+  await expect.poll(() => bootstrapRequests).toBe(1);
+
+  await page.evaluate(async () => {
+    const { db } = await import('/src/data/db.ts');
+    const now = new Date().toISOString();
+    await db.subjects.add({
+      id: '10101010-aaaa-4111-8111-101010101010',
+      name: 'Matière locale',
+      parentId: null,
+      createdAt: now,
+      updatedAt: now,
+      syncState: 'synced',
+      syncError: null,
+    });
+    await db.resources.add({
+      id: '20202020-bbbb-4222-8222-202020202020',
+      subjectId: '10101010-aaaa-4111-8111-101010101010',
+      title: 'Support local',
+      kind: 'text',
+      currentVersionId: '30303030-cccc-4333-8333-303030303030',
+      status: 'ready',
+      extractionError: null,
+      createdAt: now,
+      updatedAt: now,
+      syncState: 'synced',
+      syncError: null,
+    });
+  });
+
+  await expect(page.getByRole('heading', { name: 'Continuer à partir de mes supports' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Vérifier ma bibliothèque' })).toBeVisible();
+  await expect(page.getByText(message, { exact: false })).toBeVisible();
+  await expect.poll(() => bootstrapRequests).toBe(1);
+});
+
 test('l’accueil ne présente pas un envoi distant incomplet comme support consultable', async ({ page }) => {
   await page.route('**/api/bootstrap', async (route) => {
     await route.fulfill({
