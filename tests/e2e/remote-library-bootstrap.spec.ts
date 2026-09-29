@@ -91,6 +91,84 @@ test('une bibliothèque locale vide retrouve les supports synchronisés sans éc
   await expect(page.getByText(remoteText)).toBeVisible();
 });
 
+test('un PDF uniquement distant affiche le vrai nom de sa matière', async ({ page }) => {
+  const subjectId = '12121212-abab-4121-8121-121212121212';
+  const resourceId = '34343434-cdcd-4343-8343-343434343434';
+  const versionId = '56565656-efef-4565-8565-565656565656';
+  const now = '2026-09-29T00:00:00.000Z';
+
+  await page.route('**/api/bootstrap', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        subjects: [{ id: subjectId, name: 'Matière PDF distante', parentId: null, createdAt: now, updatedAt: now }],
+        resources: [{
+          id: resourceId,
+          subjectId,
+          title: 'PDF distant',
+          kind: 'pdf',
+          currentVersionId: versionId,
+          status: 'failed',
+          extractionCharCount: null,
+          createdAt: now,
+          updatedAt: now,
+        }],
+      }),
+    });
+  });
+
+  await page.route(`**/api/resources/${resourceId}`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        subject: { id: subjectId, name: 'Matière PDF distante', parentId: null, createdAt: now, updatedAt: now },
+        resource: {
+          id: resourceId,
+          subjectId,
+          title: 'PDF distant',
+          kind: 'pdf',
+          currentVersionId: versionId,
+          createdAt: now,
+          updatedAt: now,
+        },
+        version: {
+          id: versionId,
+          fileName: 'distant.pdf',
+          mimeType: 'application/pdf',
+          size: 128,
+          sha256: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          status: 'failed',
+          extractionStatus: 'failed',
+          extractionError: 'Aucun texte exploitable.',
+        },
+        extraction: null,
+      }),
+    });
+  });
+
+  await page.route(`**/api/resource-versions/${versionId}/blob`, async (route) => {
+    await route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: {
+          code: 'FILE_INTEGRITY_ERROR',
+          message: 'Fichier indisponible pour ce test.',
+          retryable: false,
+        },
+      }),
+    });
+  });
+
+  await page.goto('/bibliotheque');
+  await page.getByRole('link', { name: /PDF distant/ }).click();
+
+  await expect(page.locator('.resource-header .eyebrow')).toHaveText('Matière PDF distante');
+  await expect(page.getByRole('heading', { name: 'PDF distant' })).toBeVisible();
+});
+
 test('une panne du bootstrap distant ne devient jamais un faux état vide', async ({ page }) => {
   await page.route('**/api/bootstrap', async (route) => {
     await route.fulfill({
