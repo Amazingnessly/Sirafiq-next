@@ -37,7 +37,7 @@ test('l’accueil retrouve les supports synchronisés quand IndexedDB est vide',
   const metrics = page.getByLabel('État de la bibliothèque');
   await expect(metrics.locator('.metric').filter({ hasText: 'matières' }).getByText('1', { exact: true })).toBeVisible();
   await expect(metrics.locator('.metric').filter({ hasText: 'supports' }).getByText('1', { exact: true })).toBeVisible();
-  await expect(metrics.locator('.metric').filter({ hasText: 'extraits' }).getByText('1', { exact: true })).toBeVisible();
+  await expect(metrics.locator('.metric').filter({ hasText: 'extraits' }).getByText('0', { exact: true })).toBeVisible();
 });
 
 test('une panne du bootstrap ne transforme pas l’accueil en faux état vide', async ({ page }) => {

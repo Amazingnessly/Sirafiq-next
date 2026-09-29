@@ -102,7 +102,7 @@ export function LibraryPage() {
     : remoteOnlyResources;
   const statusRemoteResources = statusFilter === 'all'
     ? subjectRemoteResources
-    : statusFilter === 'sync-error'
+    : statusFilter === 'sync-error' || statusFilter === 'ready'
       ? []
       : subjectRemoteResources.filter((resource) => resource.status === statusFilter);
   const visibleRemoteResources = normalizedSearchQuery
