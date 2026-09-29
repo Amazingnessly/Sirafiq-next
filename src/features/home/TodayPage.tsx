@@ -20,6 +20,10 @@ export function TodayPage() {
     queryFn: () => apiJson<BootstrapPayload>('/api/bootstrap'),
     retry: (failureCount, error) => failureCount < 1 && (!(error instanceof ApiRequestError) || error.retryable),
   });
+  const remoteBootstrapRequestError = remoteBootstrap.error instanceof ApiRequestError ? remoteBootstrap.error : null;
+  const remoteBootstrapTerminalError = remoteBootstrapRequestError && !remoteBootstrapRequestError.retryable
+    ? remoteBootstrapRequestError
+    : null;
 
   const localSubjectIds = new Set(localSubjects.map((subject) => subject.id));
   const subjects = localSubjects.length + (remoteBootstrap.data?.subjects ?? []).filter((subject) => !localSubjectIds.has(subject.id)).length;
@@ -63,7 +67,9 @@ export function TodayPage() {
     ? { label: `Revoir ${failed} support${failed > 1 ? 's' : ''}`, to: '/bibliotheque?status=failed' }
     : syncErrors > 0
       ? { label: `Corriger ${syncErrors} erreur${syncErrors > 1 ? 's' : ''} de synchronisation`, to: '/bibliotheque?status=sync-error' }
-      : hasOnlyRemoteUploading
+      : remoteBootstrapTerminalError
+        ? { label: 'Vérifier ma bibliothèque', to: '/bibliotheque' }
+        : hasOnlyRemoteUploading
         ? { label: remoteUploadingResources.length > 1 ? 'Vérifier mes envois' : 'Vérifier mon envoi', to: '/bibliotheque' }
         : hasOnlyRemoteTextsNeedingExtraction
           ? { label: remoteTextsNeedingExtraction.length > 1 ? 'Vérifier mes textes' : 'Vérifier mon texte', to: '/bibliotheque' }
@@ -86,7 +92,9 @@ export function TodayPage() {
       : checkingRemoteLibrary
       ? 'Vérification de ma bibliothèque'
       : remoteLibraryUnavailable
-        ? 'Retrouver ma bibliothèque'
+        ? remoteBootstrapTerminalError
+          ? 'Vérifier ma bibliothèque synchronisée'
+          : 'Retrouver ma bibliothèque'
         : 'Préparer mon espace d’apprentissage';
 
   const incompleteUploadNotice = remoteUploadingResources.length > 0
@@ -95,6 +103,9 @@ export function TodayPage() {
   const textRecoveryNotice = remoteTextsNeedingExtraction.length > 0
     ? ` ${remoteTextsNeedingExtraction.length} texte${remoteTextsNeedingExtraction.length > 1 ? 's synchronisés doivent' : ' synchronisé doit'} encore récupérer ${remoteTextsNeedingExtraction.length > 1 ? 'leur' : 'son'} extraction avant d’être déclaré${remoteTextsNeedingExtraction.length > 1 ? 's' : ''} lisible${remoteTextsNeedingExtraction.length > 1 ? 's' : ''}.`
     : '';
+  const terminalBootstrapNotice = remoteBootstrapTerminalError
+    ? ` La bibliothèque synchronisée signale un état à vérifier : ${remoteBootstrapTerminalError.message} Les données locales restent disponibles.`
+    : '';
 
   const cardDescription = hasOnlyRemoteUploading
     ? `Sirāfiq a retrouvé ${remoteUploadingResources.length > 1 ? 'des envois serveur incomplets' : 'un envoi serveur incomplet'}. ${remoteUploadingResources.length > 1 ? 'Ils ne sont' : 'Il n’est'} pas encore déclaré${remoteUploadingResources.length > 1 ? 's' : ''} consultable${remoteUploadingResources.length > 1 ? 's' : ''} ; ouvrez la bibliothèque pour vérifier ${remoteUploadingResources.length > 1 ? 'leur' : 'son'} état.`
@@ -102,12 +113,14 @@ export function TodayPage() {
       ? `Sirāfiq a retrouvé ${remoteTextsNeedingExtraction.length > 1 ? 'des fichiers texte synchronisés' : 'un fichier texte synchronisé'}, mais ${remoteTextsNeedingExtraction.length > 1 ? 'leurs contenus ne sont' : 'son contenu n’est'} pas encore déclaré${remoteTextsNeedingExtraction.length > 1 ? 's' : ''} lisible${remoteTextsNeedingExtraction.length > 1 ? 's' : ''}. Ouvrez la bibliothèque pour reprendre l’extraction.`
       : resources > 0
         ? hasRemoteFinalizedResources && localResources.length === 0
-          ? `Sirāfiq a retrouvé vos supports synchronisés. Ouvrez la bibliothèque pour voir leur état et consulter ceux dont le contenu est disponible ; leur disponibilité hors ligne dépend d’une copie locale sur cet appareil.${textRecoveryNotice}${incompleteUploadNotice}`
-          : `Sirāfiq conserve l’état local de vos supports sur cet appareil et synchronise le reste lorsque le réseau est disponible. La lecture hors ligne dépend des données effectivement conservées en local.${textRecoveryNotice}${incompleteUploadNotice}`
+          ? `Sirāfiq a retrouvé vos supports synchronisés. Ouvrez la bibliothèque pour voir leur état et consulter ceux dont le contenu est disponible ; leur disponibilité hors ligne dépend d’une copie locale sur cet appareil.${textRecoveryNotice}${incompleteUploadNotice}${terminalBootstrapNotice}`
+          : `Sirāfiq conserve l’état local de vos supports sur cet appareil et synchronise le reste lorsque le réseau est disponible. La lecture hors ligne dépend des données effectivement conservées en local.${textRecoveryNotice}${incompleteUploadNotice}${terminalBootstrapNotice}`
       : checkingRemoteLibrary
       ? 'Sirāfiq vérifie les données synchronisées avant de conclure que cet appareil ne contient encore aucun support.'
       : remoteLibraryUnavailable
-        ? 'Le serveur n’a pas pu être vérifié. Sirāfiq ne considère pas cette erreur réseau comme une bibliothèque vide.'
+        ? remoteBootstrapTerminalError
+          ? `${remoteBootstrapTerminalError.message} Sirāfiq ne transforme pas cet état incohérent en bibliothèque vide.`
+          : 'Le serveur n’a pas pu être vérifié. Sirāfiq ne considère pas cette erreur réseau comme une bibliothèque vide.'
         : 'Créez une matière puis ajoutez un PDF ou un texte pour commencer à construire votre espace de travail.';
 
   return (
