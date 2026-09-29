@@ -74,6 +74,12 @@ test('une bibliothèque locale vide retrouve les supports synchronisés sans éc
   await expect(page.getByText('État serveur finalisé · ouvrez le support pour vérifier la lecture du fichier sur cet appareil.')).toBeVisible();
   await expect(page.getByText('Synchronisé sur le serveur et consultable.')).toHaveCount(0);
 
+  await page.getByRole('button', { name: 'Extraits', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Support distant E2E' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Aucun élément correspondant' })).toBeVisible();
+  await page.getByRole('button', { name: 'Tous', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Support distant E2E' })).toBeVisible();
+
   await expect.poll(async () => page.evaluate(async (subjectId) => {
     const { db } = await import('/src/data/db.ts');
     return (await db.subjects.get(subjectId))?.syncState ?? null;
