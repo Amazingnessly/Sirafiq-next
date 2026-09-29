@@ -41,8 +41,10 @@ export function TodayPage() {
     (resource) => resource.kind === 'pdf' || resource.status === 'ready',
   );
   const resources = localResources.length + remoteOnlyResources.length;
-  const ready = localResources.filter((resource) => resource.status === 'ready').length
-    + remoteOnlyResources.filter((resource) => resource.status === 'ready').length;
+  // A remote bootstrap only reports persisted server state. Until the
+  // resource detail has been opened and validated, do not count it as an
+  // extracted support on this device.
+  const ready = localResources.filter((resource) => resource.status === 'ready').length;
   const failed = localResources.filter((resource) => resource.status === 'failed').length
     + remoteOnlyResources.filter((resource) => resource.status === 'failed').length;
   const noLocalResources = localResources.length === 0;
