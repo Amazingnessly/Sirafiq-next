@@ -109,7 +109,7 @@ export function ResourcePage() {
 
 
   const title = localResource?.title ?? remote.data?.resource.title;
-  const subjectName = subject?.name ?? remote.data?.subject.name ?? 'Support';
+  const subjectName = subject?.name ?? remote.data?.subject?.name ?? 'Support';
   const kind = localResource?.kind ?? remote.data?.resource.kind;
   const versionId = localResource?.currentVersionId ?? remote.data?.version.id;
   const remoteVersionId = localVersion?.remoteVersionId
