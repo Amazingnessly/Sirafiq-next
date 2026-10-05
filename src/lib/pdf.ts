@@ -9,6 +9,7 @@ import {
 } from '../shared/importPolicy';
 import { readBlobAsArrayBuffer, readBlobAsText } from './blob';
 import { extractTextContent } from './textExtraction';
+import { hasUsefulPdfExtractionText } from './extractionQuality';
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -82,8 +83,8 @@ async function extractPdf(file: File): Promise<ExtractedPage[]> {
       pages.push({ pageNumber, text });
     }
 
-    const meaningfulChars = pages.reduce((sum, page) => sum + page.text.replace(/\s/g, '').length, 0);
-    if (meaningfulChars < 20) {
+    const extractedText = pages.map((page) => page.text).join('\n');
+    if (!hasUsefulPdfExtractionText(extractedText)) {
       throw new DocumentExtractionError(
         'Le lecteur PDF local n’a pas trouvé assez de texte exploitable. Une extraction serveur pourra être tentée après synchronisation.',
         'EMPTY_TEXT',
