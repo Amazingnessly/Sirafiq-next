@@ -227,6 +227,46 @@ describe('remote resource metadata integrity', () => {
     }
   });
 
+  it('downgrades legacy page-index-only PDF extraction to a recoverable failed detail', async () => {
+    const syntheticText = ['Contents', ...Array.from({ length: 24 }, (_, index) => `Page ${index + 1}`)].join('\n');
+    const row = readyDetailRow({
+      kind: 'pdf',
+      file_name: 'support.pdf',
+      mime_type: 'application/pdf',
+      content_json: JSON.stringify([{ pageNumber: 1, text: syntheticText }]),
+      char_count: syntheticText.length,
+    });
+    const env = {
+      DB: {
+        prepare: (sql: string) => ({
+          bind: () => ({
+            first: async () => {
+              if (!sql.includes('LEFT JOIN subjects') || !sql.includes('LEFT JOIN resource_versions')) {
+                throw new Error(`Unexpected SQL: ${sql}`);
+              }
+              return row;
+            },
+          }),
+        }),
+      },
+    };
+
+    const response = await worker.fetch(
+      new Request(`https://example.test/api/resources/${RESOURCE_ID}`),
+      env as never,
+    );
+    const payload = await response.json() as {
+      version: { status: string; extractionStatus: string; extractionError: string | null };
+      extraction: unknown;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.version.status).toBe('failed');
+    expect(payload.version.extractionStatus).toBe('failed');
+    expect(payload.version.extractionError).toMatch(/texte source exploitable/);
+    expect(payload.extraction).toBeNull();
+  });
+
   it('returns a ready extraction only when persisted metadata is internally consistent', async () => {
     const env = {
       DB: {

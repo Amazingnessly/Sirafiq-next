@@ -65,4 +65,71 @@ describe('server extraction R2 integrity', () => {
     expect(textReads).toBe(0);
     expect(batchCalls).toBe(0);
   });
+  it('persists a failed extraction when PDF conversion returns only a synthetic page index', async () => {
+    const expectedSha = 'ab'.repeat(32);
+    const syntheticText = ['Contents', ...Array.from({ length: 32 }, (_, index) => `Page ${index + 1}`)].join('\n');
+    let batchCalls = 0;
+
+    const env = {
+      DB: {
+        prepare: (sql: string) => ({
+          bind: () => ({
+            first: async () => {
+              if (!sql.includes('FROM resource_versions v')) {
+                throw new Error(`Unexpected SQL: ${sql}`);
+              }
+              return {
+                r2_key: `resources/resource-1/${VERSION_ID}`,
+                mime_type: 'application/pdf',
+                file_name: 'synthetic-index.pdf',
+                size: 4,
+                sha256: expectedSha,
+                upload_mode: 'single',
+                kind: 'pdf',
+              };
+            },
+          }),
+        }),
+        batch: async () => {
+          batchCalls += 1;
+          return [{ meta: { changes: 1 } }, { meta: { changes: 1 } }];
+        },
+      },
+      FILES: {
+        get: async () => ({
+          size: 4,
+          checksums: {
+            sha256: Uint8Array.from({ length: 32 }, (_, index) => index % 2 === 0 ? 0xab : 0xab).buffer,
+          },
+          customMetadata: {},
+          arrayBuffer: async () => new Uint8Array([1, 2, 3, 4]).buffer,
+        }),
+      },
+      AI: {
+        toMarkdown: async () => ({
+          format: 'text',
+          data: syntheticText,
+        }),
+      },
+    };
+
+    const response = await worker.fetch(
+      new Request(`https://example.test/api/resource-versions/${VERSION_ID}/server-extraction`, {
+        method: 'POST',
+      }),
+      env as never,
+    );
+    const payload = await response.json() as {
+      status: string;
+      code?: string;
+      message?: string;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.status).toBe('failed');
+    expect(payload.code).toBe('EMPTY_SERVER_EXTRACTION');
+    expect(payload.message).toMatch(/texte source exploitable/);
+    expect(batchCalls).toBe(1);
+  });
+
 });
