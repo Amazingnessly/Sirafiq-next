@@ -23,6 +23,7 @@ import {
   SERVER_TEXT_EXTRACTION_MAX_BYTES,
 } from '../src/shared/importPolicy';
 import { extractTextContent, TextExtractionError } from '../src/lib/textExtraction';
+import { hasUsefulPdfExtractionText } from '../src/lib/extractionQuality';
 
 type WorkerEnv = Env;
 
@@ -758,8 +759,13 @@ async function extractOnServer(versionId: string, env: WorkerEnv): Promise<Respo
     }
 
     const text = (result.data ?? '').replace(/\u0000/g, '').trim();
-    if (text.replace(/\s/g, '').length < 20) {
-      return persistServerExtractionFailure(versionId, 'EMPTY_SERVER_EXTRACTION', 'Le service d’extraction n’a trouvé aucun texte exploitable dans ce PDF.', env);
+    if (!hasUsefulPdfExtractionText(text)) {
+      return persistServerExtractionFailure(
+        versionId,
+        'EMPTY_SERVER_EXTRACTION',
+        'Le service d’extraction n’a trouvé aucun texte source exploitable dans ce PDF.',
+        env,
+      );
     }
     if (text.length > MAX_EXTRACTED_CHARS) {
       return persistServerExtractionFailure(versionId, 'SERVER_EXTRACTION_TOO_LONG', 'Le texte extrait dépasse la capacité de stockage textuel de cette première version.', env);
@@ -1003,6 +1009,9 @@ async function getResource(resourceId: string, env: Env): Promise<Response> {
     return resourceExtractionIntegrityError(row.id, row.version_id);
   }
 
+  let effectiveStatus = row.status;
+  let effectiveExtractionStatus = row.extraction_status;
+  let effectiveExtractionError = row.extraction_error;
   let extraction: ResourceDetailPayload['extraction'] = null;
   if (row.extraction_status === 'ready') {
     if (row.content_json === null || row.char_count === null) {
@@ -1027,7 +1036,19 @@ async function getResource(resourceId: string, env: Env): Promise<Response> {
     if (computedCharCount !== row.char_count) {
       return resourceExtractionIntegrityError(row.id, row.version_id);
     }
-    extraction = { pages: parsedExtraction.data.pages, charCount: row.char_count };
+
+    const extractedText = parsedExtraction.data.pages.map((page) => page.text).join('\n');
+    if (row.kind === 'pdf' && !hasUsefulPdfExtractionText(extractedText)) {
+      // Older deployments may have persisted synthetic page-index output as
+      // "ready". Expose it as recoverable extraction failure instead of
+      // presenting placeholder metadata as source content. The next explicit
+      // server extraction attempt will persist the corrected failed/ready state.
+      effectiveStatus = 'failed';
+      effectiveExtractionStatus = 'failed';
+      effectiveExtractionError = 'L’extraction synchronisée ne contient pas assez de texte source exploitable. Relancez l’extraction pour vérifier ce PDF.';
+    } else {
+      extraction = { pages: parsedExtraction.data.pages, charCount: row.char_count };
+    }
   }
 
   const payload: ResourceDetailPayload = {
@@ -1041,7 +1062,7 @@ async function getResource(resourceId: string, env: Env): Promise<Response> {
     resource: { id: row.id, subjectId: row.subject_id, title: row.title, kind: row.kind, currentVersionId: row.current_version_id, createdAt: row.created_at, updatedAt: row.updated_at },
     version: {
       id: row.version_id, fileName: row.file_name, mimeType: row.mime_type, size: row.size, sha256: row.sha256,
-      status: row.status, extractionStatus: row.extraction_status, extractionError: row.extraction_error,
+      status: effectiveStatus, extractionStatus: effectiveExtractionStatus, extractionError: effectiveExtractionError,
     },
     extraction,
   };
