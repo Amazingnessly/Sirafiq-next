@@ -789,6 +789,21 @@ async function storeExtraction(versionId: string, request: Request, env: Env): P
   if (integrityError) return integrityError;
   const computedCharCount = parsed.data.pages.reduce((sum, page) => sum + page.text.length, 0);
   if (computedCharCount !== parsed.data.charCount) return errorResponse(400, 'CHAR_COUNT_MISMATCH', 'Le contenu extrait est incohérent ; il n’a pas été enregistré.', true);
+
+  const resourceKind = await getVersionResourceKind(versionId, env);
+  if (!resourceKind) return errorResponse(404, 'VERSION_NOT_FOUND', 'La version du support est introuvable.', false);
+  if (
+    resourceKind === 'pdf'
+    && !hasUsefulPdfExtractionText(parsed.data.pages.map((page) => page.text).join('\n'))
+  ) {
+    return errorResponse(
+      422,
+      'PDF_EXTRACTION_NOT_USEFUL',
+      'Le texte extrait du PDF ne contient pas assez de contenu source exploitable ; il n’a pas été déclaré prêt.',
+      false,
+    );
+  }
+
   await persistReadyExtraction(versionId, parsed.data.pages, computedCharCount, env);
   return json({ ok: true });
 }
@@ -801,6 +816,16 @@ async function storeExtractionFailure(versionId: string, request: Request, env: 
   const changed = await persistExtractionFailure(versionId, parsed.data.code, parsed.data.message, env);
   if (!changed) return errorResponse(404, 'VERSION_NOT_FOUND', 'La version du support est introuvable.', false);
   return json({ ok: true });
+}
+
+async function getVersionResourceKind(versionId: string, env: Env): Promise<'text' | 'pdf' | null> {
+  const row = await env.DB.prepare(`
+    SELECT r.kind
+    FROM resource_versions v
+    JOIN resources r ON r.id = v.resource_id
+    WHERE v.id = ?
+  `).bind(versionId).first<{ kind: 'text' | 'pdf' }>();
+  return row?.kind ?? null;
 }
 
 async function verifyStoredVersionIntegrity(versionId: string, env: Env): Promise<Response | null> {
