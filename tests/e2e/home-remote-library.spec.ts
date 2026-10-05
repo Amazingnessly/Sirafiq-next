@@ -1,0 +1,253 @@
+import { expect, test } from '@playwright/test';
+
+test('l’accueil retrouve les supports synchronisés quand IndexedDB est vide', async ({ page }) => {
+  await page.route('**/api/bootstrap', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        subjects: [{
+          id: '11111111-aaaa-4111-8111-111111111111',
+          name: 'Matière distante',
+          parentId: null,
+          createdAt: '2026-09-23T00:00:00.000Z',
+          updatedAt: '2026-09-23T00:00:00.000Z',
+        }],
+        resources: [{
+          id: '22222222-bbbb-4222-8222-222222222222',
+          subjectId: '11111111-aaaa-4111-8111-111111111111',
+          title: 'Support distant',
+          kind: 'text',
+          currentVersionId: '33333333-cccc-4333-8333-333333333333',
+          status: 'ready',
+          extractionCharCount: 42,
+          createdAt: '2026-09-23T00:00:00.000Z',
+          updatedAt: '2026-09-23T00:00:00.000Z',
+        }],
+      }),
+    });
+  });
+
+  await page.goto('/');
+
+  await expect(page.getByRole('heading', { name: 'Retrouver mes supports synchronisés' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Reprendre mes supports' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Créer ma première matière' })).toHaveCount(0);
+
+  const metrics = page.getByLabel('État de la bibliothèque');
+  await expect(metrics.locator('.metric').filter({ hasText: 'matières' }).getByText('1', { exact: true })).toBeVisible();
+  await expect(metrics.locator('.metric').filter({ hasText: 'supports' }).getByText('1', { exact: true })).toBeVisible();
+  await expect(metrics.locator('.metric').filter({ hasText: 'extraits' }).getByText('0', { exact: true })).toBeVisible();
+});
+
+test('une panne du bootstrap ne transforme pas l’accueil en faux état vide', async ({ page }) => {
+  await page.route('**/api/bootstrap', async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'UNAVAILABLE_E2E', message: 'Bootstrap indisponible', retryable: true } }),
+    });
+  });
+
+  await page.goto('/');
+
+  await expect(page.getByRole('heading', { name: 'Retrouver ma bibliothèque' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Vérifier ma bibliothèque' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Créer ma première matière' })).toHaveCount(0);
+  await expect(page.getByText('Sirāfiq ne considère pas cette erreur réseau comme une bibliothèque vide.')).toBeVisible();
+});
+
+test('une incohérence terminale du bootstrap reste visible sans faux retry', async ({ page }) => {
+  let bootstrapRequests = 0;
+  const message = 'Un support synchronisé possède un état d’extraction incohérent.';
+
+  await page.route('**/api/bootstrap', async (route) => {
+    bootstrapRequests += 1;
+    await route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: {
+          code: 'RESOURCE_EXTRACTION_INTEGRITY_ERROR',
+          message,
+          retryable: false,
+        },
+      }),
+    });
+  });
+
+  await page.goto('/');
+
+  await expect(page.getByRole('heading', { name: 'Vérifier ma bibliothèque synchronisée' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Vérifier ma bibliothèque' })).toBeVisible();
+  await expect(page.getByText(message, { exact: false })).toBeVisible();
+  await expect(page.getByText(/erreur réseau/)).toHaveCount(0);
+  await expect.poll(() => bootstrapRequests).toBe(1);
+
+  await page.evaluate(async () => {
+    const { db } = await import('/src/data/db.ts');
+    const now = new Date().toISOString();
+    await db.subjects.add({
+      id: '10101010-aaaa-4111-8111-101010101010',
+      name: 'Matière locale',
+      parentId: null,
+      createdAt: now,
+      updatedAt: now,
+      syncState: 'synced',
+      syncError: null,
+    });
+    await db.resources.add({
+      id: '20202020-bbbb-4222-8222-202020202020',
+      subjectId: '10101010-aaaa-4111-8111-101010101010',
+      title: 'Support local',
+      kind: 'text',
+      currentVersionId: '30303030-cccc-4333-8333-303030303030',
+      status: 'ready',
+      extractionError: null,
+      createdAt: now,
+      updatedAt: now,
+      syncState: 'synced',
+      syncError: null,
+    });
+  });
+
+  await expect(page.getByRole('heading', { name: 'Continuer à partir de mes supports' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Vérifier ma bibliothèque' })).toBeVisible();
+  await expect(page.getByText(message, { exact: false })).toBeVisible();
+  await expect.poll(() => bootstrapRequests).toBe(1);
+});
+
+test('l’accueil ne présente pas un envoi distant incomplet comme support consultable', async ({ page }) => {
+  await page.route('**/api/bootstrap', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        subjects: [{
+          id: '44444444-dddd-4444-8444-444444444444',
+          name: 'Matière distante',
+          parentId: null,
+          createdAt: '2026-09-23T00:00:00.000Z',
+          updatedAt: '2026-09-23T00:00:00.000Z',
+        }],
+        resources: [{
+          id: '55555555-eeee-4555-8555-555555555555',
+          subjectId: '44444444-dddd-4444-8444-444444444444',
+          title: 'PDF encore en cours',
+          kind: 'pdf',
+          currentVersionId: '66666666-ffff-4666-8666-666666666666',
+          status: 'uploading',
+          extractionCharCount: null,
+          createdAt: '2026-09-23T00:00:00.000Z',
+          updatedAt: '2026-09-23T00:00:01.000Z',
+        }],
+      }),
+    });
+  });
+
+  await page.goto('/');
+
+  await expect(page.getByRole('heading', { name: 'Retrouver mes envois incomplets' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Vérifier mon envoi' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Retrouver mes supports synchronisés' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Reprendre mes supports' })).toHaveCount(0);
+  await expect(page.getByText(/Il n’est pas encore déclaré consultable/)).toBeVisible();
+
+  const metrics = page.getByLabel('État de la bibliothèque');
+  await expect(metrics.locator('.metric').filter({ hasText: 'supports' }).getByText('1', { exact: true })).toBeVisible();
+  await expect(metrics.locator('.metric').filter({ hasText: 'extraits' }).getByText('0', { exact: true })).toBeVisible();
+});
+
+test('l’accueil ne présente pas un texte distant non extrait comme déjà lisible', async ({ page }) => {
+  await page.route('**/api/bootstrap', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        subjects: [{
+          id: '77777777-aaaa-4777-8777-777777777777',
+          name: 'Textes distants',
+          parentId: null,
+          createdAt: '2026-09-23T00:00:00.000Z',
+          updatedAt: '2026-09-23T00:00:00.000Z',
+        }],
+        resources: [{
+          id: '88888888-bbbb-4888-8888-888888888888',
+          subjectId: '77777777-aaaa-4777-8777-777777777777',
+          title: 'Texte stocké sans extraction',
+          kind: 'text',
+          currentVersionId: '99999999-cccc-4999-8999-999999999999',
+          status: 'stored',
+          extractionCharCount: null,
+          createdAt: '2026-09-23T00:00:00.000Z',
+          updatedAt: '2026-09-23T00:00:01.000Z',
+        }],
+      }),
+    });
+  });
+
+  await page.goto('/');
+
+  await expect(page.getByRole('heading', { name: 'Retrouver mes textes à récupérer' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Vérifier mon texte' })).toBeVisible();
+  await expect(page.getByText(/son contenu n’est pas encore déclaré lisible/)).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Reprendre mes supports' })).toHaveCount(0);
+  await expect(page.getByText(/Ouvrez la bibliothèque pour les consulter/)).toHaveCount(0);
+
+  const metrics = page.getByLabel('État de la bibliothèque');
+  await expect(metrics.locator('.metric').filter({ hasText: 'supports' }).getByText('1', { exact: true })).toBeVisible();
+  await expect(metrics.locator('.metric').filter({ hasText: 'extraits' }).getByText('0', { exact: true })).toBeVisible();
+});
+
+
+
+test('une matière locale sans support attend encore la vérification distante', async ({ page }) => {
+  let releaseBootstrap!: () => void;
+  const bootstrapGate = new Promise<void>((resolve) => {
+    releaseBootstrap = resolve;
+  });
+
+  await page.route('**/api/bootstrap', async (route) => {
+    await bootstrapGate;
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: {
+          code: 'HOME_PARTIAL_LOCAL_E2E_DOWN',
+          message: 'Bootstrap indisponible avec une matière locale.',
+          retryable: true,
+        },
+      }),
+    });
+  });
+
+  await page.goto('/');
+
+  await page.evaluate(async () => {
+    const { db } = await import('/src/data/db.ts');
+    const now = new Date().toISOString();
+    await db.subjects.add({
+      id: 'abababab-1111-4111-8111-abababababab',
+      name: 'Matière locale sans support',
+      parentId: null,
+      createdAt: now,
+      updatedAt: now,
+      syncState: 'synced',
+      syncError: null,
+    });
+  });
+
+  try {
+    await expect(page.getByRole('heading', { name: 'Vérification de ma bibliothèque' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Vérifier ma bibliothèque' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Importer un support' })).toHaveCount(0);
+  } finally {
+    releaseBootstrap();
+  }
+
+  await expect(page.getByRole('heading', { name: 'Retrouver ma bibliothèque' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Vérifier ma bibliothèque' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Importer un support' })).toHaveCount(0);
+  await expect(page.getByText('Sirāfiq ne considère pas cette erreur réseau comme une bibliothèque vide.')).toBeVisible();
+});

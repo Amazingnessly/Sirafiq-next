@@ -1,0 +1,4 @@
+.fatal-error { min-height: 100vh; padding: max(32px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(32px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left)); display: grid; place-items: center; }
+.fatal-error__card { width: min(620px, 100%); padding: clamp(28px, 6vw, 52px); border: 1px solid rgba(255,255,255,.76); border-radius: 30px; background: rgba(255,253,249,.92); box-shadow: var(--shadow); }
+.fatal-error__card h1 { margin: 8px 0 14px; font-size: clamp(30px, 6vw, 48px); line-height: 1; letter-spacing: -.045em; }
+.fatal-error__card p:not(.eyebrow) { margin: 0 0 26px; color: var(--muted); line-height: 1.65; }
