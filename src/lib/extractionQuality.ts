@@ -16,6 +16,15 @@ export function hasUsefulPdfExtractionText(input: string): boolean {
     .join(' ')
     .replace(/\s/g, '');
 
+  const inlinePageLabels = normalized.match(/\bpage\s+\d+(?:\s*[-–—]\s*\d+)?\b/gi) ?? [];
+  if (inlinePageLabels.length >= 4) {
+    const withoutSyntheticNavigation = normalized
+      .replace(/\b(?:contents?|table of contents)\b/gi, ' ')
+      .replace(/\bpage\s+\d+(?:\s*[-–—]\s*\d+)?\b/gi, ' ')
+      .replace(/\s/g, '');
+    if (withoutSyntheticNavigation.length < 20) return false;
+  }
+
   // Some PDF conversion backends return only a synthetic table of page
   // labels ("Contents", "Page 1", "Page 2", ...). It is technically text,
   // but it is not source content that Sirāfiq can safely use for learning.
