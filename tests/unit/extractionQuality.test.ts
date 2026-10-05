@@ -11,6 +11,10 @@ describe('PDF extraction quality gate', () => {
     expect(hasUsefulPdfExtractionText('Page 1\nPage 2\nPage 3\nPage 4\nPage 5')).toBe(false);
   });
 
+  it('rejects the same synthetic page index when the converter flattens it to one line', () => {
+    expect(hasUsefulPdfExtractionText('Contents Page 1 Page 2 Page 3 Page 4 Page 5 Page 6')).toBe(false);
+  });
+
   it('keeps a real table of contents when it contains substantive source text', () => {
     const text = [
       'Contents',
