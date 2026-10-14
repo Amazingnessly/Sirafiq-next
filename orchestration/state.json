@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-10-15",
+  "repository": "Amazingnessly/Sirafiq-next",
+  "mode": "bootstrap",
+  "branches": {
+    "foundation": "feat/v0.1-foundation",
+    "integration": "integration/sirafiq-autonomous",
+    "protectedDefault": "main"
+  },
+  "v01": {
+    "prNumber": 1,
+    "draftObserved": true,
+    "mergedObserved": false,
+    "physicalIpadValidated": false
+  },
+  "historicalGreenCheckpoint": {
+    "sha": "2d87115bf7f907e7ad10c4348389bdc3fc75e086",
+    "workflowRunId": 37357352186,
+    "quality": "success",
+    "e2e": "success",
+    "branch": "feat/v0.1-foundation"
+  },
+  "automation": {
+    "githubPushGuard": "pending-PR-and-CI",
+    "fourHourlyCron": "inactive-until-workflow-on-default-branch",
+    "codexScout": "off",
+    "autonomousCoding": "not-configured",
+    "autoMerge": "disabled"
+  },
+  "nextAction": "Verify bootstrap PR CI, merge into integration only if exact-head checks pass; then verify postmerge CI. Do not merge PR #1.",
+  "warning": "This is a dated observation, not a live lease or proof of future green status."
+}

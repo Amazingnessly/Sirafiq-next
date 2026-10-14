@@ -1,0 +1,73 @@
+name: Sirafiq autonomous guard (read-only)
+
+on:
+  pull_request:
+    branches:
+      - integration/sirafiq-autonomous
+  push:
+    branches:
+      - integration/sirafiq-autonomous
+  workflow_dispatch:
+  # IMPORTANT: GitHub only schedules workflows present on the DEFAULT branch.
+  # This schedule will NOT execute while this file exists only on integration.
+  schedule:
+    - cron: '17 */4 * * *'
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+
+concurrency:
+  group: sirafiq-autonomous-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    name: Check V0.1 isolation and exact-head CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test guard logic
+        run: node --test tests/orchestration-guard.test.mjs
+      - name: Read GitHub state (never mutate)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/check-orchestration-state.mjs
+      - name: Upload factual checkpoint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sirafiq-guard-report
+          path: orchestration/report.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  codex_scout:
+    name: Optional Codex read-only scout
+    needs: guard
+    # Explicit opt-in. No API usage, repository write or production access by default.
+    if: ${{ vars.SIRAFIQ_CODEX_SCOUT_ENABLED == 'true' && github.event_name == 'push' && github.ref_name == 'integration/sirafiq-autonomous' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scout with official OpenAI Codex action
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          permission-profile: ':read-only'
+          safety-strategy: drop-sudo
+          prompt: |
+            Inspect Sirafiq Next as a READ-ONLY quality and security scout.
+            Read AGENTS.md and docs/AUTONOMOUS_ORCHESTRATION.md.
+            Focus on data integrity, iPad WebKit regression and local-first sync.
+            Never mutate code, branches, GitHub issues, pull requests or external services.
+            Report concrete findings with file paths, reproduction steps and tests to add.
+            PR #1 must remain DRAFT and must never be merged without real iPad validation.
