@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "observedAt": "2026-10-15",
   "repository": "Amazingnessly/Sirafiq-next",
-  "mode": "bootstrap",
+  "mode": "integration-green-confirmed",
   "branches": {
     "foundation": "feat/v0.1-foundation",
     "integration": "integration/sirafiq-autonomous",
@@ -22,12 +22,44 @@
     "branch": "feat/v0.1-foundation"
   },
   "automation": {
-    "githubPushGuard": "pending-PR-and-CI",
+    "githubPushGuard": "verified-success-on-integration-head-f2f2fe01",
     "fourHourlyCron": "inactive-until-workflow-on-default-branch",
     "codexScout": "off",
     "autonomousCoding": "not-configured",
-    "autoMerge": "disabled"
+    "autoMerge": "disabled",
+    "chatgptScheduledFourHourly": "configured-first-run-not-observed"
   },
-  "nextAction": "Verify bootstrap PR CI, merge into integration only if exact-head checks pass; then verify postmerge CI. Do not merge PR #1.",
-  "warning": "This is a dated observation, not a live lease or proof of future green status."
+  "nextAction": "Check the latest exact-head CI for PR #289; keep DRAFT and seek security review before merging. Continue independent safe tasks. PR #1 must remain DRAFT.",
+  "warning": "Snapshot is dated; re-read GitHub refs and checks before every action. Never mark an in-progress CI as green.",
+  "lastConfirmedIntegrationGreenCheckpoint": {
+    "branch": "integration/sirafiq-autonomous",
+    "sha": "f2f2fe01f3d77ad6f255db34831b7c2ece648917",
+    "ciRunId": 38651866108,
+    "guardRunId": 38651866104,
+    "quality": "success",
+    "e2e": "success",
+    "guard": "success",
+    "observedAt": "2026-10-15"
+  },
+  "activePrsObserved": [
+    {
+      "number": 1,
+      "base": "main",
+      "head": "feat/v0.1-foundation",
+      "draft": true,
+      "prohibitedToMerge": true
+    },
+    {
+      "number": 289,
+      "base": "integration/sirafiq-autonomous",
+      "head": "agents/cloudflare-access-boundary",
+      "draft": true,
+      "securityReviewRequired": true,
+      "ci": "in_progress_at_snapshot"
+    }
+  ],
+  "issuesObserved": [
+    288,
+    290
+  ]
 }
