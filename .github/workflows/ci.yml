@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - feat/v0.1-foundation
+      - integration/sirafiq-autonomous
 
 permissions:
   contents: read
