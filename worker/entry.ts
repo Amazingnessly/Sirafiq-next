@@ -1,8 +1,14 @@
 import { buildIdentity } from '../src/buildIdentity';
+import { denyUnauthenticatedApi } from './access';
 import app from './index';
 
 export default {
   async fetch(request, env): Promise<Response> {
+    // The entry point is the only production Worker handler. Guard every private
+    // route BEFORE both the optimized Range handler and regular Worker API.
+    const denied = await denyUnauthenticatedApi(request, env);
+    if (denied) return denied;
+
     const url = new URL(request.url);
     if (request.method === 'GET' && url.pathname === '/api/build') {
       return new Response(JSON.stringify(buildIdentity), {
@@ -40,6 +46,7 @@ async function getBlobWithRange(versionId: string, request: Request, env: Env): 
   headers.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(version.file_name)}`);
   headers.set('ETag', object.httpEtag);
   headers.set('Accept-Ranges', 'bytes');
+  headers.set('Cache-Control', 'private, no-store');
 
   if (object.range && 'offset' in object.range && 'length' in object.range) {
     const offset = object.range.offset ?? 0;
@@ -56,6 +63,6 @@ async function getBlobWithRange(versionId: string, request: Request, env: Env): 
 function apiError(status: number, code: string, message: string, retryable: boolean): Response {
   return new Response(JSON.stringify({ error: { code, message, retryable } }), {
     status,
-    headers: { 'content-type': 'application/json; charset=utf-8' },
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' },
   });
 }
