@@ -65,7 +65,10 @@ describe('Cloudflare Access API authentication', () => {
     expect(await verifyCloudflareAccessJwt(token({ exp: 1 }), team, aud, keysLoader)).toBe(false);
     expect(await verifyCloudflareAccessJwt(token({}, { alg: 'none' }), team, aud, keysLoader)).toBe(false);
     expect(await verifyCloudflareAccessJwt(token({}, { kid: 'other-key' }), team, aud, keysLoader)).toBe(false);
-    expect(await verifyCloudflareAccessJwt(token().replace(/.$/, 'A'), team, aud, keysLoader)).toBe(false);
+    const segments = token().split('.');
+    const signedClaims = JSON.parse(Buffer.from(segments[1]!, 'base64url').toString('utf8')) as Record<string, unknown>;
+    const tampered = segments[0] + '.' + Buffer.from(JSON.stringify({ ...signedClaims, sub: 'tampered' })).toString('base64url') + '.' + segments[2];
+    expect(await verifyCloudflareAccessJwt(tampered, team, aud, keysLoader)).toBe(false);
     expect(await verifyCloudflareAccessJwt(token({ nbf: Math.floor(Date.now() / 1000) + 600 }), team, aud, keysLoader)).toBe(false);
   });
 

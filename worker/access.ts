@@ -71,8 +71,8 @@ export async function verifyCloudflareAccessJwt(
     if (!validDomain(domain) || !audience || token.length > 24000) return false;
     const parts = token.split('.');
     if (parts.length !== 3) return false;
-    const header = decodePart<JwtHeader>(parts[0]);
-    const claims = decodePart<JwtClaims>(parts[1]);
+    const header = decodePart<JwtHeader>(parts[0]!);
+    const claims = decodePart<JwtClaims>(parts[1]!);
     if (header.alg !== 'RS256' || typeof header.kid !== 'string' || !header.kid) return false;
     if (claims.iss !== 'https://' + domain) return false;
     if (!(typeof claims.aud === 'string' ? claims.aud === audience : Array.isArray(claims.aud) && claims.aud.includes(audience))) return false;
@@ -83,8 +83,8 @@ export async function verifyCloudflareAccessJwt(
     const jwk = jwks.keys?.find((key) => key.kid === header.kid && key.kty === 'RSA' && (!key.alg || key.alg === 'RS256') && (!key.use || key.use === 'sig'));
     if (!jwk) return false;
     const key = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
-    const data = new TextEncoder().encode(parts[0] + '.' + parts[1]);
-    const signature = decodeSignature(parts[2]);
+    const data = new TextEncoder().encode(parts[0]! + '.' + parts[1]!);
+    const signature = decodeSignature(parts[2]!);
     return await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, signature, data);
   } catch {
     return false;
@@ -95,7 +95,7 @@ export async function verifyCloudflareAccessJwt(
  * Return null to continue to the app; a Response means stop BEFORE DB/R2 access.
  * /api/build and /api/health deliberately contain no user data.
  */
-export async function denyUnauthenticatedApi(request: Request, env: AccessEnv): Promise<Response | null> {
+export async function denyUnauthenticatedApi(request: Request, env: object): Promise<Response | null> {
   const url = new URL(request.url);
   if (!url.pathname.startsWith('/api/')) return null;
   if (request.method === 'GET' && (url.pathname === '/api/build' || url.pathname === '/api/health')) return null;
@@ -106,8 +106,9 @@ export async function denyUnauthenticatedApi(request: Request, env: AccessEnv): 
     return null;
   }
 
-  const domain = env.SIRAFIQ_ACCESS_TEAM_DOMAIN?.trim().toLowerCase() ?? '';
-  const audience = env.SIRAFIQ_ACCESS_AUD?.trim() ?? '';
+  const settings = env as AccessEnv;
+  const domain = settings.SIRAFIQ_ACCESS_TEAM_DOMAIN?.trim().toLowerCase() ?? '';
+  const audience = settings.SIRAFIQ_ACCESS_AUD?.trim() ?? '';
   if (!validDomain(domain) || !audience) {
     return jsonError(503, 'ACCESS_NOT_CONFIGURED', 'L’accès sécurisé à la bibliothèque n’est pas configuré.', false);
   }
