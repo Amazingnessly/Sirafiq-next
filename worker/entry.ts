@@ -16,4 +16,4 @@ export default {
 
     return app.fetch(request, env);
   },
-}
+} satisfies ExportedHandler<Env>;
