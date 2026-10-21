@@ -542,6 +542,7 @@ export function createUnsatisfiableRangeResponse(totalSize: number): Response {
     headers: {
       'Accept-Ranges': 'bytes',
       'Content-Range': `bytes */${totalSize}`,
+      'Cache-Control': 'private, no-store',
     },
   });
 }
@@ -553,6 +554,8 @@ export function createBlobResponse(
   range: (ByteRange & { totalSize: number }) | null,
 ): Response {
   headers.set('Accept-Ranges', 'bytes');
+  // Do not let R2 object's HTTP metadata make private PDF responses cacheable.
+  headers.set('Cache-Control', 'private, no-store');
   if (range) {
     const end = range.offset + range.length - 1;
     headers.set('Content-Length', String(range.length));
@@ -563,23 +566,6 @@ export function createBlobResponse(
   headers.delete('Content-Range');
   headers.set('Content-Length', String(fullSize));
   return new Response(body, { status: 200, headers });
-}
-
-function detachR2Body(source: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
-  const reader = source.getReader();
-  return new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      const next = await reader.read();
-      if (next.done) {
-        controller.close();
-        return;
-      }
-      controller.enqueue(next.value);
-    },
-    async cancel(reason) {
-      await reader.cancel(reason);
-    },
-  });
 }
 
 export async function getBlob(versionId: string, request: Request, env: Env): Promise<Response> {
@@ -666,7 +652,7 @@ export async function getBlob(versionId: string, request: Request, env: Env): Pr
     return createBlobResponse(object.body, headers, object.size, { offset, length, totalSize });
   }
 
-  return createBlobResponse(detachR2Body(object.body), headers, object.size, null);
+  return createBlobResponse(object.body, headers, object.size, null);
 }
 
 async function extractOnServer(versionId: string, env: WorkerEnv): Promise<Response> {
