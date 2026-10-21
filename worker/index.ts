@@ -542,6 +542,7 @@ export function createUnsatisfiableRangeResponse(totalSize: number): Response {
     headers: {
       'Accept-Ranges': 'bytes',
       'Content-Range': `bytes */${totalSize}`,
+      'Cache-Control': 'private, no-store',
     },
   });
 }
@@ -553,6 +554,8 @@ export function createBlobResponse(
   range: (ByteRange & { totalSize: number }) | null,
 ): Response {
   headers.set('Accept-Ranges', 'bytes');
+  // Do not let R2 object's HTTP metadata make private PDF responses cacheable.
+  headers.set('Cache-Control', 'private, no-store');
   if (range) {
     const end = range.offset + range.length - 1;
     headers.set('Content-Length', String(range.length));

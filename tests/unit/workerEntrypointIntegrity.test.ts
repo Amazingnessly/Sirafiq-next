@@ -14,7 +14,10 @@ function makeEnv(valid: boolean) {
     etag: 'etag-stable',
     httpEtag: '"etag-stable"',
     checksums: { sha256: Uint8Array.from({ length: 32 }, () => valid ? 0xab : 0xcd).buffer },
-    writeHttpMetadata: (headers: Headers) => headers.set('Content-Type', 'application/pdf'),
+    writeHttpMetadata: (headers: Headers) => {
+      headers.set('Content-Type', 'application/pdf');
+      headers.set('Cache-Control', 'public, max-age=3600');
+    },
   };
   const env = {
     DB: {
@@ -69,6 +72,7 @@ describe('real Worker entrypoint and R2 blob integrity', () => {
     }), env as never);
     expect(response.status).toBe(206);
     expect(response.headers.get('Content-Range')).toBe('bytes 1-3/6');
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
     expect(new TextDecoder().decode(await response.arrayBuffer())).toBe('bcd');
     expect(counters()).toEqual({ reads: 1, heads: 1 });
   });
@@ -77,6 +81,18 @@ describe('real Worker entrypoint and R2 blob integrity', () => {
     const { env } = makeEnv(true);
     const response = await entry.fetch(new Request('http://example.test/api/resource-versions/' + ID + '/blob'), env as never);
     expect(response.status).toBe(200);
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
     expect(new TextDecoder().decode(await response.arrayBuffer())).toBe('abcdef');
+  });
+
+  it('marks rejected byte ranges as non-cacheable without reading a body', async () => {
+    const { env, counters } = makeEnv(true);
+    const response = await entry.fetch(new Request('http://example.test/api/resource-versions/' + ID + '/blob', {
+      headers: { Range: 'bytes=999-1000' },
+    }), env as never);
+    expect(response.status).toBe(416);
+    expect(response.headers.get('Content-Range')).toBe('bytes */6');
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+    expect(counters()).toEqual({ reads: 0, heads: 1 });
   });
 });
